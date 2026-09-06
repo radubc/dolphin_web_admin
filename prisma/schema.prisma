@@ -1,0 +1,1616 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model account_balances {
+  id                String    @id
+  tenant_id         String
+  balance_amount    Decimal   @db.Decimal(11, 4)
+  balance_date      DateTime  @db.Timestamptz(6)
+  currency_code     String
+  is_reconciled     Boolean?
+  is_bank_balance   Boolean?
+  is_autoreconciled Boolean?
+  created_at        DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime? @default(now()) @db.Timestamptz(6)
+  deleted_at        DateTime? @db.Timestamptz(6)
+  account_id        String?
+  accounts          accounts? @relation(fields: [account_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants           tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_account_balances_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model account_base_types {
+  id            String          @id
+  tenant_id     String
+  name          String
+  tenants       tenants         @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  account_types account_types[]
+
+  @@unique([tenant_id, name])
+  @@index([tenant_id], map: "idx_account_base_types_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model account_external_identifiers {
+  id                  String    @id
+  tenant_id           String
+  account_id          String?
+  external_account_id String?
+  external_bank_id    String?
+  external_plaid_id   String?
+  skip_import         Boolean?  @default(false)
+  created_at          DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime? @default(now()) @db.Timestamptz(6)
+  deleted_at          DateTime? @db.Timestamptz(6)
+  accounts            accounts? @relation(fields: [account_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants             tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([tenant_id, external_account_id, external_bank_id])
+  @@index([tenant_id], map: "idx_account_external_identifiers_tenant_id")
+  @@index([external_account_id], map: "idx_external_account_id")
+  @@index([external_bank_id], map: "idx_external_bank_id")
+  @@index([external_plaid_id], map: "idx_external_plaid_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model account_types {
+  id                 String              @id
+  tenant_id          String
+  name               String
+  display_name       String
+  is_asset           Boolean
+  is_banking         Boolean
+  is_investment      Boolean
+  base_type_id       String?
+  deleted_at         DateTime?           @db.Timestamptz(6)
+  account_base_types account_base_types? @relation(fields: [base_type_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants            tenants             @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  accounts           accounts[]
+  loans              loans[]
+
+  @@index([tenant_id], map: "idx_account_types_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model accounts {
+  id                                                   String                         @id
+  tenant_id                                            String
+  nickname                                             String?
+  account_bank_number                                  String?
+  account_routing_number                               String?
+  original_bank_name                                   String?
+  currency_code                                        String?
+  overdraft                                            Decimal?                       @db.Decimal(11, 4)
+  last_calc_balance                                    Decimal?                       @db.Decimal(11, 4)
+  last_sync_balance                                    Decimal?                       @db.Decimal(11, 4)
+  created_at                                           DateTime?                      @default(now()) @db.Timestamptz(6)
+  updated_at                                           DateTime?                      @default(now()) @db.Timestamptz(6)
+  deleted_at                                           DateTime?                      @db.Timestamptz(6)
+  account_type_id                                      String?
+  loan_id                                              String?
+  financial_institution_id                             String?
+  account_balances                                     account_balances[]
+  account_external_identifiers                         account_external_identifiers[]
+  account_types                                        account_types?                 @relation(fields: [account_type_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  financial_institutions                               financial_institutions?        @relation(fields: [financial_institution_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants                                              tenants                        @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  loans_accounts_loan_idToloans                        loans?                         @relation("accounts_loan_idToloans", fields: [loan_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_accounts_loan_id")
+  asset_liability_accounts                             asset_liability_accounts[]
+  assets                                               assets[]
+  crypto_trades                                        crypto_trades[]
+  loans_loans_account_idToaccounts                     loans[]                        @relation("loans_account_idToaccounts")
+  loans_loans_asset_account_idToaccounts               loans[]                        @relation("loans_asset_account_idToaccounts")
+  reconciliations                                      reconciliations[]
+  recurring_transactions                               recurring_transactions[]
+  rule_account_applications                            rule_account_applications[]
+  stock_trades                                         stock_trades[]
+  transactions                                         transactions[]
+  transfers_transfers_destination_account_idToaccounts transfers[]                    @relation("transfers_destination_account_idToaccounts")
+  transfers_transfers_source_account_idToaccounts      transfers[]                    @relation("transfers_source_account_idToaccounts")
+
+  @@index([tenant_id], map: "idx_accounts_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model asset_attachments {
+  id                 String              @id
+  tenant_id          String
+  file_name          String
+  file_path          String
+  file_size          Int?
+  mime_type          String?
+  attachment_type    String?             @default("document")
+  uploaded_at        DateTime?           @default(now()) @db.Timestamptz(6)
+  created_at         DateTime?           @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime?           @default(now()) @db.Timestamptz(6)
+  deleted_at         DateTime?           @db.Timestamptz(6)
+  asset_id           String?
+  improvement_id     String?
+  assets             assets?             @relation(fields: [asset_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  asset_improvements asset_improvements? @relation(fields: [improvement_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants            tenants             @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_asset_attachments_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model asset_improvements {
+  id                             String              @id
+  tenant_id                      String
+  name                           String
+  improvement_description        String?
+  improvement_type               String
+  cost                           Decimal?            @db.Decimal(11, 4)
+  cost_currency                  String?
+  estimated_value_added          Decimal?            @db.Decimal(11, 4)
+  estimated_value_added_currency String?
+  start_date                     DateTime?           @db.Timestamptz(6)
+  completion_date                DateTime?           @db.Timestamptz(6)
+  performed_by                   String?
+  notes                          String?
+  status                         String?             @default("planned")
+  is_active                      Boolean?            @default(true)
+  created_at                     DateTime?           @default(now()) @db.Timestamptz(6)
+  updated_at                     DateTime?           @default(now()) @db.Timestamptz(6)
+  deleted_at                     DateTime?           @db.Timestamptz(6)
+  asset_id                       String?
+  asset_attachments              asset_attachments[]
+  assets                         assets?             @relation(fields: [asset_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants                        tenants             @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_asset_improvements_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model asset_liability_accounts {
+  id         String    @id
+  tenant_id  String
+  asset_id   String
+  account_id String
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at DateTime? @default(now()) @db.Timestamptz(6)
+  deleted_at DateTime? @db.Timestamptz(6)
+  accounts   accounts  @relation(fields: [account_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  assets     assets    @relation(fields: [asset_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants    tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([asset_id, account_id])
+  @@index([tenant_id], map: "idx_asset_liability_accounts_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model asset_transactions {
+  id             String       @id
+  tenant_id      String
+  asset_id       String
+  transaction_id String
+  created_at     DateTime?    @default(now()) @db.Timestamptz(6)
+  assets         assets       @relation(fields: [asset_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants        tenants      @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  transactions   transactions @relation(fields: [transaction_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([asset_id, transaction_id])
+  @@index([tenant_id], map: "idx_asset_transactions_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model asset_valuations {
+  id               String    @id
+  tenant_id        String
+  valuation_date   DateTime  @db.Timestamptz(6)
+  valuation_amount Decimal   @db.Decimal(11, 4)
+  currency_code    String
+  valuation_method String?
+  valued_by        String?
+  notes            String?
+  is_active        Boolean?  @default(true)
+  created_at       DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime? @default(now()) @db.Timestamptz(6)
+  deleted_at       DateTime? @db.Timestamptz(6)
+  asset_id         String?
+  assets           assets?   @relation(fields: [asset_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants          tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_asset_valuations_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model assets {
+  id                       String                     @id
+  tenant_id                String
+  name                     String
+  asset_description        String?
+  asset_type               String
+  purchase_price           Decimal?                   @db.Decimal(11, 4)
+  purchase_date            DateTime?                  @db.Timestamptz(6)
+  purchase_currency        String?
+  serial_number            String?
+  model_number             String?
+  brand                    String?
+  condition                String
+  location                 String?
+  notes                    String?
+  is_active                Boolean?                   @default(true)
+  created_at               DateTime?                  @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime?                  @default(now()) @db.Timestamptz(6)
+  deleted_at               DateTime?                  @db.Timestamptz(6)
+  linked_asset_account_id  String?
+  asset_attachments        asset_attachments[]
+  asset_improvements       asset_improvements[]
+  asset_liability_accounts asset_liability_accounts[]
+  asset_transactions       asset_transactions[]
+  asset_valuations         asset_valuations[]
+  accounts                 accounts?                  @relation(fields: [linked_asset_account_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants                  tenants                    @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  real_estate              real_estate[]
+  transactions             transactions[]
+  vehicles                 vehicles[]
+
+  @@index([tenant_id], map: "idx_assets_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model bill_assignments {
+  id                                                                          String                 @id
+  tenant_id                                                                   String
+  paycheck_id                                                                 String
+  bill_id                                                                     String
+  occurrence_ordinal                                                          Int                    @default(1)
+  created_at                                                                  DateTime?              @default(now()) @db.Timestamptz(6)
+  updated_at                                                                  DateTime?              @default(now()) @db.Timestamptz(6)
+  deleted_at                                                                  DateTime?              @db.Timestamptz(6)
+  recurring_transactions_bill_assignments_bill_idTorecurring_transactions     recurring_transactions @relation("bill_assignments_bill_idTorecurring_transactions", fields: [bill_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  recurring_transactions_bill_assignments_paycheck_idTorecurring_transactions recurring_transactions @relation("bill_assignments_paycheck_idTorecurring_transactions", fields: [paycheck_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants                                                                     tenants                @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_bill_assignments_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model bills {
+  id          String      @id
+  tenant_id   String
+  name        String
+  amount      Decimal     @db.Decimal(11, 4)
+  due_date    DateTime    @db.Timestamptz(6)
+  created_at  DateTime?   @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime?   @default(now()) @db.Timestamptz(6)
+  category_id String?
+  payee_id    String?
+  categories  categories? @relation(fields: [category_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  partners    partners?   @relation(fields: [payee_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants     tenants     @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_bills_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model budget_item_period_amounts {
+  id               String           @id
+  tenant_id        String
+  amount           Decimal          @db.Decimal(11, 4)
+  currency_code    String?          @default("USD")
+  notes            String?
+  created_at       DateTime?        @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime?        @default(now()) @db.Timestamptz(6)
+  deleted_at       DateTime?        @db.Timestamptz(6)
+  budget_item_id   String
+  budget_period_id String
+  budgeted_items   budgeted_items   @relation(fields: [budget_item_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  budgeted_periods budgeted_periods @relation(fields: [budget_period_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants          tenants          @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_budget_item_period_amounts_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model budgeted_items {
+  id                         String                       @id
+  tenant_id                  String
+  name                       String
+  describe                   String?
+  budget_item_type           String                       @default("expense")
+  is_active                  Boolean?                     @default(true)
+  notes                      String?
+  created_at                 DateTime?                    @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime?                    @default(now()) @db.Timestamptz(6)
+  deleted_at                 DateTime?                    @db.Timestamptz(6)
+  budget_id                  String?
+  category_id                String?
+  subscription_id            String?
+  loan_id                    String?
+  goal_id                    String?
+  recurring_transaction_id   String?
+  budget_item_period_amounts budget_item_period_amounts[]
+  budgets                    budgets?                     @relation(fields: [budget_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  categories                 categories?                  @relation(fields: [category_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  goals                      goals?                       @relation(fields: [goal_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  loans                      loans?                       @relation(fields: [loan_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  recurring_transactions     recurring_transactions?      @relation(fields: [recurring_transaction_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  subscriptions              subscriptions?               @relation(fields: [subscription_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants                    tenants                      @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_budgeted_items_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model budgeted_periods {
+  id                         String                       @id
+  tenant_id                  String
+  name                       String
+  start_date                 DateTime                     @db.Timestamptz(6)
+  end_date                   DateTime?                    @db.Timestamptz(6)
+  is_active                  Boolean?                     @default(true)
+  notes                      String?
+  created_at                 DateTime?                    @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime?                    @default(now()) @db.Timestamptz(6)
+  deleted_at                 DateTime?                    @db.Timestamptz(6)
+  budget_id                  String?
+  budget_item_period_amounts budget_item_period_amounts[]
+  budgets                    budgets?                     @relation(fields: [budget_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants                    tenants                      @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_budgeted_periods_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model budgets {
+  id                 String             @id
+  tenant_id          String
+  name               String
+  describe           String?
+  start_date         DateTime           @db.Timestamptz(6)
+  end_date           DateTime           @db.Timestamptz(6)
+  is_active          Boolean?           @default(true)
+  currency_code      String?            @default("USD")
+  budget_period_type String?            @default("monthly")
+  created_at         DateTime?          @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime?          @default(now()) @db.Timestamptz(6)
+  deleted_at         DateTime?          @db.Timestamptz(6)
+  budgeted_items     budgeted_items[]
+  budgeted_periods   budgeted_periods[]
+  tenants            tenants            @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_budgets_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model categories {
+  id                               String                             @id
+  tenant_id                        String
+  name                             String
+  type                             String?
+  created_at                       DateTime?                          @default(now()) @db.Timestamptz(6)
+  updated_at                       DateTime?                          @default(now()) @db.Timestamptz(6)
+  deleted_at                       DateTime?                          @db.Timestamptz(6)
+  parent_id                        String?
+  is_discretionary                 Boolean?
+  bills                            bills[]
+  budgeted_items                   budgeted_items[]
+  categories                       categories?                        @relation("categoriesTocategories", fields: [parent_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  other_categories                 categories[]                       @relation("categoriesTocategories")
+  tenants                          tenants                            @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  loan_additional_costs            loan_additional_costs[]
+  recurring_transaction_categories recurring_transaction_categories[]
+  rule_category_splits             rule_category_splits[]
+  subscriptions                    subscriptions[]
+  transaction_categories           transaction_categories[]
+
+  @@index([tenant_id], map: "idx_categories_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model chart_color_assignments {
+  id          String    @id
+  tenant_id   String
+  domain      String
+  label       String
+  color_index Int
+  created_at  DateTime? @default(now()) @db.Timestamptz(6)
+  tenants     tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([tenant_id, domain, label])
+  @@index([tenant_id], map: "idx_chart_color_assignments_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model crypto_trades {
+  id                String            @id
+  tenant_id         String
+  date              DateTime          @db.Timestamptz(6)
+  quantity          Decimal           @db.Decimal(11, 4)
+  price_per_unit    Decimal           @db.Decimal(11, 4)
+  fees              Decimal           @default(0) @db.Decimal(11, 4)
+  currency          String
+  created_at        DateTime?         @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime?         @default(now()) @db.Timestamptz(6)
+  deleted_at        DateTime?         @db.Timestamptz(6)
+  cryptocurrency_id String?
+  portfolio_id      String?
+  account_id        String?
+  accounts          accounts?         @relation(fields: [account_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  cryptocurrencies  cryptocurrencies? @relation(fields: [cryptocurrency_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  portfolios        portfolios?       @relation(fields: [portfolio_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants           tenants           @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([account_id], map: "idx_crypto_trades_account_id")
+  @@index([cryptocurrency_id, portfolio_id], map: "idx_crypto_trades_crypto_portfolio")
+  @@index([cryptocurrency_id], map: "idx_crypto_trades_cryptocurrency_id")
+  @@index([currency], map: "idx_crypto_trades_currency")
+  @@index([date], map: "idx_crypto_trades_date")
+  @@index([date, cryptocurrency_id], map: "idx_crypto_trades_date_crypto")
+  @@index([deleted_at], map: "idx_crypto_trades_deleted_at")
+  @@index([portfolio_id], map: "idx_crypto_trades_portfolio_id")
+  @@index([price_per_unit], map: "idx_crypto_trades_price_per_unit")
+  @@index([quantity], map: "idx_crypto_trades_quantity")
+  @@index([tenant_id], map: "idx_crypto_trades_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model cryptocurrencies {
+  id                         String                       @id
+  tenant_id                  String
+  symbol                     String
+  available_exchanges        String
+  currency_base              String
+  currency_quote             String
+  created_at                 DateTime?                    @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime?                    @default(now()) @db.Timestamptz(6)
+  deleted_at                 DateTime?                    @db.Timestamptz(6)
+  crypto_trades              crypto_trades[]
+  tenants                    tenants                      @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  portfolio_cryptocurrencies portfolio_cryptocurrencies[]
+  watchlist_cryptocurrencies watchlist_cryptocurrencies[]
+
+  @@unique([tenant_id, symbol, currency_base, currency_quote])
+  @@index([tenant_id], map: "idx_cryptocurrencies_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model exchange_rates {
+  id                 String    @id
+  tenant_id          String
+  from_currency      String
+  to_currency        String
+  rate               Decimal   @db.Decimal(10, 10)
+  date               DateTime  @db.Date
+  source             String
+  is_manual_override Boolean?  @default(false)
+  created_at         DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime? @default(now()) @db.Timestamptz(6)
+  tenants            tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([tenant_id, from_currency, to_currency, date])
+  @@index([tenant_id], map: "idx_exchange_rates_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model financial_institutions {
+  id                 String           @id
+  tenant_id          String
+  name               String
+  institution_number String
+  type               String
+  accounts           accounts[]
+  tenants            tenants          @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  loan_schedules     loan_schedules[]
+  loans              loans[]
+
+  @@index([tenant_id], map: "idx_financial_institutions_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model goal_transactions {
+  id             String       @id
+  tenant_id      String
+  amount         Decimal      @db.Decimal(11, 4)
+  currency_code  String
+  notes          String?
+  created_at     DateTime?    @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime?    @default(now()) @db.Timestamptz(6)
+  deleted_at     DateTime?    @db.Timestamptz(6)
+  goal_id        String
+  transaction_id String
+  goals          goals        @relation(fields: [goal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants        tenants      @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  transactions   transactions @relation(fields: [transaction_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_goal_transactions_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model goals {
+  id                String              @id
+  tenant_id         String
+  goal_name         String
+  target_amount     Decimal             @db.Decimal(11, 4)
+  currency_code     String
+  target_date       DateTime?           @db.Timestamptz(6)
+  notes             String?
+  is_discretionary  Boolean             @default(true)
+  created_at        DateTime?           @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime?           @default(now()) @db.Timestamptz(6)
+  deleted_at        DateTime?           @db.Timestamptz(6)
+  budgeted_items    budgeted_items[]
+  goal_transactions goal_transactions[]
+  tenants           tenants             @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_goals_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model loan_additional_costs {
+  id               String         @id
+  tenant_id        String
+  amount           Decimal        @db.Decimal(11, 4)
+  is_active        Boolean?       @default(true)
+  created_at       DateTime?      @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime?      @default(now()) @db.Timestamptz(6)
+  deleted_at       DateTime?      @db.Timestamptz(6)
+  category_id      String?
+  loan_schedule_id String
+  categories       categories?    @relation(fields: [category_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  loan_schedules   loan_schedules @relation(fields: [loan_schedule_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants          tenants        @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_loan_additional_costs_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model loan_schedule_breakdowns {
+  id                        String                      @id
+  tenant_id                 String
+  payment_date              DateTime                    @db.Timestamptz(6)
+  payment_number            Int
+  principal_amount          Decimal                     @db.Decimal(11, 4)
+  interest_amount           Decimal                     @db.Decimal(11, 4)
+  remaining_balance         Decimal                     @db.Decimal(11, 4)
+  is_paid                   Boolean?                    @default(false)
+  actual_payment_date       DateTime?                   @db.Timestamptz(6)
+  created_at                DateTime?                   @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime?                   @default(now()) @db.Timestamptz(6)
+  deleted_at                DateTime?                   @db.Timestamptz(6)
+  loan_schedule_id          String
+  loan_schedules            loan_schedules              @relation(fields: [loan_schedule_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants                   tenants                     @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  transaction_loan_payments transaction_loan_payments[]
+
+  @@index([tenant_id], map: "idx_loan_schedule_breakdowns_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model loan_schedules {
+  id                           String                     @id
+  tenant_id                    String
+  payment_date                 DateTime                   @db.Timestamptz(6)
+  amortization_frequency       String
+  total_payment                Decimal?                   @db.Decimal(11, 4)
+  total_principal_and_interest Decimal?                   @db.Decimal(11, 4)
+  interest_rate                Decimal?                   @db.Decimal(5, 4)
+  starting_date                DateTime?                  @db.Timestamptz(6)
+  ending_date                  DateTime?                  @db.Timestamptz(6)
+  created_at                   DateTime?                  @default(now()) @db.Timestamptz(6)
+  updated_at                   DateTime?                  @default(now()) @db.Timestamptz(6)
+  deleted_at                   DateTime?                  @db.Timestamptz(6)
+  mortgage_term                Int?
+  mortgage_interest_type       String?
+  custom_term_in_months        Int?
+  compounding_period           String?
+  balloon_payment              Decimal?                   @db.Decimal(11, 4)
+  loan_id                      String?
+  financial_institution_id     String?
+  loan_additional_costs        loan_additional_costs[]
+  loan_schedule_breakdowns     loan_schedule_breakdowns[]
+  financial_institutions       financial_institutions?    @relation(fields: [financial_institution_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  loans                        loans?                     @relation(fields: [loan_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants                      tenants                    @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_loan_schedules_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model loans {
+  id                                        String                  @id
+  tenant_id                                 String
+  name                                      String?
+  loan_number                               String?
+  lender                                    String?
+  principal                                 Decimal?                @db.Decimal(11, 4)
+  current_interest_rate                     Decimal?                @db.Decimal(5, 4)
+  original_term                             Int?
+  currency                                  String?
+  has_balloon_payments                      Boolean?
+  contracting_date                          DateTime?               @db.Timestamptz(6)
+  maturity_date                             DateTime?               @db.Timestamptz(6)
+  first_payment_date                        DateTime?               @db.Timestamptz(6)
+  amortization_input_method                 String?
+  amortization_years                        String?
+  amortization_months                       String?
+  amortization_weeks                        String?
+  amortization_number_of_payments           String?
+  status                                    String?
+  is_discretionary                          Boolean                 @default(false)
+  loan_type_id                              String?
+  created_at                                DateTime?               @default(now()) @db.Timestamptz(6)
+  updated_at                                DateTime?               @default(now()) @db.Timestamptz(6)
+  deleted_at                                DateTime?               @db.Timestamptz(6)
+  account_id                                String?
+  asset_account_id                          String?
+  financial_institution_id                  String?
+  accounts_accounts_loan_idToloans          accounts[]              @relation("accounts_loan_idToloans")
+  budgeted_items                            budgeted_items[]
+  loan_schedules                            loan_schedules[]
+  accounts_loans_account_idToaccounts       accounts?               @relation("loans_account_idToaccounts", fields: [account_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_loans_account_id")
+  accounts_loans_asset_account_idToaccounts accounts?               @relation("loans_asset_account_idToaccounts", fields: [asset_account_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_loans_asset_account_id")
+  financial_institutions                    financial_institutions? @relation(fields: [financial_institution_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  account_types                             account_types?          @relation(fields: [loan_type_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants                                   tenants                 @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_loans_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model net_worth_classes {
+  id          String    @id
+  tenant_id   String
+  name        String
+  description String?
+  created_at  DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime? @default(now()) @db.Timestamptz(6)
+  tenants     tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_net_worth_classes_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model notifications {
+  id           String    @id
+  tenant_id    String
+  category     String
+  type         String
+  severity     String    @default("info")
+  title        String
+  message      String?
+  dedup_key    String?
+  scheduled_at DateTime? @db.Timestamptz(6)
+  source       String    @default("local")
+  external_id  String?
+  payload      String?
+  is_read      Boolean   @default(false)
+  read_at      DateTime? @db.Timestamptz(6)
+  created_at   DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime? @default(now()) @db.Timestamptz(6)
+  deleted_at   DateTime? @db.Timestamptz(6)
+  tenants      tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([category], map: "idx_notifications_category")
+  @@index([dedup_key], map: "idx_notifications_dedup_key")
+  @@index([tenant_id], map: "idx_notifications_tenant_id")
+  @@index([is_read, deleted_at], map: "idx_notifications_unread")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model overview_card_preferences {
+  id             String    @id
+  tenant_id      String
+  card_type      String
+  is_visible     Boolean?  @default(true)
+  order_position Int?      @default(0)
+  created_at     DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime? @default(now()) @db.Timestamptz(6)
+  deleted_at     DateTime? @db.Timestamptz(6)
+  tenants        tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_overview_card_preferences_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model partners {
+  id                     String                   @id
+  tenant_id              String
+  name                   String
+  notes                  String?
+  created_at             DateTime?                @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime?                @default(now()) @db.Timestamptz(6)
+  deleted_at             DateTime?                @db.Timestamptz(6)
+  bills                  bills[]
+  tenants                tenants                  @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  recurring_transactions recurring_transactions[]
+  rules                  rules[]
+  subscriptions          subscriptions[]
+  transactions           transactions[]
+
+  @@index([tenant_id], map: "idx_partners_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model portfolio_cryptocurrencies {
+  id                Int              @id @default(autoincrement())
+  tenant_id         String
+  portfolio_id      String
+  cryptocurrency_id String
+  created_at        DateTime?        @default(now()) @db.Timestamptz(6)
+  cryptocurrencies  cryptocurrencies @relation(fields: [cryptocurrency_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  portfolios        portfolios       @relation(fields: [portfolio_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants           tenants          @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([portfolio_id, cryptocurrency_id], map: "idx_portfolio_crypto_unique")
+  @@unique([portfolio_id, cryptocurrency_id])
+  @@index([cryptocurrency_id], map: "idx_portfolio_crypto_crypto_id")
+  @@index([portfolio_id], map: "idx_portfolio_crypto_portfolio_id")
+  @@index([tenant_id], map: "idx_portfolio_cryptocurrencies_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model portfolio_stocks {
+  id           Int        @id @default(autoincrement())
+  tenant_id    String
+  portfolio_id String
+  stock_id     String
+  created_at   DateTime?  @default(now()) @db.Timestamptz(6)
+  portfolios   portfolios @relation(fields: [portfolio_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  stocks       stocks     @relation(fields: [stock_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants      tenants    @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([portfolio_id, stock_id], map: "idx_portfolio_stocks_unique")
+  @@unique([portfolio_id, stock_id])
+  @@index([portfolio_id], map: "idx_portfolio_stocks_portfolio_id")
+  @@index([stock_id], map: "idx_portfolio_stocks_stock_id")
+  @@index([tenant_id], map: "idx_portfolio_stocks_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model portfolios {
+  id                         String                       @id
+  tenant_id                  String
+  name                       String
+  currency                   String
+  is_sample                  Boolean                      @default(false)
+  created_at                 DateTime?                    @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime?                    @default(now()) @db.Timestamptz(6)
+  deleted_at                 DateTime?                    @db.Timestamptz(6)
+  crypto_trades              crypto_trades[]
+  portfolio_cryptocurrencies portfolio_cryptocurrencies[]
+  portfolio_stocks           portfolio_stocks[]
+  tenants                    tenants                      @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  stock_trades               stock_trades[]
+
+  @@index([currency], map: "idx_portfolios_currency")
+  @@index([deleted_at], map: "idx_portfolios_deleted_at")
+  @@index([name], map: "idx_portfolios_name")
+  @@index([tenant_id], map: "idx_portfolios_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model quotes {
+  id             String    @id
+  tenant_id      String
+  symbol         String
+  quote_date     String
+  close          Decimal   @db.Decimal(11, 4)
+  open           Decimal?  @db.Decimal(11, 4)
+  high           Decimal?  @db.Decimal(11, 4)
+  low            Decimal?  @db.Decimal(11, 4)
+  currency       String?
+  change         Decimal?  @db.Decimal(11, 4)
+  percent_change Decimal?  @db.Decimal(11, 4)
+  fetched_at     DateTime? @default(now()) @db.Timestamptz(6)
+  created_at     DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime? @default(now()) @db.Timestamptz(6)
+  tenants        tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([tenant_id, symbol, quote_date])
+  @@index([symbol], map: "idx_quotes_symbol")
+  @@index([symbol, quote_date], map: "idx_quotes_symbol_date")
+  @@index([tenant_id], map: "idx_quotes_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model real_estate {
+  id             String    @id
+  tenant_id      String
+  property_type  String
+  address        String
+  address2       String?
+  city           String
+  province       String
+  postal_code    String?
+  country        String
+  square_footage Float?
+  bedrooms       Int?
+  bathrooms      Int?
+  lot_size       Float?
+  year_built     Int?
+  created_at     DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime? @default(now()) @db.Timestamptz(6)
+  deleted_at     DateTime? @db.Timestamptz(6)
+  asset_id       String?
+  assets         assets?   @relation(fields: [asset_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants        tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_real_estate_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model reconciliations {
+  id                   String         @id
+  tenant_id            String
+  reconciliation_date  DateTime?      @db.Timestamptz(6)
+  opening_balance      Decimal        @db.Decimal(11, 4)
+  opening_balance_date DateTime       @db.Timestamptz(6)
+  closing_balance      Decimal        @db.Decimal(11, 4)
+  closing_balance_date DateTime       @db.Timestamptz(6)
+  is_complete          Boolean?       @default(false)
+  created_at           DateTime?      @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime?      @default(now()) @db.Timestamptz(6)
+  deleted_at           DateTime?      @db.Timestamptz(6)
+  account_id           String?
+  accounts             accounts?      @relation(fields: [account_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants              tenants        @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  transactions         transactions[]
+
+  @@index([tenant_id], map: "idx_reconciliations_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model recurring_transaction_categories {
+  id                       String                 @id
+  tenant_id                String
+  recurring_transaction_id String
+  category_id              String
+  amount                   Decimal                @db.Decimal(11, 4)
+  notes                    String?
+  created_at               DateTime?              @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime?              @default(now()) @db.Timestamptz(6)
+  deleted_at               DateTime?              @db.Timestamptz(6)
+  categories               categories             @relation(fields: [category_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  recurring_transactions   recurring_transactions @relation(fields: [recurring_transaction_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants                  tenants                @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_recurring_transaction_categories_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model recurring_transaction_matches {
+  id                       String                 @id
+  tenant_id                String
+  recurring_transaction_id String
+  transaction_id           String
+  match_confidence         Float
+  is_confirmed             Boolean?               @default(false)
+  match_reasons            String
+  created_at               DateTime?              @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime?              @default(now()) @db.Timestamptz(6)
+  deleted_at               DateTime?              @db.Timestamptz(6)
+  recurring_transactions   recurring_transactions @relation(fields: [recurring_transaction_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants                  tenants                @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  transactions             transactions           @relation(fields: [transaction_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_recurring_transaction_matches_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model recurring_transactions {
+  id                                                                    String                             @id
+  tenant_id                                                             String
+  name                                                                  String
+  type                                                                  String
+  frequency                                                             String
+  total_amount                                                          Decimal                            @db.Decimal(11, 4)
+  payee_id                                                              String?
+  transfer_account_id                                                   String?
+  starting_date                                                         DateTime                           @db.Timestamptz(6)
+  ending_date                                                           DateTime?                          @db.Timestamptz(6)
+  last_processed_date                                                   DateTime?                          @db.Timestamptz(6)
+  is_active                                                             Boolean?                           @default(true)
+  is_discretionary                                                      Boolean                            @default(false)
+  notes                                                                 String?
+  created_at                                                            DateTime?                          @default(now()) @db.Timestamptz(6)
+  updated_at                                                            DateTime?                          @default(now()) @db.Timestamptz(6)
+  deleted_at                                                            DateTime?                          @db.Timestamptz(6)
+  bill_assignments_bill_assignments_bill_idTorecurring_transactions     bill_assignments[]                 @relation("bill_assignments_bill_idTorecurring_transactions")
+  bill_assignments_bill_assignments_paycheck_idTorecurring_transactions bill_assignments[]                 @relation("bill_assignments_paycheck_idTorecurring_transactions")
+  budgeted_items                                                        budgeted_items[]
+  recurring_transaction_categories                                      recurring_transaction_categories[]
+  recurring_transaction_matches                                         recurring_transaction_matches[]
+  accounts                                                              accounts?                          @relation(fields: [transfer_account_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_recurring_transactions_transfer_account_id")
+  partners                                                              partners?                          @relation(fields: [payee_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants                                                               tenants                            @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_recurring_transactions_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model rule_account_applications {
+  id         String    @id
+  tenant_id  String
+  rule_id    String
+  account_id String
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at DateTime? @default(now()) @db.Timestamptz(6)
+  deleted_at DateTime? @db.Timestamptz(6)
+  accounts   accounts  @relation(fields: [account_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  rules      rules     @relation(fields: [rule_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants    tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_rule_account_applications_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model rule_category_splits {
+  id          String     @id
+  tenant_id   String
+  rule_id     String
+  category_id String
+  split_type  String
+  split_value Decimal    @db.Decimal(11, 4)
+  created_at  DateTime?  @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime?  @default(now()) @db.Timestamptz(6)
+  deleted_at  DateTime?  @db.Timestamptz(6)
+  categories  categories @relation(fields: [category_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  rules       rules      @relation(fields: [rule_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants     tenants    @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_rule_category_splits_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model rule_conditions {
+  id                String    @id
+  tenant_id         String
+  condition_field   String
+  condition_type    String
+  trans_description String?
+  trans_amount      Decimal?  @db.Decimal(11, 4)
+  currency_code     String?
+  created_at        DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime? @default(now()) @db.Timestamptz(6)
+  deleted_at        DateTime? @db.Timestamptz(6)
+  rule_id           String?
+  rules             rules?    @relation(fields: [rule_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants           tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_rule_conditions_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model rules {
+  id                              String                      @id
+  tenant_id                       String
+  rule_name                       String
+  priority                        Int?                        @default(0)
+  action_type                     String?                     @default("assign")
+  all_conditions_apply            Boolean?                    @default(true)
+  auto_applies                    Boolean?                    @default(false)
+  is_active                       Boolean?                    @default(true)
+  updated_transaction_description String?
+  partner_id                      String?
+  created_at                      DateTime?                   @default(now()) @db.Timestamptz(6)
+  updated_at                      DateTime?                   @default(now()) @db.Timestamptz(6)
+  deleted_at                      DateTime?                   @db.Timestamptz(6)
+  rule_account_applications       rule_account_applications[]
+  rule_category_splits            rule_category_splits[]
+  rule_conditions                 rule_conditions[]
+  partners                        partners?                   @relation(fields: [partner_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants                         tenants                     @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_rules_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model settings {
+  id         String    @id
+  tenant_id  String
+  key        String
+  value      String?
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at DateTime? @default(now()) @db.Timestamptz(6)
+  tenants    tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_settings_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model stock_trades {
+  id             String      @id
+  tenant_id      String
+  date           DateTime    @db.Timestamptz(6)
+  quantity       Decimal     @db.Decimal(11, 4)
+  price_per_unit Decimal     @db.Decimal(11, 4)
+  fees           Decimal     @default(0) @db.Decimal(11, 4)
+  currency       String
+  created_at     DateTime?   @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime?   @default(now()) @db.Timestamptz(6)
+  deleted_at     DateTime?   @db.Timestamptz(6)
+  stock_id       String?
+  portfolio_id   String?
+  account_id     String?
+  accounts       accounts?   @relation(fields: [account_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  portfolios     portfolios? @relation(fields: [portfolio_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  stocks         stocks?     @relation(fields: [stock_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants        tenants     @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([account_id], map: "idx_stock_trades_account_id")
+  @@index([currency], map: "idx_stock_trades_currency")
+  @@index([date], map: "idx_stock_trades_date")
+  @@index([date, stock_id], map: "idx_stock_trades_date_stock")
+  @@index([deleted_at], map: "idx_stock_trades_deleted_at")
+  @@index([portfolio_id], map: "idx_stock_trades_portfolio_id")
+  @@index([price_per_unit], map: "idx_stock_trades_price_per_unit")
+  @@index([quantity], map: "idx_stock_trades_quantity")
+  @@index([stock_id], map: "idx_stock_trades_stock_id")
+  @@index([stock_id, portfolio_id], map: "idx_stock_trades_stock_portfolio")
+  @@index([tenant_id], map: "idx_stock_trades_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model stocks {
+  id               String             @id
+  tenant_id        String
+  symbol           String
+  name             String
+  currency         String
+  exchange         String
+  mic_code         String
+  country          String
+  type             String
+  figi_code        String
+  cfi_code         String
+  isin             String
+  cusip            String
+  created_at       DateTime?          @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime?          @default(now()) @db.Timestamptz(6)
+  deleted_at       DateTime?          @db.Timestamptz(6)
+  portfolio_stocks portfolio_stocks[]
+  stock_trades     stock_trades[]
+  tenants          tenants            @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  watchlist_stocks watchlist_stocks[]
+
+  @@unique([tenant_id, symbol, mic_code])
+  @@index([country], map: "idx_stocks_country")
+  @@index([deleted_at], map: "idx_stocks_deleted_at")
+  @@index([exchange], map: "idx_stocks_exchange")
+  @@index([mic_code], map: "idx_stocks_mic_code")
+  @@index([name], map: "idx_stocks_name")
+  @@index([symbol], map: "idx_stocks_symbol")
+  @@index([tenant_id], map: "idx_stocks_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model subscription_transaction_matches {
+  id               String        @id
+  tenant_id        String
+  subscription_id  String
+  transaction_id   String
+  match_confidence Float
+  is_confirmed     Boolean?      @default(false)
+  match_reasons    String
+  created_at       DateTime?     @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime?     @default(now()) @db.Timestamptz(6)
+  deleted_at       DateTime?     @db.Timestamptz(6)
+  subscriptions    subscriptions @relation(fields: [subscription_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants          tenants       @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  transactions     transactions  @relation(fields: [transaction_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_subscription_transaction_matches_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model subscriptions {
+  id                               String                             @id
+  tenant_id                        String
+  name                             String
+  amount                           Decimal                            @db.Decimal(11, 4)
+  currency_code                    String
+  frequency                        String
+  renewal_date                     DateTime?                          @db.Timestamptz(6)
+  expiry_date                      DateTime?                          @db.Timestamptz(6)
+  starting_date                    DateTime?                          @db.Timestamptz(6)
+  cancellation_date                DateTime?                          @db.Timestamptz(6)
+  notes                            String?
+  has_autorenewal                  Boolean?                           @default(true)
+  created_at                       DateTime?                          @default(now()) @db.Timestamptz(6)
+  updated_at                       DateTime?                          @default(now()) @db.Timestamptz(6)
+  deleted_at                       DateTime?                          @db.Timestamptz(6)
+  category_id                      String?
+  payee_id                         String?
+  budgeted_items                   budgeted_items[]
+  subscription_transaction_matches subscription_transaction_matches[]
+  categories                       categories?                        @relation(fields: [category_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  partners                         partners?                          @relation(fields: [payee_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants                          tenants                            @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  transaction_subscriptions        transaction_subscriptions[]
+
+  @@index([tenant_id], map: "idx_subscriptions_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model tag_transactions {
+  id                  String       @id
+  tenant_id           String
+  value_tag_id        String
+  bank_transaction_id String
+  amount              Decimal?     @db.Decimal(11, 4)
+  currency_code       String?
+  created_at          DateTime?    @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime?    @default(now()) @db.Timestamptz(6)
+  transactions        transactions @relation(fields: [bank_transaction_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants             tenants      @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  value_tags          value_tags   @relation(fields: [value_tag_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_tag_transactions_tenant_id")
+}
+
+model tenants {
+  id                                 String                               @id
+  name                               String
+  created_at                         DateTime?                            @default(now()) @db.Timestamptz(6)
+  updated_at                         DateTime?                            @default(now()) @db.Timestamptz(6)
+  deleted_at                         DateTime?                            @db.Timestamptz(6)
+  account_balances                   account_balances[]
+  account_base_types                 account_base_types[]
+  account_external_identifiers       account_external_identifiers[]
+  account_types                      account_types[]
+  accounts                           accounts[]
+  asset_attachments                  asset_attachments[]
+  asset_improvements                 asset_improvements[]
+  asset_liability_accounts           asset_liability_accounts[]
+  asset_transactions                 asset_transactions[]
+  asset_valuations                   asset_valuations[]
+  assets                             assets[]
+  bill_assignments                   bill_assignments[]
+  bills                              bills[]
+  budget_item_period_amounts         budget_item_period_amounts[]
+  budgeted_items                     budgeted_items[]
+  budgeted_periods                   budgeted_periods[]
+  budgets                            budgets[]
+  categories                         categories[]
+  chart_color_assignments            chart_color_assignments[]
+  crypto_trades                      crypto_trades[]
+  cryptocurrencies                   cryptocurrencies[]
+  exchange_rates                     exchange_rates[]
+  financial_institutions             financial_institutions[]
+  goal_transactions                  goal_transactions[]
+  goals                              goals[]
+  loan_additional_costs              loan_additional_costs[]
+  loan_schedule_breakdowns           loan_schedule_breakdowns[]
+  loan_schedules                     loan_schedules[]
+  loans                              loans[]
+  net_worth_classes                  net_worth_classes[]
+  notifications                      notifications[]
+  overview_card_preferences          overview_card_preferences[]
+  partners                           partners[]
+  portfolio_cryptocurrencies         portfolio_cryptocurrencies[]
+  portfolio_stocks                   portfolio_stocks[]
+  portfolios                         portfolios[]
+  quotes                             quotes[]
+  real_estate                        real_estate[]
+  reconciliations                    reconciliations[]
+  recurring_transaction_categories   recurring_transaction_categories[]
+  recurring_transaction_matches      recurring_transaction_matches[]
+  recurring_transactions             recurring_transactions[]
+  rule_account_applications          rule_account_applications[]
+  rule_category_splits               rule_category_splits[]
+  rule_conditions                    rule_conditions[]
+  rules                              rules[]
+  settings                           settings[]
+  stock_trades                       stock_trades[]
+  stocks                             stocks[]
+  subscription_transaction_matches   subscription_transaction_matches[]
+  subscriptions                      subscriptions[]
+  tag_transactions                   tag_transactions[]
+  transaction_attachments            transaction_attachments[]
+  transaction_categories             transaction_categories[]
+  transaction_exchange_rates         transaction_exchange_rates[]
+  transaction_loan_payments          transaction_loan_payments[]
+  transaction_subscriptions          transaction_subscriptions[]
+  transactions                       transactions[]
+  transfers                          transfers[]
+  user_tenants                       user_tenants[]
+  value_tags                         value_tags[]
+  vehicle_maintenance_items          vehicle_maintenance_items[]
+  vehicle_maintenance_record_lines   vehicle_maintenance_record_lines[]
+  vehicle_maintenance_records        vehicle_maintenance_records[]
+  vehicle_maintenance_schedule_items vehicle_maintenance_schedule_items[]
+  vehicle_maintenance_schedules      vehicle_maintenance_schedules[]
+  vehicles                           vehicles[]
+  watchlist_cryptocurrencies         watchlist_cryptocurrencies[]
+  watchlist_stocks                   watchlist_stocks[]
+  watchlists                         watchlists[]
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model transaction_attachments {
+  id             String        @id
+  tenant_id      String
+  file_name      String?
+  file_url       String?
+  uploaded_at    DateTime?     @default(now()) @db.Timestamptz(6)
+  deleted_at     DateTime?     @db.Timestamptz(6)
+  transaction_id String?
+  tenants        tenants       @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  transactions   transactions? @relation(fields: [transaction_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_transaction_attachments_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model transaction_categories {
+  id             String       @id
+  tenant_id      String
+  transaction_id String
+  category_id    String
+  amount         Decimal      @db.Decimal(11, 4)
+  created_at     DateTime?    @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime?    @default(now()) @db.Timestamptz(6)
+  deleted_at     DateTime?    @db.Timestamptz(6)
+  categories     categories   @relation(fields: [category_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants        tenants      @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  transactions   transactions @relation(fields: [transaction_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_transaction_categories_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model transaction_exchange_rates {
+  id             String       @id
+  tenant_id      String
+  transaction_id String
+  from_currency  String
+  to_currency    String
+  rate           Decimal      @db.Decimal(10, 10)
+  source         String
+  created_at     DateTime?    @default(now()) @db.Timestamptz(6)
+  tenants        tenants      @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  transactions   transactions @relation(fields: [transaction_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([transaction_id, from_currency, to_currency])
+  @@index([tenant_id], map: "idx_transaction_exchange_rates_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model transaction_loan_payments {
+  id                         String                    @id
+  tenant_id                  String
+  transaction_id             String?
+  loan_schedule_breakdown_id String?
+  amount                     Decimal?                  @db.Decimal(11, 4)
+  currency_code              String
+  match_confidence           Float?
+  is_confirmed               Boolean?                  @default(false)
+  created_at                 DateTime?                 @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime?                 @default(now()) @db.Timestamptz(6)
+  deleted_at                 DateTime?                 @db.Timestamptz(6)
+  loan_schedule_breakdowns   loan_schedule_breakdowns? @relation(fields: [loan_schedule_breakdown_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants                    tenants                   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  transactions               transactions?             @relation(fields: [transaction_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_transaction_loan_payments_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model transaction_subscriptions {
+  id               String         @id
+  tenant_id        String
+  transaction_id   String?
+  subscription_id  String?
+  amount           Decimal?       @db.Decimal(11, 4)
+  currency_code    String
+  match_confidence Float?
+  is_confirmed     Boolean?       @default(false)
+  created_at       DateTime?      @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime?      @default(now()) @db.Timestamptz(6)
+  deleted_at       DateTime?      @db.Timestamptz(6)
+  subscriptions    subscriptions? @relation(fields: [subscription_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants          tenants        @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  transactions     transactions?  @relation(fields: [transaction_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_transaction_subscriptions_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model transactions {
+  id                                                           String                             @id
+  tenant_id                                                    String
+  payee_name                                                   String?
+  trans_description                                            String?
+  trans_description2                                           String?
+  cheque_number                                                String?
+  notes                                                        String?
+  amount                                                       Decimal                            @db.Decimal(11, 4)
+  currency_code                                                String
+  default_currency_code                                        String?
+  default_currency_amount                                      Decimal?                           @db.Decimal(11, 4)
+  transaction_date                                             DateTime                           @db.Timestamptz(6)
+  is_categorized                                               Boolean?                           @default(false)
+  is_excluded                                                  Boolean?                           @default(false)
+  is_pending                                                   Boolean?                           @default(false)
+  type                                                         String?                            @default("normal")
+  transaction_reference_number                                 String?
+  created_at                                                   DateTime?                          @default(now()) @db.Timestamptz(6)
+  updated_at                                                   DateTime?                          @default(now()) @db.Timestamptz(6)
+  deleted_at                                                   DateTime?                          @db.Timestamptz(6)
+  related_asset_id                                             String?
+  account_id                                                   String?
+  reconciliation_id                                            String?
+  reconciliation_status                                        String?
+  payee_id                                                     String?
+  asset_transactions                                           asset_transactions[]
+  goal_transactions                                            goal_transactions[]
+  recurring_transaction_matches                                recurring_transaction_matches[]
+  subscription_transaction_matches                             subscription_transaction_matches[]
+  tag_transactions                                             tag_transactions[]
+  transaction_attachments                                      transaction_attachments[]
+  transaction_categories                                       transaction_categories[]
+  transaction_exchange_rates                                   transaction_exchange_rates[]
+  transaction_loan_payments                                    transaction_loan_payments[]
+  transaction_subscriptions                                    transaction_subscriptions[]
+  accounts                                                     accounts?                          @relation(fields: [account_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  partners                                                     partners?                          @relation(fields: [payee_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  reconciliations                                              reconciliations?                   @relation(fields: [reconciliation_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  assets                                                       assets?                            @relation(fields: [related_asset_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants                                                      tenants                            @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  transfers_transfers_destination_transaction_idTotransactions transfers[]                        @relation("transfers_destination_transaction_idTotransactions")
+  transfers_transfers_source_transaction_idTotransactions      transfers[]                        @relation("transfers_source_transaction_idTotransactions")
+
+  @@index([tenant_id], map: "idx_transactions_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model transfers {
+  id                                                              String        @id
+  tenant_id                                                       String
+  source_amount                                                   Decimal       @db.Decimal(11, 4)
+  destination_amount                                              Decimal       @db.Decimal(11, 4)
+  source_currency_code                                            String
+  destination_currency_code                                       String
+  date_initiated                                                  DateTime      @db.Timestamptz(6)
+  date_completed                                                  DateTime?     @db.Timestamptz(6)
+  status                                                          String?       @default("pending")
+  notes                                                           String?
+  created_at                                                      DateTime?     @default(now()) @db.Timestamptz(6)
+  updated_at                                                      DateTime?     @default(now()) @db.Timestamptz(6)
+  deleted_at                                                      DateTime?     @db.Timestamptz(6)
+  source_transaction_id                                           String?
+  destination_transaction_id                                      String?
+  source_account_id                                               String?
+  destination_account_id                                          String?
+  accounts_transfers_destination_account_idToaccounts             accounts?     @relation("transfers_destination_account_idToaccounts", fields: [destination_account_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  transactions_transfers_destination_transaction_idTotransactions transactions? @relation("transfers_destination_transaction_idTotransactions", fields: [destination_transaction_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  accounts_transfers_source_account_idToaccounts                  accounts?     @relation("transfers_source_account_idToaccounts", fields: [source_account_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  transactions_transfers_source_transaction_idTotransactions      transactions? @relation("transfers_source_transaction_idTotransactions", fields: [source_transaction_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants                                                         tenants       @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_transfers_tenant_id")
+}
+
+model user_tenants {
+  id         String    @id
+  user_id    String
+  tenant_id  String
+  is_primary Boolean?  @default(false)
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at DateTime? @default(now()) @db.Timestamptz(6)
+  deleted_at DateTime? @db.Timestamptz(6)
+  tenants    tenants   @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users      users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([user_id, tenant_id])
+  @@index([tenant_id], map: "idx_user_tenants_tenant_id")
+  @@index([user_id], map: "idx_user_tenants_user_id")
+}
+
+model users {
+  id           String         @id
+  cognito_sub  String
+  email        String
+  is_primary   Boolean?       @default(false)
+  created_at   DateTime?      @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime?      @default(now()) @db.Timestamptz(6)
+  deleted_at   DateTime?      @db.Timestamptz(6)
+  user_tenants user_tenants[]
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model value_tags {
+  id               String             @id
+  tenant_id        String
+  name             String
+  tag_desc         String?
+  color            String?
+  created_at       DateTime?          @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime?          @default(now()) @db.Timestamptz(6)
+  deleted_at       DateTime?          @db.Timestamptz(6)
+  tag_transactions tag_transactions[]
+  tenants          tenants            @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_value_tags_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model vehicle_maintenance_items {
+  id                                 String                               @id
+  tenant_id                          String
+  name                               String
+  item_description                   String?
+  interval_mileage                   Int?
+  interval_months                    Int?
+  is_active                          Boolean?                             @default(true)
+  created_at                         DateTime?                            @default(now()) @db.Timestamptz(6)
+  updated_at                         DateTime?                            @default(now()) @db.Timestamptz(6)
+  deleted_at                         DateTime?                            @db.Timestamptz(6)
+  tenants                            tenants                              @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  vehicle_maintenance_record_lines   vehicle_maintenance_record_lines[]
+  vehicle_maintenance_schedule_items vehicle_maintenance_schedule_items[]
+
+  @@index([tenant_id], map: "idx_vehicle_maintenance_items_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model vehicle_maintenance_record_lines {
+  id                          String                      @id
+  tenant_id                   String
+  maintenance_record_id       String
+  maintenance_item_id         String
+  cost                        Decimal?                    @db.Decimal(11, 4)
+  notes                       String?
+  created_at                  DateTime?                   @default(now()) @db.Timestamptz(6)
+  vehicle_maintenance_items   vehicle_maintenance_items   @relation(fields: [maintenance_item_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  vehicle_maintenance_records vehicle_maintenance_records @relation(fields: [maintenance_record_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants                     tenants                     @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([maintenance_record_id, maintenance_item_id], map: "vehicle_maintenance_record_li_maintenance_record_id_mainten_key")
+  @@index([tenant_id], map: "idx_vehicle_maintenance_record_lines_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model vehicle_maintenance_records {
+  id                               String                             @id
+  tenant_id                        String
+  vehicle_id                       String
+  maintenance_date                 DateTime                           @db.Timestamptz(6)
+  mileage                          Int?
+  taxes                            Decimal?                           @db.Decimal(11, 4)
+  notes                            String?
+  created_at                       DateTime?                          @default(now()) @db.Timestamptz(6)
+  updated_at                       DateTime?                          @default(now()) @db.Timestamptz(6)
+  deleted_at                       DateTime?                          @db.Timestamptz(6)
+  vehicle_maintenance_record_lines vehicle_maintenance_record_lines[]
+  tenants                          tenants                            @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  vehicles                         vehicles                           @relation(fields: [vehicle_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_vehicle_maintenance_records_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model vehicle_maintenance_schedule_items {
+  id                            String                        @id
+  tenant_id                     String
+  schedule_id                   String
+  item_id                       String
+  created_at                    DateTime?                     @default(now()) @db.Timestamptz(6)
+  vehicle_maintenance_items     vehicle_maintenance_items     @relation(fields: [item_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  vehicle_maintenance_schedules vehicle_maintenance_schedules @relation(fields: [schedule_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants                       tenants                       @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([schedule_id, item_id])
+  @@index([tenant_id], map: "idx_vehicle_maintenance_schedule_items_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model vehicle_maintenance_schedules {
+  id                                 String                               @id
+  tenant_id                          String
+  name                               String
+  schedule_description               String?
+  make                               String?
+  model                              String?
+  year_from                          Int?
+  year_to                            Int?
+  is_active                          Boolean?                             @default(true)
+  created_at                         DateTime?                            @default(now()) @db.Timestamptz(6)
+  updated_at                         DateTime?                            @default(now()) @db.Timestamptz(6)
+  deleted_at                         DateTime?                            @db.Timestamptz(6)
+  vehicle_maintenance_schedule_items vehicle_maintenance_schedule_items[]
+  tenants                            tenants                              @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  vehicles                           vehicles[]
+
+  @@index([tenant_id], map: "idx_vehicle_maintenance_schedules_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model vehicles {
+  id                            String                         @id
+  tenant_id                     String
+  make                          String
+  model                         String
+  year                          Int
+  trim                          String?
+  body_style                    String?
+  engine_size                   String?
+  transmission                  String?
+  fuel_type                     String?
+  color                         String?
+  vin                           String?
+  license_plate                 String?
+  mileage                       Int?
+  odometer_unit                 String                         @default("kilometers")
+  registration_expiry           DateTime?                      @db.Timestamptz(6)
+  insurance_expiry              DateTime?                      @db.Timestamptz(6)
+  last_service_date             DateTime?                      @db.Timestamptz(6)
+  next_service_due              DateTime?                      @db.Timestamptz(6)
+  vehicle_notes                 String?
+  created_at                    DateTime?                      @default(now()) @db.Timestamptz(6)
+  updated_at                    DateTime?                      @default(now()) @db.Timestamptz(6)
+  deleted_at                    DateTime?                      @db.Timestamptz(6)
+  asset_id                      String?
+  maintenance_schedule_id       String?
+  vehicle_maintenance_records   vehicle_maintenance_records[]
+  assets                        assets?                        @relation(fields: [asset_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  vehicle_maintenance_schedules vehicle_maintenance_schedules? @relation(fields: [maintenance_schedule_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants                       tenants                        @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_vehicles_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model watchlist_cryptocurrencies {
+  id                Int              @id @default(autoincrement())
+  tenant_id         String
+  watchlist_id      String
+  cryptocurrency_id String
+  created_at        DateTime?        @default(now()) @db.Timestamptz(6)
+  cryptocurrencies  cryptocurrencies @relation(fields: [cryptocurrency_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants           tenants          @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  watchlists        watchlists       @relation(fields: [watchlist_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([watchlist_id, cryptocurrency_id], map: "idx_watchlist_crypto_unique")
+  @@unique([watchlist_id, cryptocurrency_id])
+  @@index([cryptocurrency_id], map: "idx_watchlist_crypto_crypto_id")
+  @@index([watchlist_id], map: "idx_watchlist_crypto_watchlist_id")
+  @@index([tenant_id], map: "idx_watchlist_cryptocurrencies_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model watchlist_stocks {
+  id           Int        @id @default(autoincrement())
+  tenant_id    String
+  watchlist_id String
+  stock_id     String
+  created_at   DateTime?  @default(now()) @db.Timestamptz(6)
+  stocks       stocks     @relation(fields: [stock_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants      tenants    @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  watchlists   watchlists @relation(fields: [watchlist_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([watchlist_id, stock_id], map: "idx_watchlist_stocks_unique")
+  @@unique([watchlist_id, stock_id])
+  @@index([stock_id], map: "idx_watchlist_stocks_stock_id")
+  @@index([tenant_id], map: "idx_watchlist_stocks_tenant_id")
+  @@index([watchlist_id], map: "idx_watchlist_stocks_watchlist_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model watchlists {
+  id                         String                       @id
+  tenant_id                  String
+  name                       String
+  created_at                 DateTime?                    @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime?                    @default(now()) @db.Timestamptz(6)
+  deleted_at                 DateTime?                    @db.Timestamptz(6)
+  watchlist_cryptocurrencies watchlist_cryptocurrencies[]
+  watchlist_stocks           watchlist_stocks[]
+  tenants                    tenants                      @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([deleted_at], map: "idx_watchlists_deleted_at")
+  @@index([name], map: "idx_watchlists_name")
+  @@index([tenant_id], map: "idx_watchlists_tenant_id")
+}
