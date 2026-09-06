@@ -27,6 +27,7 @@ import {
   type RateLimitPolicy,
   type RateLimitVerdict,
 } from "@/lib/security/rate-limit";
+import { recordEndpointUsage } from "@/lib/admin-access/usage";
 import { requireApiKey, type ApiKeyClient } from "./api-key";
 import { authenticate } from "./auth";
 import { ApiError, isApiError } from "./errors";
@@ -54,6 +55,12 @@ export interface HandlerOptions {
    * else (the user id, an API key) the way `protectedHandler` does.
    */
   rateLimit?: RateLimitPolicy | RateLimitPolicy[] | null;
+  /**
+   * The endpoint's key in `src/lib/admin-access/endpoint-registry.ts`. When
+   * set, every call is counted for the Services page (status and duration).
+   * `adminHandler` also uses it to look up the endpoint's access rule.
+   */
+  endpoint?: string;
 }
 
 function resolveRequestId(request: Request): string {
@@ -183,8 +190,10 @@ export function apiHandler<Ctx = unknown>(
   options?: HandlerOptions,
 ): (request: NextRequest, ctx: Ctx) => Promise<Response> {
   const policies = resolvePolicies(options?.rateLimit);
+  const endpoint = options?.endpoint;
   return async (request: NextRequest, ctx: Ctx): Promise<Response> => {
     const requestId = resolveRequestId(request);
+    const startedAt = Date.now();
     let verdict: RateLimitVerdict | undefined;
     let response: Response;
     try {
@@ -192,6 +201,14 @@ export function apiHandler<Ctx = unknown>(
       response = await fn(request, ctx);
     } catch (error) {
       response = toErrorResponse(error, request, requestId);
+    }
+    if (endpoint) {
+      // Not awaited: counting is best effort and must not delay the reply.
+      recordEndpointUsage({
+        endpointKey: endpoint,
+        status: response.status,
+        durationMs: Date.now() - startedAt,
+      });
     }
     return withStandardHeaders(response, requestId, verdict);
   };

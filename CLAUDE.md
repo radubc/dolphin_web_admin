@@ -2,7 +2,7 @@
 
 # Penny Squeeze — admin app (dolphin_web_admin)
 
-Internal admin console for the Penny Squeeze personal-finance product: operator sign-in through an admin-only Cognito pool, default-deny role-based access, and read/write tooling over the consumer app's data. Next.js 16 (App Router) + React 19 + TypeScript on Node 24, Tailwind v4 + Ant Design 6 for UI, Prisma 7 (pg adapter) against two PostgreSQL databases, AWS Cognito for auth. Early stage: sign-in, session refresh and the authenticated shell (nav bar, side rail, quick actions) are ported from the consumer app; User Management is built on an in-memory mock of the RBAC tables (swap `getAdminAccessRepository()` for Prisma next); Overview, Constants and Support are still blank. The consumer web app lives beside this repo at `../penny-squeeze-web` and is the reference implementation for the API toolkit, auth, and session code.
+Internal admin console for the Penny Squeeze personal-finance product: operator sign-in through an admin-only Cognito pool, default-deny role-based access, and read/write tooling over the consumer app's data. Next.js 16 (App Router) + React 19 + TypeScript on Node 24, Tailwind v4 + Ant Design 6 for UI, Prisma 7 (pg adapter) against two PostgreSQL databases, AWS Cognito for auth. Early stage: sign-in, session refresh and the authenticated shell (nav bar, side rail, quick actions) are ported from the consumer app; User Management, Access Map and Services run on the admin database through Prisma (`ADMIN_ACCESS_STORE=mock` selects the in-memory mock); Overview, Constants and Support are still blank. Human-readable guides live in `docs/*.md`. The consumer web app lives beside this repo at `../penny-squeeze-web` and is the reference implementation for the API toolkit, auth, and session code.
 
 ## Commands
 - `npm run dev` — dev server (Turbopack) on http://localhost:3001 (3000 belongs to the consumer app)
@@ -21,9 +21,10 @@ Internal admin console for the Penny Squeeze personal-finance product: operator 
 - `src/lib/api/` — API toolkit: handler wrapper, auth, validation, response/error helpers
 - `src/lib/security/` — rate limiting and client IP resolution
 - `src/lib/auth/` — Cognito sign-in, cookie session (`psa_` prefix), refresh
-- `src/lib/admin-access/` — the RBAC model: `types.ts` (mirrors the SQL), `repository.ts` (the storage seam; **currently the in-memory `mock.ts`**, seeded with `ADMIN_SUB` as the owner), `authorize.ts` (`requireAdminSession`, `adminHandler`), `client.ts` + `store.ts` (browser side)
-- `src/app/api/v1/admin/` — users, roles, actions, audit, me; every handler goes through `adminHandler`
-- `src/components/user-management/` — the User Management page: tables, ribbons, drawers
+- `src/lib/admin-access/` — access control: `types.ts` (model + `evaluateRule`), `repository.ts` (storage seam: `prisma-repository.ts` by default, `mock.ts` with `ADMIN_ACCESS_STORE=mock`), `authorize.ts` (`requireAdminSession`, `requirePageAccess`, `adminHandler`), `page-registry.ts` + `endpoint-registry.ts` (what the build ships; rules live in the DB), `client.ts` + stores (browser side)
+- `src/app/api/v1/admin/` — users, roles, actions, audit, pages, endpoints, usage, me; every handler goes through `adminHandler(fn, { endpoint })`
+- `src/components/user-management/`, `access-map/`, `services/` — the three built pages
+- `docs/sql/` — numbered SQL the owner runs in pgAdmin against the admin DB; `docs/*.md` — guides for people
 - `src/components/shell/` — nav bar, side rail, quick actions; tabs and actions are listed in `definitions.ts`, routes in `routes.ts`
 - `public/brand/` — logo assets copied from the consumer app
 - `src/lib/prisma.ts` — the only place the **main-database** PrismaClient is constructed (`prisma`)
@@ -31,7 +32,7 @@ Internal admin console for the Penny Squeeze personal-finance product: operator 
 - `prisma/schema.prisma` + `prisma.config.ts` — main database (owned by the consumer app; read-mostly, never migrated from here)
 - `prisma-admin/schema.prisma` + `prisma-admin.config.ts` — admin database (catalogs plus the `admin_*` RBAC tables)
 - `src/generated/prisma/`, `src/generated/prisma-admin/` — generated, git-ignored, never hand-edit
-- `docs/admin-access/` — RBAC schema (`admin_access.sql`) and the rules the app must enforce (`README.md`)
+- `docs/admin-access/README.md` — the original RBAC design note
 - `.cursor/rules/` — Cursor-side rules; the filesystem-scope rule there applies here too: stay inside `~/Developer/projects`
 
 ## Environment variables
@@ -51,7 +52,7 @@ Only `main` exists so far (GitHub default and PR target). Mirror the consumer ap
 Detailed rules live in `.claude/rules/` (orchestration, Next.js, database, api, auth) and load automatically. The non-negotiables:
 1. Never remove or disable existing functionality without the owner's explicit approval.
 2. Read `node_modules/next/dist/docs/` before writing Next.js code; this version has breaking changes.
-3. Never read `.env`. Never hand-edit generated Prisma code. Never run destructive DB commands. Never migrate the main database from this repo.
-4. Authorization is default-deny and lives in the admin database: every route and control checks the `admin_users` allowlist plus an explicit action key or super-admin. Never derive access from the main database's `users` table or the end-user Cognito pool.
+3. Never read `.env`. Never hand-edit generated Prisma code. Never run destructive DB commands. Never migrate either database from this repo: schema changes are numbered SQL files in `docs/sql/` that the owner runs in pgAdmin, followed by `npx prisma db pull --config prisma-admin.config.ts` and `npm run prisma:generate`.
+4. Authorization is default-deny and lives in the admin database: pages call `requirePageAccess("<key>")`, routes export through `adminHandler(fn, { endpoint: "<key>" })`, and the required actions come from the access map (`admin_pages`, `admin_endpoints`), never from code. A new page or endpoint gets a registry entry and is super-admin only until registered on the Access Map. Never derive access from the main database's `users` table or the end-user Cognito pool.
 5. The main session orchestrates; subagents (max 4) in `.claude/agents/` do the work: `implementer` (Sonnet) for simple tasks, `architect` (Opus) for complex ones, `explorer` and `reviewer` for read-only research and review.
 6. Commit only when asked. Branch off `main` until `develop` exists.

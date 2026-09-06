@@ -1,6 +1,7 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma-admin"
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma-admin"
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
@@ -220,4 +221,192 @@ model watchlists {
   watchlist_stocks watchlist_stocks[]
 
   @@index([name], map: "idx_watchlists_name")
+}
+
+/// Access control for the admin console. Hand-written to match
+/// docs/sql/001_admin_access.sql and 002_access_map_and_services.sql;
+/// `prisma db pull` should reproduce these (relation names may differ).
+model admin_users {
+  id                                                        String                          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  cognito_sub                                               String                          @unique
+  email                                                     String                          @unique
+  display_name                                              String?
+  is_super_admin                                            Boolean                         @default(false)
+  disabled_at                                               DateTime?                       @db.Timestamptz(6)
+  last_login_at                                             DateTime?                       @db.Timestamptz(6)
+  created_at                                                DateTime                        @default(now()) @db.Timestamptz(6)
+  updated_at                                                DateTime                        @default(now()) @db.Timestamptz(6)
+  created_by                                                String?                         @db.Uuid
+  updated_by                                                String?                         @db.Uuid
+  admin_endpoints                                           admin_endpoints[]
+  admin_pages                                               admin_pages[]
+  admin_permission_audit_events                             admin_permission_audit_events[]
+  admin_role_actions                                        admin_role_actions[]
+  admin_roles_admin_roles_created_byToadmin_users           admin_roles[]                   @relation("admin_roles_created_byToadmin_users")
+  admin_roles_admin_roles_updated_byToadmin_users           admin_roles[]                   @relation("admin_roles_updated_byToadmin_users")
+  admin_user_roles_admin_user_roles_created_byToadmin_users admin_user_roles[]              @relation("admin_user_roles_created_byToadmin_users")
+  admin_user_roles                                          admin_user_roles[]
+  admin_users_admin_users_created_byToadmin_users           admin_users?                    @relation("admin_users_created_byToadmin_users", fields: [created_by], references: [id], onUpdate: NoAction)
+  other_admin_users_admin_users_created_byToadmin_users     admin_users[]                   @relation("admin_users_created_byToadmin_users")
+  admin_users_admin_users_updated_byToadmin_users           admin_users?                    @relation("admin_users_updated_byToadmin_users", fields: [updated_by], references: [id], onUpdate: NoAction)
+  other_admin_users_admin_users_updated_byToadmin_users     admin_users[]                   @relation("admin_users_updated_byToadmin_users")
+
+  @@index([disabled_at], map: "idx_admin_users_disabled_at")
+  @@index([is_super_admin], map: "idx_admin_users_is_super_admin", where: raw("((is_super_admin = true) AND (disabled_at IS NULL))"))
+}
+
+model admin_actions {
+  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key                    String                   @unique
+  description            String
+  category               String                   @default("general")
+  created_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  admin_endpoint_actions admin_endpoint_actions[]
+  admin_page_actions     admin_page_actions[]
+  admin_role_actions     admin_role_actions[]
+
+  @@index([category], map: "idx_admin_actions_category")
+}
+
+model admin_roles {
+  id                                              String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key                                             String               @unique
+  name                                            String
+  description                                     String?
+  is_system                                       Boolean              @default(false)
+  created_at                                      DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at                                      DateTime             @default(now()) @db.Timestamptz(6)
+  created_by                                      String?              @db.Uuid
+  updated_by                                      String?              @db.Uuid
+  admin_role_actions                              admin_role_actions[]
+  admin_users_admin_roles_created_byToadmin_users admin_users?         @relation("admin_roles_created_byToadmin_users", fields: [created_by], references: [id], onUpdate: NoAction)
+  admin_users_admin_roles_updated_byToadmin_users admin_users?         @relation("admin_roles_updated_byToadmin_users", fields: [updated_by], references: [id], onUpdate: NoAction)
+  admin_user_roles                                admin_user_roles[]
+}
+
+model admin_role_actions {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  role_id       String        @db.Uuid
+  action_id     String        @db.Uuid
+  created_at    DateTime      @default(now()) @db.Timestamptz(6)
+  created_by    String?       @db.Uuid
+  admin_actions admin_actions @relation(fields: [action_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  admin_users   admin_users?  @relation(fields: [created_by], references: [id], onUpdate: NoAction)
+  admin_roles   admin_roles   @relation(fields: [role_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([role_id, action_id], map: "admin_role_actions_role_action_key")
+  @@index([action_id], map: "idx_admin_role_actions_action_id")
+}
+
+model admin_user_roles {
+  id                                                   String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id                                              String       @db.Uuid
+  role_id                                              String       @db.Uuid
+  created_at                                           DateTime     @default(now()) @db.Timestamptz(6)
+  created_by                                           String?      @db.Uuid
+  admin_users_admin_user_roles_created_byToadmin_users admin_users? @relation("admin_user_roles_created_byToadmin_users", fields: [created_by], references: [id], onUpdate: NoAction)
+  admin_roles                                          admin_roles  @relation(fields: [role_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  admin_users                                          admin_users  @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([user_id, role_id], map: "admin_user_roles_user_role_key")
+  @@index([role_id], map: "idx_admin_user_roles_role_id")
+}
+
+model admin_permission_audit_events {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actor_user_id String?      @db.Uuid
+  action        String
+  target_type   String
+  target_id     String?      @db.Uuid
+  metadata      Json         @default("{}")
+  created_at    DateTime     @default(now()) @db.Timestamptz(6)
+  admin_users   admin_users? @relation(fields: [actor_user_id], references: [id], onUpdate: NoAction)
+
+  @@index([created_at(sort: Desc)], map: "idx_admin_permission_audit_events_created_at")
+  @@index([actor_user_id], map: "idx_admin_permission_audit_events_actor")
+  @@index([target_type, target_id], map: "idx_admin_permission_audit_events_target")
+}
+
+/// Access map: pages and quick actions and the rule that gates each.
+model admin_pages {
+  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key                 String               @unique
+  kind                String               @default("page")
+  path                String?
+  name                String
+  description         String?
+  nav_order           Int                  @default(100)
+  is_enabled          Boolean              @default(true)
+  require_super_admin Boolean              @default(false)
+  created_at          DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime             @default(now()) @db.Timestamptz(6)
+  updated_by          String?              @db.Uuid
+  admin_page_actions  admin_page_actions[]
+  admin_users         admin_users?         @relation(fields: [updated_by], references: [id], onUpdate: NoAction)
+
+  @@index([kind, nav_order], map: "idx_admin_pages_kind_nav_order")
+}
+
+model admin_page_actions {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  page_id       String        @db.Uuid
+  action_id     String        @db.Uuid
+  created_at    DateTime      @default(now()) @db.Timestamptz(6)
+  admin_actions admin_actions @relation(fields: [action_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  admin_pages   admin_pages   @relation(fields: [page_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([page_id, action_id], map: "admin_page_actions_page_action_key")
+  @@index([action_id], map: "idx_admin_page_actions_action_id")
+}
+
+/// Service registry: API endpoints, metadata and the rule that gates each.
+model admin_endpoints {
+  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key                    String                   @unique
+  method                 String
+  path                   String
+  name                   String
+  description            String?
+  category               String                   @default("general")
+  auth_kind              String                   @default("admin")
+  rate_limit_policy      String                   @default("api")
+  require_super_admin    Boolean                  @default(false)
+  is_enabled             Boolean                  @default(true)
+  notes                  String?
+  created_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_by             String?                  @db.Uuid
+  admin_endpoint_actions admin_endpoint_actions[]
+  admin_users            admin_users?             @relation(fields: [updated_by], references: [id], onUpdate: NoAction)
+
+  @@unique([method, path])
+  @@index([category], map: "idx_admin_endpoints_category")
+}
+
+model admin_endpoint_actions {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  endpoint_id     String          @db.Uuid
+  action_id       String          @db.Uuid
+  created_at      DateTime        @default(now()) @db.Timestamptz(6)
+  admin_actions   admin_actions   @relation(fields: [action_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  admin_endpoints admin_endpoints @relation(fields: [endpoint_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([endpoint_id, action_id], map: "admin_endpoint_actions_endpoint_action_key")
+  @@index([action_id], map: "idx_admin_endpoint_actions_action_id")
+}
+
+/// Daily per-endpoint counters for the Services page.
+model admin_endpoint_usage {
+  endpoint_key      String
+  day               DateTime  @db.Date
+  calls             BigInt    @default(0)
+  errors            BigInt    @default(0)
+  denied            BigInt    @default(0)
+  rate_limited      BigInt    @default(0)
+  total_duration_ms BigInt    @default(0)
+  last_called_at    DateTime? @db.Timestamptz(6)
+
+  @@id([endpoint_key, day])
+  @@index([day(sort: Desc)], map: "idx_admin_endpoint_usage_day")
 }

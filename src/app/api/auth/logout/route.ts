@@ -29,7 +29,8 @@ import { clearSession } from "@/lib/auth/session";
 import { RATE_LIMITS } from "@/lib/security/rate-limit";
 
 /** Same budget as refresh: both spend a Cognito call per request. */
-const HANDLER_OPTIONS = { rateLimit: RATE_LIMITS.authRefresh };
+const GET_OPTIONS = { rateLimit: RATE_LIMITS.authRefresh, endpoint: "auth.logout.get" };
+const POST_OPTIONS = { rateLimit: RATE_LIMITS.authRefresh, endpoint: "auth.logout.post" };
 
 const LOGIN_PATH = "/login";
 
@@ -113,7 +114,7 @@ export const GET = apiHandler(async (request: NextRequest) => {
   }
   await endSession(request);
   return redirectTo(request, LOGIN_PATH);
-}, HANDLER_OPTIONS);
+}, GET_OPTIONS);
 
 /**
  * POST /api/auth/logout — the sign-out form, and fetch clients.
@@ -128,4 +129,4 @@ export const POST = apiHandler(async (request: NextRequest) => {
   }
   await endSession(request);
   return navigation ? redirectTo(request, LOGIN_PATH) : noContent();
-}, HANDLER_OPTIONS);
+}, POST_OPTIONS);

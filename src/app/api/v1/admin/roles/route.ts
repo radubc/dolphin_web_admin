@@ -11,7 +11,7 @@ import { parseJsonBody } from "@/lib/api/validate";
 
 export const GET = adminHandler(
   async () => ok(await getAdminAccessRepository().listRoles()),
-  { action: "can_manage_roles" },
+  { endpoint: "admin.roles.list" },
 );
 
 export const POST = adminHandler(
@@ -20,5 +20,5 @@ export const POST = adminHandler(
     const role = await getAdminAccessRepository().createRole(input, principal.user.id);
     return created(role);
   },
-  { superAdmin: true },
+  { endpoint: "admin.roles.create" },
 );

@@ -8,7 +8,7 @@ import NavBar from "./nav-bar";
 import NotificationCenter from "./notification-center";
 import SideRail from "./side-rail";
 import type { AdminCapabilities } from "@/lib/admin-access/types";
-import type { QuickActionKind } from "./definitions";
+import type { QuickActionKind, ShellQuickAction, ShellTab } from "./definitions";
 import { INITIAL_NOTIFICATIONS, type ShellNotification } from "./notifications";
 
 interface AppShellProps {
@@ -18,6 +18,10 @@ interface AppShellProps {
   name: string | null;
   /** The operator's allowlist row and actions, for the quick-action forms. */
   capabilities: AdminCapabilities;
+  /** Rail tabs the operator may open, in order, per the access map. */
+  tabs: readonly ShellTab[];
+  /** Quick actions the operator may use, in order, per the access map. */
+  quickActions: readonly ShellQuickAction[];
   /** The active page, rendered in the scrolling content area. */
   children: ReactNode;
 }
@@ -32,7 +36,14 @@ interface AppShellProps {
  * because the notification list is read by the bell badge, the popover and the
  * centre at once.
  */
-export default function AppShell({ email, name, capabilities, children }: AppShellProps) {
+export default function AppShell({
+  email,
+  name,
+  capabilities,
+  tabs,
+  quickActions,
+  children,
+}: AppShellProps) {
   const [entryKind, setEntryKind] = useState<QuickActionKind | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [notificationCenterOpen, setNotificationCenterOpen] = useState(false);
@@ -69,6 +80,7 @@ export default function AppShell({ email, name, capabilities, children }: AppShe
         email={email}
         name={name}
         notifications={notifications}
+        quickActions={quickActions}
         onQuickAction={setEntryKind}
         onOpenHelp={() => setHelpOpen(true)}
         onOpenNotificationCenter={() => setNotificationCenterOpen(true)}
@@ -79,7 +91,7 @@ export default function AppShell({ email, name, capabilities, children }: AppShe
       />
 
       <div className="flex min-h-0 flex-1">
-        <SideRail />
+        <SideRail tabs={tabs} />
         {/* Only the content area scrolls; the bar and the rail stay put. */}
         <main className="min-w-0 flex-1 overflow-y-auto">{children}</main>
       </div>

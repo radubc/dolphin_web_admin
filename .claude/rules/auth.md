@@ -8,7 +8,7 @@ paths:
 
 # Session, token refresh, and admin authorization
 
-**Status:** `src/lib/auth/`, `src/app/api/auth/`, `src/app/login/`, `src/app/forgot-password/` and `src/proxy.ts` are ported from `../penny-squeeze-web` with the `psa_` cookie prefix and the `ADMIN_COGNITO_*` variables. The allowlist and action checks live in `src/lib/admin-access/authorize.ts`: pages call `requireAdminSession()` (a signed-in non-operator lands on `/no-access`), routes use `adminHandler`. The repository behind them (`src/lib/admin-access/repository.ts`) is an **in-memory mock** seeded with `ADMIN_SUB` as the owner until the Prisma implementation lands. Do not redesign the session model.
+**Status:** `src/lib/auth/`, `src/app/api/auth/`, `src/app/login/`, `src/app/forgot-password/` and `src/proxy.ts` are ported from `../penny-squeeze-web` with the `psa_` cookie prefix and the `ADMIN_COGNITO_*` variables. The allowlist and access-map checks live in `src/lib/admin-access/authorize.ts`: the layout calls `requireAdminSession()`, every page calls `requirePageAccess("<key>")`, routes use `adminHandler(fn, { endpoint })`. Rules come from the admin database (`docs/access-control.md`); the Prisma repository is the default and `ADMIN_ACCESS_STORE=mock` selects the in-memory mock. Do not redesign the session model.
 
 ## Admin differences from the consumer app
 

@@ -22,6 +22,14 @@ import {
   type AdminAccessRepository,
   type LoginClaims,
 } from "./repository";
+import { endpointRegistryEntry } from "./endpoint-registry";
+import {
+  mergeEndpointRules,
+  mergePageRules,
+  type StoredEndpointRule,
+  type StoredPageRule,
+} from "./merge-rules";
+import { pageRegistryEntry } from "./page-registry";
 import type {
   AdminAction,
   AdminPrincipal,
@@ -32,8 +40,14 @@ import type {
   AuditTargetType,
   CreateAdminUserInput,
   CreateRoleInput,
+  EndpointRule,
+  EndpointUsageSummary,
+  PageRule,
   UpdateAdminUserInput,
   UpdateRoleInput,
+  UpsertEndpointRuleInput,
+  UpsertPageRuleInput,
+  UsageHit,
 } from "./types";
 
 /* -------------------------------------------------------------------------- */
@@ -72,6 +86,11 @@ interface State {
   userRoles: Map<string, Set<string>>;
   /** Newest first. */
   audit: AuditEvent[];
+  /** Access map rows; empty until registered, like a fresh database after 001 only. */
+  pageRules: StoredPageRule[];
+  endpointRules: StoredEndpointRule[];
+  /** endpoint key -> day (YYYY-MM-DD) -> counters */
+  usage: Map<string, Map<string, { calls: number; errors: number; denied: number; rateLimited: number; durationMs: number; lastCalledAt: string }>>;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -97,6 +116,8 @@ const ACTION_SEED: ReadonlyArray<[key: string, description: string, category: st
   ["can_close_tickets", "Close or resolve tickets", "tickets"],
   ["can_read_catalogs", "View shared catalog data in the admin database", "catalogs"],
   ["can_write_catalogs", "Create or update catalog / reference data", "catalogs"],
+  ["can_manage_access_map", "Open the Access Map and see which actions gate each page and endpoint", "admin_access"],
+  ["can_read_services", "Open the Services page: endpoint catalog, limits and usage", "admin_access"],
 ];
 
 /** Same rows and grants as the `admin_roles` seed in the SQL. */
@@ -313,7 +334,13 @@ function seed(): State {
     },
   ] satisfies AuditEvent[]).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
-  return { users, roles, actions, roleActions, userRoles, audit };
+  // The access map starts registered with the registry defaults, as the SQL
+  // seed leaves it, so the mock behaves like a database after 002 has run.
+  const now = new Date().toISOString();
+  const pageRules: StoredPageRule[] = mergePageRules([]).map((rule) => ({ ...rule, updatedAt: now }));
+  const endpointRules: StoredEndpointRule[] = mergeEndpointRules([]).map((rule) => ({ ...rule, updatedAt: now }));
+
+  return { users, roles, actions, roleActions, userRoles, audit, pageRules, endpointRules, usage: new Map() };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -722,6 +749,144 @@ class MemoryAdminAccessRepository implements AdminAccessRepository {
 
   async listActions(): Promise<AdminAction[]> {
     return [...this.state.actions];
+  }
+
+  /* ----------------------------- access map ----------------------------- */
+
+  async listPageRules(): Promise<PageRule[]> {
+    return mergePageRules(this.state.pageRules);
+  }
+
+  async getPageRule(key: string): Promise<PageRule | null> {
+    const row = this.state.pageRules.find((rule) => rule.key === key);
+    return row ? { ...row, registered: true, inCode: pageRegistryEntry(key) !== undefined } : null;
+  }
+
+  async upsertPageRule(key: string, input: UpsertPageRuleInput, actorId: string): Promise<PageRule> {
+    const entry = pageRegistryEntry(key);
+    let row = this.state.pageRules.find((rule) => rule.key === key);
+    if (!row && !entry) {
+      throw new AdminAccessError("not_found", "The running code has no page with that key.");
+    }
+    if (input.actionKeys !== undefined) this.actionIdsFor(input.actionKeys); // validates keys
+    const registered = row === undefined;
+    if (!row) {
+      row = {
+        key,
+        kind: entry!.kind,
+        path: entry!.path,
+        name: entry!.name,
+        description: entry!.description,
+        navOrder: entry!.defaults.navOrder,
+        isEnabled: true,
+        requireSuperAdmin: entry!.defaults.requireSuperAdmin,
+        actionKeys: [...entry!.defaults.actionKeys],
+        updatedAt: null,
+      };
+      this.state.pageRules.push(row);
+    }
+    if (input.name !== undefined) row.name = normaliseName(input.name, "Name", true)!;
+    if (input.description !== undefined) row.description = normaliseDescription(input.description);
+    if (input.navOrder !== undefined) row.navOrder = input.navOrder;
+    if (input.isEnabled !== undefined) row.isEnabled = input.isEnabled;
+    if (input.requireSuperAdmin !== undefined) row.requireSuperAdmin = input.requireSuperAdmin;
+    if (input.actionKeys !== undefined) row.actionKeys = [...new Set(input.actionKeys)].sort();
+    row.updatedAt = new Date().toISOString();
+    this.record(actorId, registered ? "page_rule_registered" : "page_rule_updated", "admin_page", key, row.name, {
+      key,
+      ...(input.actionKeys !== undefined ? { actionKeys: row.actionKeys } : {}),
+      ...(input.requireSuperAdmin !== undefined ? { requireSuperAdmin: input.requireSuperAdmin } : {}),
+      ...(input.isEnabled !== undefined ? { isEnabled: input.isEnabled } : {}),
+    });
+    return (await this.getPageRule(key))!;
+  }
+
+  async listEndpointRules(): Promise<EndpointRule[]> {
+    return mergeEndpointRules(this.state.endpointRules);
+  }
+
+  async getEndpointRule(key: string): Promise<EndpointRule | null> {
+    const row = this.state.endpointRules.find((rule) => rule.key === key);
+    return row ? { ...row, registered: true, inCode: endpointRegistryEntry(key) !== undefined } : null;
+  }
+
+  async upsertEndpointRule(key: string, input: UpsertEndpointRuleInput, actorId: string): Promise<EndpointRule> {
+    const entry = endpointRegistryEntry(key);
+    let row = this.state.endpointRules.find((rule) => rule.key === key);
+    if (!row && !entry) {
+      throw new AdminAccessError("not_found", "The running code has no endpoint with that key.");
+    }
+    if (input.actionKeys !== undefined) this.actionIdsFor(input.actionKeys);
+    const registered = row === undefined;
+    if (!row) {
+      row = {
+        key,
+        method: entry!.method,
+        path: entry!.path,
+        name: entry!.name,
+        description: entry!.description,
+        category: entry!.category,
+        authKind: entry!.authKind,
+        rateLimit: entry!.rateLimit,
+        notes: null,
+        isEnabled: true,
+        requireSuperAdmin: entry!.defaults.requireSuperAdmin,
+        actionKeys: [...entry!.defaults.actionKeys],
+        updatedAt: null,
+      };
+      this.state.endpointRules.push(row);
+    }
+    if (input.name !== undefined) row.name = normaliseName(input.name, "Name", true)!;
+    if (input.description !== undefined) row.description = input.description?.trim() || null;
+    if (input.notes !== undefined) row.notes = input.notes?.trim() || null;
+    if (input.isEnabled !== undefined) row.isEnabled = input.isEnabled;
+    if (input.requireSuperAdmin !== undefined) row.requireSuperAdmin = input.requireSuperAdmin;
+    if (input.actionKeys !== undefined) row.actionKeys = [...new Set(input.actionKeys)].sort();
+    row.updatedAt = new Date().toISOString();
+    this.record(actorId, registered ? "endpoint_rule_registered" : "endpoint_rule_updated", "admin_endpoint", key, ` `, {
+      key,
+      ...(input.actionKeys !== undefined ? { actionKeys: row.actionKeys } : {}),
+      ...(input.requireSuperAdmin !== undefined ? { requireSuperAdmin: input.requireSuperAdmin } : {}),
+      ...(input.isEnabled !== undefined ? { isEnabled: input.isEnabled } : {}),
+    });
+    return (await this.getEndpointRule(key))!;
+  }
+
+  /* -------------------------------- usage ------------------------------- */
+
+  async recordUsage(hit: UsageHit): Promise<void> {
+    const day = new Date().toISOString().slice(0, 10);
+    const days = this.state.usage.get(hit.endpointKey) ?? new Map();
+    const counters = days.get(day) ?? { calls: 0, errors: 0, denied: 0, rateLimited: 0, durationMs: 0, lastCalledAt: "" };
+    counters.calls += 1;
+    if (hit.status >= 500) counters.errors += 1;
+    if (hit.status === 401 || hit.status === 403) counters.denied += 1;
+    if (hit.status === 429) counters.rateLimited += 1;
+    counters.durationMs += Math.max(0, Math.round(hit.durationMs));
+    counters.lastCalledAt = new Date().toISOString();
+    days.set(day, counters);
+    this.state.usage.set(hit.endpointKey, days);
+  }
+
+  async listUsage(): Promise<EndpointUsageSummary[]> {
+    const today = new Date().toISOString().slice(0, 10);
+    const dayKey = (offset: number) => new Date(Date.now() - offset * 86_400_000).toISOString().slice(0, 10);
+    const weekAgo = dayKey(7);
+    const monthAgo = dayKey(30);
+    const summaries: EndpointUsageSummary[] = [];
+    for (const [endpointKey, days] of this.state.usage) {
+      let callsToday = 0, calls7d = 0, calls30d = 0, errors30d = 0, denied30d = 0, rateLimited30d = 0, duration = 0;
+      let lastCalledAt: string | null = null;
+      for (const [day, c] of days) {
+        if (day < monthAgo) continue;
+        calls30d += c.calls; errors30d += c.errors; denied30d += c.denied; rateLimited30d += c.rateLimited; duration += c.durationMs;
+        if (day >= weekAgo) calls7d += c.calls;
+        if (day === today) callsToday += c.calls;
+        if (!lastCalledAt || c.lastCalledAt > lastCalledAt) lastCalledAt = c.lastCalledAt;
+      }
+      summaries.push({ endpointKey, callsToday, calls7d, calls30d, errors30d, denied30d, rateLimited30d, avgMs30d: calls30d > 0 ? Math.round(duration / calls30d) : null, lastCalledAt });
+    }
+    return summaries;
   }
 
   /* -------------------------------- audit ------------------------------- */

@@ -18,7 +18,7 @@ export const GET = adminHandler<Ctx>(
     if (!role) throw new NotFoundError("That role does not exist.");
     return ok(role);
   },
-  { action: "can_manage_roles" },
+  { endpoint: "admin.roles.get" },
 );
 
 export const PATCH = adminHandler<Ctx>(
@@ -28,7 +28,7 @@ export const PATCH = adminHandler<Ctx>(
     const role = await getAdminAccessRepository().updateRole(id, input, principal.user.id);
     return ok(role);
   },
-  { superAdmin: true },
+  { endpoint: "admin.roles.update" },
 );
 
 export const DELETE = adminHandler<Ctx>(
@@ -37,5 +37,5 @@ export const DELETE = adminHandler<Ctx>(
     await getAdminAccessRepository().deleteRole(id, principal.user.id);
     return noContent();
   },
-  { superAdmin: true },
+  { endpoint: "admin.roles.delete" },
 );

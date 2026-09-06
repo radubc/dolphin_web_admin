@@ -22,7 +22,7 @@ export const GET = adminHandler<Ctx>(
     if (!user) throw new NotFoundError("That admin user does not exist.");
     return ok(user);
   },
-  { action: "can_manage_admin_users" },
+  { endpoint: "admin.users.get" },
 );
 
 export const PATCH = adminHandler<Ctx>(
@@ -32,5 +32,5 @@ export const PATCH = adminHandler<Ctx>(
     const user = await getAdminAccessRepository().updateUser(id, input, principal.user.id);
     return ok(user);
   },
-  { superAdmin: true },
+  { endpoint: "admin.users.update" },
 );

@@ -16,7 +16,7 @@ import { parseJsonBody } from "@/lib/api/validate";
 
 export const GET = adminHandler(
   async () => ok(await getAdminAccessRepository().listUsers()),
-  { action: "can_manage_admin_users" },
+  { endpoint: "admin.users.list" },
 );
 
 export const POST = adminHandler(
@@ -25,5 +25,5 @@ export const POST = adminHandler(
     const user = await getAdminAccessRepository().createUser(input, principal.user.id);
     return created(user);
   },
-  { superAdmin: true },
+  { endpoint: "admin.users.create" },
 );

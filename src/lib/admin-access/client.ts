@@ -15,9 +15,17 @@ import type {
   AuditPage,
   CreateAdminUserInput,
   CreateRoleInput,
+  EndpointRule,
+  EndpointUsageSummary,
+  PageRule,
   UpdateAdminUserInput,
   UpdateRoleInput,
+  UpsertEndpointRuleInput,
+  UpsertPageRuleInput,
 } from "./types";
+
+/** The rate-limit presets as the usage route reports them. */
+export type RateLimitPresets = Record<string, { limit: number; windowMs: number }>;
 
 const BASE = "/api/v1/admin";
 
@@ -81,4 +89,27 @@ export const adminAccessApi = {
     if (cursor) params.set("cursor", cursor);
     return apiFetch<AuditPage>(`${BASE}/audit?${params.toString()}`);
   },
+
+  listPageRules: () => apiFetch<PageRule[]>(`${BASE}/pages`),
+  upsertPageRule: async (key: string, input: UpsertPageRuleInput) => {
+    const rule = await apiFetch<PageRule>(`${BASE}/pages/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      json: input,
+    });
+    notifyAdminAccessChanged();
+    return rule;
+  },
+
+  listEndpointRules: () => apiFetch<EndpointRule[]>(`${BASE}/endpoints`),
+  upsertEndpointRule: async (key: string, input: UpsertEndpointRuleInput) => {
+    const rule = await apiFetch<EndpointRule>(`${BASE}/endpoints/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      json: input,
+    });
+    notifyAdminAccessChanged();
+    return rule;
+  },
+
+  listUsage: () =>
+    apiFetch<{ usage: EndpointUsageSummary[]; rateLimits: RateLimitPresets }>(`${BASE}/usage`),
 };

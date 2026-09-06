@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import PageHeader from "@/components/page-header";
-import { requireAdminSession } from "@/lib/admin-access/authorize";
+import { requirePageAccess } from "@/lib/admin-access/authorize";
 
 export const metadata: Metadata = {
   title: "Overview · Penny Squeeze Admin",
@@ -12,7 +12,7 @@ export const metadata: Metadata = {
  * highlight and the page chrome can be judged before the page is designed.
  */
 export default async function Page() {
-  await requireAdminSession();
+  await requirePageAccess("overview");
 
   return <PageHeader title="Overview" caption="At a glance." />;
 }

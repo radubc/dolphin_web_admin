@@ -1,12 +1,12 @@
 /**
- * The rail's routes, kept apart from `./definitions` so Server Components can
- * import them: the definitions module pulls in `@ant-design/icons`, which is
- * client-only and cannot be evaluated during server rendering.
+ * Routes the shell links to from Server Components. The rail itself is driven
+ * by the access map; this only names the paths code has to redirect to.
  */
 export const TAB_ROUTES = {
-  /** Overview lives at the root, as in the consumer app: it is the landing page. */
   overview: "/",
   constants: "/constants",
   userManagement: "/user-management",
   support: "/support",
+  accessMap: "/access-map",
+  services: "/services",
 } as const;

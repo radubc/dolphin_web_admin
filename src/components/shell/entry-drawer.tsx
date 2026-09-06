@@ -27,7 +27,7 @@ interface EntryDrawerProps {
 export default function EntryDrawer({ kind, capabilities, onClose }: EntryDrawerProps) {
   return (
     <InviteUserEntryDrawer
-      open={kind === "inviteUser"}
+      open={kind === "invite_user"}
       capabilities={capabilities}
       onClose={onClose}
     />

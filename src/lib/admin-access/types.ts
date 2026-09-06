@@ -37,6 +37,8 @@ export const ACTION_KEYS = [
   "can_close_tickets",
   "can_read_catalogs",
   "can_write_catalogs",
+  "can_manage_access_map",
+  "can_read_services",
 ] as const;
 
 export type ActionKey = (typeof ACTION_KEYS)[number];
@@ -137,7 +139,9 @@ export type AuditTargetType =
   | "admin_role"
   | "admin_action"
   | "admin_user_role"
-  | "admin_role_action";
+  | "admin_role_action"
+  | "admin_page"
+  | "admin_endpoint";
 
 export interface AuditEvent {
   id: string;
@@ -201,4 +205,126 @@ export function canDo(
   action: ActionKey,
 ): boolean {
   return capabilities.isSuperAdmin || capabilities.actions.includes(action);
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                 Access map                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The rule that gates a page, a quick action or an endpoint. Stored in the
+ * admin database (`admin_pages` / `admin_endpoints` plus their action links)
+ * and edited on the Access Map page.
+ *
+ * Evaluation order, in `evaluateRule`: super-admins pass everything; then
+ * `isEnabled`; then `requireSuperAdmin`; then ANY ONE of `actionKeys`. An
+ * empty `actionKeys` means any enabled operator.
+ */
+export interface AccessRule {
+  isEnabled: boolean;
+  requireSuperAdmin: boolean;
+  /** ANY-OF. Empty means any operator. */
+  actionKeys: string[];
+}
+
+export type AccessDecision =
+  /** Open it. */
+  | "allow"
+  /** No row in the database yet: super-admins only until registered. */
+  | "unregistered"
+  /** `isEnabled` is false. */
+  | "disabled"
+  /** The caller lacks the super-admin flag or every listed action. */
+  | "denied";
+
+/** The one rule evaluation, shared by the server (pages, routes) and the client (rail, buttons). */
+export function evaluateRule(
+  capabilities: Pick<AdminCapabilities, "isSuperAdmin" | "actions">,
+  rule: AccessRule | null,
+): AccessDecision {
+  if (capabilities.isSuperAdmin) return "allow";
+  if (rule === null) return "unregistered";
+  if (!rule.isEnabled) return "disabled";
+  if (rule.requireSuperAdmin) return "denied";
+  if (rule.actionKeys.length === 0) return "allow";
+  return rule.actionKeys.some((key) => capabilities.actions.includes(key)) ? "allow" : "denied";
+}
+
+export type PageKind = "page" | "quick_action";
+
+/** One page or quick action as the Access Map shows it: rule plus catalog data. */
+export interface PageRule extends AccessRule {
+  key: string;
+  kind: PageKind;
+  path: string | null;
+  name: string;
+  description: string | null;
+  navOrder: number;
+  /** True when a database row exists. False rows show the code's defaults. */
+  registered: boolean;
+  /** False for a database row whose key the running code no longer ships. */
+  inCode: boolean;
+  updatedAt: string | null;
+}
+
+export interface UpsertPageRuleInput {
+  actionKeys?: string[];
+  requireSuperAdmin?: boolean;
+  isEnabled?: boolean;
+  navOrder?: number;
+  name?: string;
+  description?: string | null;
+}
+
+export type EndpointAuthKind = "public" | "session" | "admin";
+
+/** One endpoint as the Access Map and the Services page show it. */
+export interface EndpointRule extends AccessRule {
+  key: string;
+  method: string;
+  path: string;
+  name: string;
+  description: string | null;
+  category: string;
+  authKind: EndpointAuthKind;
+  /** A `RATE_LIMITS` preset name. */
+  rateLimit: string;
+  notes: string | null;
+  registered: boolean;
+  inCode: boolean;
+  updatedAt: string | null;
+}
+
+export interface UpsertEndpointRuleInput {
+  actionKeys?: string[];
+  requireSuperAdmin?: boolean;
+  isEnabled?: boolean;
+  name?: string;
+  description?: string | null;
+  notes?: string | null;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                    Usage                                   */
+/* -------------------------------------------------------------------------- */
+
+/** One recorded call, as the handler wrapper reports it. */
+export interface UsageHit {
+  endpointKey: string;
+  status: number;
+  durationMs: number;
+}
+
+/** Rolled-up counters for one endpoint, for the Services page. */
+export interface EndpointUsageSummary {
+  endpointKey: string;
+  callsToday: number;
+  calls7d: number;
+  calls30d: number;
+  errors30d: number;
+  denied30d: number;
+  rateLimited30d: number;
+  /** Mean response time over the last 30 days, or null with no calls. */
+  avgMs30d: number | null;
+  lastCalledAt: string | null;
 }

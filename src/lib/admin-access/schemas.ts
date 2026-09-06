@@ -42,3 +42,23 @@ export const updateRoleSchema = z
   .refine((value) => Object.keys(value).length > 0, {
     message: "Nothing to update.",
   });
+
+const ruleActionKeys = z.array(z.string().min(1).max(64)).max(100);
+
+export const upsertPageRuleSchema = z.object({
+  actionKeys: ruleActionKeys.optional(),
+  requireSuperAdmin: z.boolean().optional(),
+  isEnabled: z.boolean().optional(),
+  navOrder: z.number().int().min(0).max(10_000).optional(),
+  name: z.string().trim().min(1).max(120).optional(),
+  description: z.string().trim().max(500).nullable().optional(),
+});
+
+export const upsertEndpointRuleSchema = z.object({
+  actionKeys: ruleActionKeys.optional(),
+  requireSuperAdmin: z.boolean().optional(),
+  isEnabled: z.boolean().optional(),
+  name: z.string().trim().min(1).max(120).optional(),
+  description: z.string().trim().max(1000).nullable().optional(),
+  notes: z.string().trim().max(2000).nullable().optional(),
+});

@@ -28,10 +28,17 @@ import type {
   AuditPage,
   CreateAdminUserInput,
   CreateRoleInput,
+  EndpointRule,
+  EndpointUsageSummary,
+  PageRule,
   UpdateAdminUserInput,
   UpdateRoleInput,
+  UpsertEndpointRuleInput,
+  UpsertPageRuleInput,
+  UsageHit,
 } from "./types";
 import { getMemoryAdminAccessRepository } from "./mock";
+import { getPrismaAdminAccessRepository } from "./prisma-repository";
 
 /** A rule of the model was violated. `code` is stable; `message` is user-facing. */
 export class AdminAccessError extends Error {
@@ -88,15 +95,40 @@ export interface AdminAccessRepository {
   /* ------------------------------- Audit -------------------------------- */
 
   listAuditEvents(options: { limit: number; cursor?: string | null }): Promise<AuditPage>;
+
+  /* ----------------------------- Access map ----------------------------- */
+
+  /** Every page and quick action: database rows merged with the code registry. */
+  listPageRules(): Promise<PageRule[]>;
+  /** The stored rule for one key, or `null` when it is not registered. */
+  getPageRule(key: string): Promise<PageRule | null>;
+  /** Registers (from the registry defaults) or updates one rule. */
+  upsertPageRule(key: string, input: UpsertPageRuleInput, actorId: string): Promise<PageRule>;
+
+  listEndpointRules(): Promise<EndpointRule[]>;
+  getEndpointRule(key: string): Promise<EndpointRule | null>;
+  upsertEndpointRule(key: string, input: UpsertEndpointRuleInput, actorId: string): Promise<EndpointRule>;
+
+  /* -------------------------------- Usage ------------------------------- */
+
+  /** Counts one call. Best effort: must never throw into a request. */
+  recordUsage(hit: UsageHit): Promise<void>;
+  /** Counters per endpoint over the last 30 days. */
+  listUsage(): Promise<EndpointUsageSummary[]>;
 }
 
 /**
  * The repository the app runs on.
  *
- * **Mock for now.** Swap the body for the Prisma implementation when the
- * `admin_*` tables are mirrored into `prisma-admin/schema.prisma`; nothing
- * else in the app needs to change.
+ * Prisma over the admin database by default. `ADMIN_ACCESS_STORE=mock` in the
+ * environment selects the in-memory mock instead — for development before the
+ * SQL in `docs/sql/` has been run, or for a demo with invented operators. Read
+ * per call so a change to `.env` takes effect on the dev server's next request.
  */
 export function getAdminAccessRepository(): AdminAccessRepository {
-  return getMemoryAdminAccessRepository();
+  const store = process.env.ADMIN_ACCESS_STORE?.trim().toLowerCase();
+  if (store === "mock") {
+    return getMemoryAdminAccessRepository();
+  }
+  return getPrismaAdminAccessRepository();
 }

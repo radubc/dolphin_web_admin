@@ -12,7 +12,7 @@ import { surfaceColors } from "@/lib/theme/colors";
 import NotificationsPopover from "./notifications-popover";
 import QuickActions from "./quick-actions";
 import UserMenu from "./user-menu";
-import type { QuickActionKind } from "./definitions";
+import type { QuickActionKind, ShellQuickAction } from "./definitions";
 import { unreadCountOf, type ShellNotification } from "./notifications";
 
 /** Nav bar height, matching the consumer app's 60pt toolbar. */
@@ -36,6 +36,7 @@ interface NavBarProps {
   email: string | null;
   name: string | null;
   notifications: readonly ShellNotification[];
+  quickActions: readonly ShellQuickAction[];
   onQuickAction: (kind: QuickActionKind) => void;
   onOpenHelp: () => void;
   onOpenNotificationCenter: () => void;
@@ -74,6 +75,7 @@ export default function NavBar({
   email,
   name,
   notifications,
+  quickActions,
   onQuickAction,
   onOpenHelp,
   onOpenNotificationCenter,
@@ -123,6 +125,7 @@ export default function NavBar({
           placement="bottom"
           content={
             <QuickActions
+              actions={quickActions}
               onSelect={(kind) => {
                 setQuickActionsOpen(false);
                 onQuickAction(kind);

@@ -39,6 +39,10 @@ export const featureColors = {
   users: "#007AFF",
   /** Orange — support tickets and the help desk. */
   support: "#FF9500",
+  /** Indigo — the access map. */
+  accessMap: "#5856D6",
+  /** Teal — the service registry. */
+  services: "#30B0C7",
 } as const;
 
 export type FeatureColor = keyof typeof featureColors;

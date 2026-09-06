@@ -9,5 +9,5 @@ import { ok } from "@/lib/api/response";
 
 export const GET = adminHandler(
   async () => ok(await getAdminAccessRepository().listActions()),
-  { action: "can_manage_roles" },
+  { endpoint: "admin.actions.list" },
 );

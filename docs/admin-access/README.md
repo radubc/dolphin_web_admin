@@ -2,7 +2,7 @@
 
 Schema and seeds for the **admin-only** Cognito pool allowlist and a default-deny RBAC model.
 
-- SQL: [`admin_access.sql`](./admin_access.sql)
+- SQL: [`docs/sql/001_admin_access.sql`](../sql/001_admin_access.sql) (step 1 of the scripts in [`docs/sql`](../sql/README.md))
 - Target DB: `admin_penny_squeeze` (`ADMIN_DATABASE_URL`)
 - RLS: **not used**. Authorization is enforced in the admin app.
 
@@ -42,7 +42,7 @@ Do not grant admin access based on the main app’s `users` table or the end-use
 
 ```bash
 # From repo root; uses ADMIN_DATABASE_URL from .env
-psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f docs/admin-access/admin_access.sql
+psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f docs/sql/001_admin_access.sql
 ```
 
 Or with Prisma later: mirror these tables in `prisma-admin/schema.prisma`, then migrate — this SQL is the source of truth for the first cut.

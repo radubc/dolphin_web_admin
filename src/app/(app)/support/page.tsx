@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import PageHeader from "@/components/page-header";
-import { requireAdminSession } from "@/lib/admin-access/authorize";
+import { requirePageAccess } from "@/lib/admin-access/authorize";
 
 export const metadata: Metadata = {
   title: "Support · Penny Squeeze Admin",
@@ -12,7 +12,7 @@ export const metadata: Metadata = {
  * itself is designed.
  */
 export default async function Page() {
-  await requireAdminSession();
+  await requirePageAccess("support");
 
   return <PageHeader title="Support" caption="Support tickets and the help desk." />;
 }

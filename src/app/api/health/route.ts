@@ -106,5 +106,5 @@ export const GET = apiHandler(
   },
   // Its own budget: the probe is anonymous and unversioned, so it must not
   // spend (or be starved by) the shared per-IP API allowance.
-  { rateLimit: RATE_LIMITS.health },
+  { rateLimit: RATE_LIMITS.health, endpoint: "health" },
 );

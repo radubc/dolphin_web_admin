@@ -3,21 +3,18 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { accentBlue, accentTints, surfaceColors } from "@/lib/theme/colors";
-import { primaryTabs, type TabDefinition } from "./definitions";
+import { presentationFor, type ShellTab } from "./definitions";
 
-/** Width of the rail, matching the native app's 100pt tab bar. */
+/** Width of the rail, matching the consumer app's 100pt tab bar. */
 export const RAIL_WIDTH = 100;
 
 /**
  * One tab. The active one is the accent blue — icon, label, a 3px rule down
  * its leading edge and a soft blue wash behind it — rather than the tab's own
- * feature colour: with several tabs, several active colours read as
- * decoration, while one colour reads as "you are here". The feature colours
- * are still carried by the quick actions, the settings rows and the cards, so
- * each domain keeps its identity where it actually helps.
+ * feature colour: one colour reads as "you are here".
  */
-function RailTab({ tab, active }: { tab: TabDefinition; active: boolean }) {
-  const { icon: Icon } = tab;
+function RailTab({ tab, active }: { tab: ShellTab; active: boolean }) {
+  const { icon: Icon } = presentationFor(tab.key);
   const color = active ? accentBlue : surfaceColors.textSecondary;
 
   return (
@@ -25,10 +22,7 @@ function RailTab({ tab, active }: { tab: TabDefinition; active: boolean }) {
       href={tab.href}
       aria-current={active ? "page" : undefined}
       className="relative flex flex-col items-center gap-1 rounded-lg px-1.5 py-2 text-center transition-colors hover:bg-black/[0.04]"
-      style={{
-        color,
-        backgroundColor: active ? accentTints.soft : undefined,
-      }}
+      style={{ color, backgroundColor: active ? accentTints.soft : undefined }}
     >
       {active && (
         <span
@@ -39,10 +33,7 @@ function RailTab({ tab, active }: { tab: TabDefinition; active: boolean }) {
       )}
       <Icon style={{ fontSize: 20, color }} />
       {/* Two lines maximum, as in the native tab bar button. */}
-      <span
-        className="text-[12px] leading-[14px] font-medium"
-        style={{ color }}
-      >
+      <span className="text-[12px] leading-[14px] font-medium" style={{ color }}>
         {tab.label}
       </span>
     </Link>
@@ -50,10 +41,12 @@ function RailTab({ tab, active }: { tab: TabDefinition; active: boolean }) {
 }
 
 /**
- * The vertical tab rail. Tabs are routes here rather than an index into a
- * switch, so the active one is whatever `usePathname()` reports.
+ * The vertical tab rail. The tabs arrive from the layout already filtered by
+ * the access map — what a person cannot open is not drawn — so the rail is
+ * the permission model made visible. The active one is whatever
+ * `usePathname()` reports.
  */
-export default function SideRail() {
+export default function SideRail({ tabs }: { tabs: readonly ShellTab[] }) {
   const pathname = usePathname();
 
   const isActive = (href: string) =>
@@ -69,8 +62,8 @@ export default function SideRail() {
         borderInlineEnd: `1px solid ${surfaceColors.separator}`,
       }}
     >
-      {primaryTabs.map((tab) => (
-        <RailTab key={tab.href} tab={tab} active={isActive(tab.href)} />
+      {tabs.map((tab) => (
+        <RailTab key={tab.key} tab={tab} active={isActive(tab.href)} />
       ))}
     </nav>
   );

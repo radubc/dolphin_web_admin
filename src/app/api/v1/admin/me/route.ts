@@ -9,6 +9,6 @@ import { adminHandler } from "@/lib/admin-access/authorize";
 import { capabilitiesOf } from "@/lib/admin-access/types";
 import { ok } from "@/lib/api/response";
 
-export const GET = adminHandler(async (_request, _ctx, principal) =>
-  ok(capabilitiesOf(principal)),
-);
+export const GET = adminHandler(async (_request, _ctx, principal) => ok(capabilitiesOf(principal)), {
+  endpoint: "admin.me",
+});

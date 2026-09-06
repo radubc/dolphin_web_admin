@@ -18,5 +18,5 @@ export const GET = adminHandler(
     const { limit, cursor } = parseSearchParams(request.nextUrl, querySchema);
     return ok(await getAdminAccessRepository().listAuditEvents({ limit, cursor }));
   },
-  { action: "can_read_admin_audit" },
+  { endpoint: "admin.audit.list" },
 );

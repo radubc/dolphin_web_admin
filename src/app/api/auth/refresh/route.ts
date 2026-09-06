@@ -38,10 +38,10 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rate-limit";
  * hand, because the wrapper's refusal is a JSON 429 — a page of JSON is not
  * something to hand a person who clicked a link. See {@link GET}.
  */
-const POST_OPTIONS = { rateLimit: RATE_LIMITS.authRefresh };
+const POST_OPTIONS = { rateLimit: RATE_LIMITS.authRefresh, endpoint: "auth.refresh.post" };
 
 /** The GET opts out of the wrapper's limiting and does it itself. */
-const GET_OPTIONS = { rateLimit: null };
+const GET_OPTIONS = { rateLimit: null, endpoint: "auth.refresh.get" };
 
 const LOGIN_PATH = "/login";
 

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import UserManagementPage from "@/components/user-management/user-management-page";
-import { requireAdminSession } from "@/lib/admin-access/authorize";
+import { requirePageAccess } from "@/lib/admin-access/authorize";
 import { capabilitiesOf } from "@/lib/admin-access/types";
 
 export const metadata: Metadata = {
@@ -15,7 +15,7 @@ export const metadata: Metadata = {
  * and controls to draw from them; every write is re-checked by the API.
  */
 export default async function Page() {
-  const { principal } = await requireAdminSession();
+  const { principal } = await requirePageAccess("user_management");
 
   return <UserManagementPage capabilities={capabilitiesOf(principal)} />;
 }
