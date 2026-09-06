@@ -42,3 +42,6 @@ next-env.d.ts
 
 /src/generated/prisma
 /src/generated/prisma-admin
+
+# claude code personal overrides
+.claude/settings.local.json

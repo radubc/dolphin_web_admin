@@ -1,0 +1,11 @@
+---
+description: Restrict filesystem access to ~/Developer/projects only
+alwaysApply: true
+---
+
+# Filesystem scope
+
+- Only read, search, or write under `/Users/radubarbuta/Developer/projects` (and this repo within it).
+- Never browse, open, copy from, or inspect paths outside that folder — including `~/Documents`, `~/Desktop`, Downloads, other home directories, or system paths — unless the user explicitly names a full path in the current message and asks you to use it.
+- Prefer project-relative paths. Do not use broad home-directory searches (`find ~`, `mdfind` across the home folder, etc.).
+- If needed context seems to live outside `~/Developer/projects`, ask the user to copy it into the project or provide the path explicitly.

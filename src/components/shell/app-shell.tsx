@@ -1,0 +1,117 @@
+"use client";
+
+import { useCallback, useState, type ReactNode } from "react";
+import { Drawer, Typography } from "antd";
+import { surfaceColors } from "@/lib/theme/colors";
+import EntryDrawer from "./entry-drawer";
+import NavBar from "./nav-bar";
+import NotificationCenter from "./notification-center";
+import SideRail from "./side-rail";
+import type { AdminCapabilities } from "@/lib/admin-access/types";
+import type { QuickActionKind } from "./definitions";
+import { INITIAL_NOTIFICATIONS, type ShellNotification } from "./notifications";
+
+interface AppShellProps {
+  /** From the verified session, for the nav bar name and the user menu. */
+  email: string | null;
+  /** From the verified session's `given_name`/`name` claim, for the nav bar. */
+  name: string | null;
+  /** The operator's allowlist row and actions, for the quick-action forms. */
+  capabilities: AdminCapabilities;
+  /** The active page, rendered in the scrolling content area. */
+  children: ReactNode;
+}
+
+/**
+ * The authenticated frame: nav bar on top, tab rail on the left, page content
+ * on the right, and every drawer and overlay mounted here so they sit above
+ * the whole window — the same arrangement as the consumer web app's shell.
+ *
+ * Overlay state lives at this level rather than in the nav bar because a drawer
+ * raised from a quick action has to survive the popover that opened it, and
+ * because the notification list is read by the bell badge, the popover and the
+ * centre at once.
+ */
+export default function AppShell({ email, name, capabilities, children }: AppShellProps) {
+  const [entryKind, setEntryKind] = useState<QuickActionKind | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [notificationCenterOpen, setNotificationCenterOpen] = useState(false);
+  // Empty until the admin notifications API exists; see ./notifications.
+  const [notifications, setNotifications] = useState<ShellNotification[]>(
+    () => INITIAL_NOTIFICATIONS,
+  );
+
+  const setRead = useCallback((id: string, read: boolean) => {
+    setNotifications((current) =>
+      current.map((item) => (item.id === id ? { ...item, read } : item)),
+    );
+  }, []);
+
+  const markRead = useCallback((id: string) => setRead(id, true), [setRead]);
+  const markUnread = useCallback((id: string) => setRead(id, false), [setRead]);
+
+  const markAllRead = useCallback(() => {
+    setNotifications((current) =>
+      current.map((item) => (item.read ? item : { ...item, read: true })),
+    );
+  }, []);
+
+  const deleteNotification = useCallback((id: string) => {
+    setNotifications((current) => current.filter((item) => item.id !== id));
+  }, []);
+
+  return (
+    <div
+      className="flex h-dvh min-h-0 flex-col"
+      style={{ background: surfaceColors.page, color: surfaceColors.text }}
+    >
+      <NavBar
+        email={email}
+        name={name}
+        notifications={notifications}
+        onQuickAction={setEntryKind}
+        onOpenHelp={() => setHelpOpen(true)}
+        onOpenNotificationCenter={() => setNotificationCenterOpen(true)}
+        onMarkNotificationRead={markRead}
+        onMarkNotificationUnread={markUnread}
+        onMarkAllNotificationsRead={markAllRead}
+        onDeleteNotification={deleteNotification}
+      />
+
+      <div className="flex min-h-0 flex-1">
+        <SideRail />
+        {/* Only the content area scrolls; the bar and the rail stay put. */}
+        <main className="min-w-0 flex-1 overflow-y-auto">{children}</main>
+      </div>
+
+      {/* Learning Centre. Placeholder content, as in the consumer app. */}
+      <Drawer
+        open={helpOpen}
+        onClose={() => setHelpOpen(false)}
+        placement="right"
+        size={420}
+        title="Learning Centre"
+      >
+        <Typography.Paragraph type="secondary">
+          Learning Centre…
+        </Typography.Paragraph>
+      </Drawer>
+
+      <EntryDrawer
+        kind={entryKind}
+        capabilities={capabilities}
+        onClose={() => setEntryKind(null)}
+      />
+
+      <NotificationCenter
+        open={notificationCenterOpen}
+        onClose={() => setNotificationCenterOpen(false)}
+        notifications={notifications}
+        onMarkRead={markRead}
+        onMarkUnread={markUnread}
+        onMarkAllRead={markAllRead}
+        onDelete={deleteNotification}
+      />
+    </div>
+  );
+}
