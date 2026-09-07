@@ -38,7 +38,7 @@ In-process sliding windows, per preset name (`src/lib/security/rate-limit.ts`):
 | `authReset` | 5 / 15 min | password reset |
 | `authRefresh` | 30 / 15 min per IP | refresh and logout |
 | `health` | 30 / minute per IP | the health probe |
-| `service` | 600 / minute per key | machine clients (`API_KEYS`), none yet |
+| `service` | 600 / minute per key | machine clients (`API_KEYS`): the two service lookups |
 
 Per-IP policies are skipped when the client IP is unknown
 (`TRUST_PROXY_HEADERS` unset). Counters live in the Node process: N instances
@@ -87,7 +87,7 @@ Default rules as seeded; all editable on the Access Map.
 | `admin.endpoints.list` | `GET /api/v1/admin/endpoints` | Endpoint rules merged with the registry. | `can_manage_access_map` or `can_read_services` |
 | `admin.endpoints.upsert` | `PUT /api/v1/admin/endpoints/[key]` | Register or update an endpoint rule. | super-admin |
 | `admin.usage.list` | `GET /api/v1/admin/usage` | 30-day counters per endpoint plus the rate-limit presets. | `can_read_services` |
-| `admin.constants.list` | `GET /api/v1/admin/constants/[kind]?page=&pageSize=&q=&state=` | One **page** of a catalog, each row labelled from the sync ledger, with catalog counts, `lastComparedAt` and `latestJob`. | `can_read_catalogs` or `can_write_catalogs` |
+| `admin.constants.list` | `GET /api/v1/admin/constants/[kind]?page=&pageSize=&q=&state=&country=` | One **page** of a catalog, each row labelled from the sync ledger, with catalog counts, `lastComparedAt` and `latestJob`. `country` (exact match) and the preferred-markets-first order apply to `stocks` and `etfs` only; see constants.md. | `can_read_catalogs` or `can_write_catalogs` |
 | `admin.constants.create` | `POST /api/v1/admin/constants/[kind]` | Adds a row to the admin catalog. 201. | `can_write_catalogs` |
 | `admin.constants.get` | `GET /api/v1/admin/constants/[kind]/[id]` | One catalog row with its push state. | `can_read_catalogs` or `can_write_catalogs` |
 | `admin.constants.update` | `PATCH /api/v1/admin/constants/[kind]/[id]` | Partial edit; at least one field. | `can_write_catalogs` |
@@ -96,6 +96,19 @@ Default rules as seeded; all editable on the Access Map.
 | `admin.constants.compare` | `POST /api/v1/admin/constants/[kind]/compare` | Rebuilds the catalog's sync ledger against the main app database. No body. Answers `{ job }`. | `can_write_catalogs` |
 | `admin.constants.jobs.list` | `GET /api/v1/admin/constants/[kind]/jobs?limit=` | Recent compare and push jobs, newest first. `limit` 1..50, default 10. | `can_read_catalogs` or `can_write_catalogs` |
 | `admin.constants.jobs.get` | `GET /api/v1/admin/constants/[kind]/jobs/[jobId]` | One job, for polling. Non-uuid or another catalog's job is a 404. | `can_read_catalogs` or `can_write_catalogs` |
+| `admin.integrations.list` | `GET /api/v1/admin/integrations` | Every integration with schedule, settings, `apiKeyConfigured` (presence only) and `latestRun`, plus `schedulerActive`. | `can_read_integrations` or `can_write_integrations` |
+| `admin.integrations.update` | `PATCH /api/v1/admin/integrations/[key]` | Any of `baseUrl` (https), `isEnabled`, `schedule`, `settings`. Recomputes `nextRunAt`. | `can_write_integrations` |
+| `admin.integrations.run` | `POST /api/v1/admin/integrations/[key]/run` | Starts a run. Body `{ force? }`, empty allowed. Answers a `running` run. | `can_write_integrations` |
+| `admin.integrations.runs.list` | `GET /api/v1/admin/integrations/[key]/runs?limit=` | Recent runs, newest first. `limit` 1..50, default 10. | `can_read_integrations` or `can_write_integrations` |
+| `admin.integrations.runs.get` | `GET /api/v1/admin/integrations/[key]/runs/[runId]` | One run, for polling. Non-uuid or another integration's run is a 404. | `can_read_integrations` or `can_write_integrations` |
+| `admin.integrations.quote_symbols.list` | `GET /api/v1/admin/integrations/quote-symbols?page=&pageSize=&q=&kind=&active=` | One page of the quote watch list, each item with `latestQuote`. | `can_read_integrations` or `can_write_integrations` |
+| `admin.integrations.quote_symbols.create` | `POST /api/v1/admin/integrations/quote-symbols` | `{ kind, symbol, exchange? }`. 201. 409 on a duplicate canonical. | `can_write_integrations` |
+| `admin.integrations.quote_symbols.update` | `PATCH /api/v1/admin/integrations/quote-symbols/[id]` | `{ isActive }`. | `can_write_integrations` |
+| `admin.integrations.quote_symbols.delete` | `DELETE /api/v1/admin/integrations/quote-symbols/[id]` | Removes the watch row; cached quotes stay. 204. | `can_write_integrations` |
+| `admin.integrations.currency_pairs.list` | `GET /api/v1/admin/integrations/currency-pairs?page=&pageSize=&q=&active=` | One page of the pair watch list, each item with `latestRate`. | `can_read_integrations` or `can_write_integrations` |
+| `admin.integrations.currency_pairs.create` | `POST /api/v1/admin/integrations/currency-pairs` | `{ fromCurrency, toCurrency }`, three letters each, must differ. 201; 409 on a duplicate. | `can_write_integrations` |
+| `admin.integrations.currency_pairs.update` | `PATCH /api/v1/admin/integrations/currency-pairs/[id]` | `{ isActive }`. | `can_write_integrations` |
+| `admin.integrations.currency_pairs.delete` | `DELETE /api/v1/admin/integrations/currency-pairs/[id]` | Removes the watch row; cached rates stay. 204. | `can_write_integrations` |
 
 `[kind]` is one of `countries`, `currencies`, `financial_institutions`,
 `categories`, `account_base_types`, `account_types`, `cryptocurrencies`,
@@ -139,6 +152,83 @@ at a time; a second request is a 409 `conflict` naming the job that holds it.
 Until [`docs/sql/007_constants_sync_and_jobs.sql`](./sql/007_constants_sync_and_jobs.sql)
 has run, all of these answer 503 `admin_schema_missing`. Full details in
 [constants.md](./constants.md).
+
+### Service (API key)
+
+Machine-to-machine only, for the consumer app. The caller sends
+`x-api-key: <key>` or `Authorization: ApiKey <key>` (`API_KEYS`,
+comma-separated, 32 characters minimum); no key configured is a 503
+`api_keys_not_configured`. Both paths are listed in `PUBLIC_API_PATHS` in
+`src/proxy.ts` so the proxy does not refuse them for having no Cognito cookie,
+and neither consults the access map: the key is the credential.
+
+| Key | Route | Purpose |
+| --- | --- | --- |
+| `service.quotes.lookup` | `GET /api/v1/service/quotes?symbols=AAPL,SHOP:TSX,BTC/USD` | `{ quotes, missing }`. Newest cached quote per symbol; symbols with nothing from today are fetched from TwelveData, **at most one batch inline** (see below). Up to 100 symbols. |
+| `service.exchange_rates.lookup` | `GET /api/v1/service/exchange-rates?pairs=USD/CAD,EUR/USD` | `{ rates, missing }`. Newest cached rate per pair; fetches the Bank of Canada only when today's series are not cached, in one call for every pair. Up to 100 pairs. |
+
+**One batch inline, the rest in the background.** A quote lookup spends at
+most `settings.batchSize` credits (one TwelveData call) while the caller waits.
+When more symbols than that are stale, the remainder is handed to a background
+`on_demand` run and answered from the newest cached value, or reported
+`pending` when there is nothing cached; asking again a little later gets the
+fetched values. Without that rule a request for 100 stale symbols on the free
+plan (8 credits a minute) would hold the connection open for a quarter of an
+hour. Rates need no equivalent: one Bank of Canada call covers every pair.
+
+**Neither ever fails because a provider does.** A dead provider, a missing API
+key, a disabled integration or an uninstalled schema all answer 200 with
+whatever the cache holds, and list the rest in `missing` with a reason
+(`not_found` — the provider does not have it; `provider_error` — try again
+later; `unavailable` — the integration is off or unconfigured, or an operator
+deactivated that symbol or pair on the watch list; `pending` — a fetch has been
+started, ask again shortly). A symbol or pair that was not on a watch list is
+added to it (`source: "request"`) **after** the provider answered for it, so a
+typo'd ticker never buys a daily credit; an item an operator deactivated is
+never fetched for and never reactivated by a lookup.
+
+## Integrations semantics
+
+`[key]` is one of `twelvedata_catalogs`, `iso_mic_markets`,
+`twelvedata_quotes`, `alpha_vantage_quotes`, `bank_of_canada_rates`; any other
+value is a 404 `not_found`. The rows are seeded by
+[`docs/sql/008_integrations.sql`](./sql/008_integrations.sql) and
+[`009_markets_and_alpha_vantage.sql`](./sql/009_markets_and_alpha_vantage.sql)
+and cannot be created or deleted through the API — only their base URL, enabled
+flag, schedule and settings can change. The base URL has to stay on the
+provider's own domain (`twelvedata.com`, `bankofcanada.ca`, `iso20022.org` or
+`alphavantage.co`, subdomains included); anything else is a 422
+`validation_failed` naming the domain, because the quote calls carry an API
+key — and Alpha Vantage's travels in the query string, so its address is the
+one an operator could most directly turn into a leak. Saving recomputes `nextRunAt` only when the
+schedule or the enabled flag changed, so editing a base URL cannot postpone a
+run that is already due.
+
+**Runs.** `admin.integrations.run` answers a `running` run, which the page
+follows through the two run endpoints; nothing runs inline, because a catalog
+download moves hundreds of thousands of rows and a quote run paces itself
+against a per-minute credit allowance. Only one run per integration is live at
+a time, so a second request is a 409 `conflict` naming the run that holds it.
+An integration whose API key is not configured is refused with 422
+`validation_failed` naming the environment variable, rather than starting a run
+that could only fail. A run that is `running` with a stale heartbeat is
+reported as `interrupted` — every batch commits on its own, so nothing already
+written is lost and it can simply be started again.
+
+**Scheduling.** A 60-second in-process tick (`src/instrumentation.ts`, switched
+off with `INTEGRATIONS_SCHEDULER=off`) starts the integrations whose
+`nextRunAt` has passed, claiming each with an atomic update so two instances
+never both run one. `schedulerActive` on the list response says whether this
+process is the one doing it.
+
+**Never the main app database.** Everything this feature reads and writes is in
+the admin database. Rows the catalog download inserts are marked `new` in the
+Constants sync ledger, so they reach the consumer app the same way every other
+catalog row does: through a Constants push.
+
+Until [`docs/sql/008_integrations.sql`](./sql/008_integrations.sql) has run,
+the operator endpoints answer 503 `admin_schema_missing`. Full details in
+[integrations.md](./integrations.md).
 
 ## Calling from the browser
 

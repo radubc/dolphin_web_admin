@@ -46,12 +46,18 @@ function listSearch(query: ListQuery): string {
   if (query.pageSize !== undefined) params.set("pageSize", String(query.pageSize));
   if (query.q !== undefined && query.q.trim() !== "") params.set("q", query.q.trim());
   if (query.state !== undefined && query.state !== "all") params.set("state", query.state);
+  if (query.country !== undefined && query.country.trim() !== "") {
+    params.set("country", query.country.trim());
+  }
   const text = params.toString();
   return text === "" ? "" : `?${text}`;
 }
 
 export const constantsApi = {
-  /** One page of a catalog; see `ListQuery` for paging, search and the state filter. */
+  /**
+   * One page of a catalog; see `ListQuery` for paging, search, the state
+   * filter and (for ETFs and stocks) the market filter.
+   */
   list: <K extends ConstantKind>(kind: K, query: ListQuery = {}) =>
     apiFetch<ConstantListResponse<K>>(`${kindPath(kind)}${listSearch(query)}`),
 

@@ -419,10 +419,12 @@ export default function ConstantsPage({ capabilities, initialKind }: ConstantsPa
           kind={store.kind}
           search={store.search}
           stateFilter={store.stateFilter}
+          market={store.market}
           searching={store.refreshing}
           disabled={requesting}
           onSearchChange={store.setSearch}
           onStateFilterChange={store.setStateFilter}
+          onMarketChange={store.setMarket}
         />
 
         {store.total === 0 ? (

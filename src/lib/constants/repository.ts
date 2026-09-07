@@ -38,7 +38,9 @@ import {
 } from "./ledger";
 import {
   CONSTANT_KIND_LABELS,
+  PREFERRED_COUNTRIES,
   hasIntegerId,
+  isMarketKind,
   type AccountBaseTypeInput,
   type AccountBaseTypeRow,
   type AccountTypeInput,
@@ -59,6 +61,7 @@ import {
   type FinancialInstitutionInput,
   type FinancialInstitutionRow,
   type MarketInput,
+  type MarketKind,
   type MarketRow,
   type PushState,
   type StockInput,
@@ -1312,6 +1315,11 @@ export interface RowFilter {
   ids?: readonly string[];
   /** Cursor: only rows whose primary key is greater than this wire id. */
   after?: string | null;
+  /**
+   * Exact match on the listing country. Only `etfs` and `stocks` have that
+   * column (`isMarketKind`); every other kind ignores it.
+   */
+  country?: string;
 }
 
 interface RowQuery extends RowFilter {
@@ -1418,6 +1426,11 @@ function whereOf(kind: ConstantKind, filter: RowFilter): Record<string, unknown>
     if (filter.scope === "retired") where.deleted_at = { not: null };
   }
 
+  // The market filter is an exact match on the feed's own spelling of the
+  // country, so it uses the `(country)` values the catalog actually holds.
+  const country = filter.country?.trim();
+  if (country && isMarketKind(kind)) where.country = country;
+
   const integerKeyed = hasIntegerId(kind);
   const id: Record<string, unknown> = {};
   if (filter.ids !== undefined) {
@@ -1478,7 +1491,11 @@ function naturalKey(kind: ConstantKind, row: CatalogRow): string[] {
     case "etfs":
     case "stocks": {
       const a = row as CatalogEtf;
-      return [a.symbol, a.exchange];
+      // Same tiers as the raw page query: the preferred markets first, in
+      // their listed order, then everything else. The tier is a sortable
+      // digit so `localeCompare` orders it with the rest of the key.
+      const tier = PREFERRED_COUNTRIES.indexOf(a.country as (typeof PREFERRED_COUNTRIES)[number]);
+      return [String(tier === -1 ? PREFERRED_COUNTRIES.length : tier), a.symbol, a.exchange];
     }
     case "markets":
       return [(row as CatalogMarket).micCode];
@@ -1536,6 +1553,99 @@ async function queryRows(kind: ConstantKind, query: RowQuery): Promise<CatalogRo
     case "markets":
       return (await prismaAdmin.markets.findMany({ where, orderBy, ...page })).map(toMarket);
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                     Preferred markets first (etfs, stocks)                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The columns a free-text search looks at for the two listed-instrument
+ * catalogs. The same list `searchOr` uses, spelled as database columns because
+ * the preferred-market page is raw SQL (below).
+ */
+const MARKET_SEARCH_COLUMNS: Record<MarketKind, readonly string[]> = {
+  etfs: ["symbol", "name", "exchange", "mic_code", "country"],
+  stocks: ["symbol", "name", "exchange", "mic_code", "country", "type"],
+};
+
+/**
+ * The `WHERE` of a preferred-market page, with the same semantics as
+ * `whereOf` for these two kinds: the free-text search as a case-insensitive
+ * substring over the kind's searchable columns, and the exact market filter.
+ * Neither kind is retirable, so scope adds nothing.
+ *
+ * The search value is a bound parameter and the wildcards are concatenated in
+ * SQL, which is exactly what Prisma's `contains` + `mode: "insensitive"`
+ * emits — so a `%` typed into the search box keeps behaving as it does on the
+ * typed path. Only the column *names* are interpolated, and they come from the
+ * constant above, never from a request.
+ */
+function marketWhereSql(kind: MarketKind, filter: { q?: string; country?: string }): Prisma.Sql {
+  const clauses: Prisma.Sql[] = [];
+
+  const q = filter.q?.trim();
+  if (q) {
+    const columns = MARKET_SEARCH_COLUMNS[kind].map(
+      (column) => Prisma.sql`${Prisma.raw(`"${column}"`)} ILIKE '%' || ${q} || '%'`,
+    );
+    clauses.push(Prisma.sql`(${Prisma.join(columns, " OR ")})`);
+  }
+
+  const country = filter.country?.trim();
+  if (country) clauses.push(Prisma.sql`"country" = ${country}`);
+
+  return clauses.length === 0 ? Prisma.sql`TRUE` : Prisma.join(clauses, " AND ");
+}
+
+/**
+ * One page of ETFs or stocks with the **preferred markets first**: Canadian
+ * listings, then US ones, then the rest, and inside each tier the kind's usual
+ * order (symbol, exchange, id).
+ *
+ * This is the one read that raw SQL earns. The app is mostly about Canadian
+ * and US markets, but the feed lists the same ticker on dozens of world
+ * exchanges, so a search for a symbol used to bury the listing the operator
+ * wants pages down. Ordering by a `CASE`-like expression is not something
+ * Prisma's `orderBy` can express, and sorting a 100 000-row catalog in the
+ * application is not an option — so the order goes to Postgres as a boolean
+ * expression per preferred country, `DESC` (true first).
+ *
+ * Everything else stays as it was: the same `where`, the same `skip`/`take`,
+ * and the count still comes from `countRows`, which reads the same filter
+ * through Prisma.
+ */
+async function queryMarketPage(
+  kind: MarketKind,
+  options: { q?: string; country?: string; skip: number; take: number },
+): Promise<CatalogRow[]> {
+  const where = marketWhereSql(kind, options);
+  const preferred = Prisma.join(
+    PREFERRED_COUNTRIES.map((country) => Prisma.sql`("country" = ${country}) DESC`),
+    ", ",
+  );
+  const order = Prisma.sql`ORDER BY ${preferred}, "symbol", "exchange", "id"`;
+  const page = Prisma.sql`LIMIT ${options.take} OFFSET ${options.skip}`;
+
+  if (kind === "stocks") {
+    const rows = await prismaAdmin.$queryRaw<StockRecord[]>`
+      SELECT "id", "symbol", "name", "currency", "exchange", "mic_code", "country", "type",
+             "figi_code", "cfi_code", "isin", "cusip", "created_at"
+      FROM "stocks"
+      WHERE ${where}
+      ${order}
+      ${page}`;
+    return rows.map(toStock);
+  }
+
+  const rows = await prismaAdmin.$queryRaw<EtfRecord[]>`
+    SELECT "id", "symbol", "name", "currency", "exchange", "mic_code", "country",
+           "figi_code", "cfi_code", "isin", "cusip", "created_at"
+    FROM "etfs"
+    WHERE ${where}
+    ${order}
+    ${page}`;
+  return rows.map(toEtf);
 }
 
 /**
@@ -1662,6 +1772,8 @@ export interface FindPageQuery {
   pageSize: number;
   q?: string;
   state?: ListStateFilter;
+  /** Market filter; `etfs` and `stocks` only, exact match on `country`. */
+  country?: string;
 }
 
 export interface ConstantPage<K extends ConstantKind> {
@@ -1678,7 +1790,9 @@ export interface ConstantPage<K extends ConstantKind> {
  * no relation, on purpose, so one ledger serves ten kinds:
  *
  * 1. **No state filter** (`all`, `retired`): a plain indexed page over the
- *    catalog, exact count. The common case.
+ *    catalog, exact count. The common case. For `etfs` and `stocks` that page
+ *    is read with raw SQL instead, so Canadian and then US listings come
+ *    before every other market's (`queryMarketPage`); the count is unchanged.
  * 2. **A state, no search**: the ledger is paged instead (`skip`/`take` on
  *    `(kind, state)`), and the page's ids are read back as rows. Bounded and
  *    fast at any catalog size; the ids come out in ledger id order, so the
@@ -1698,6 +1812,10 @@ export interface ConstantPage<K extends ConstantKind> {
  *    the count is exact, but the cost is one pass over the catalog **per
  *    page** — see `scanForState`.
  *
+ * The market filter (`?country`, `etfs` and `stocks` only) narrows all three
+ * routes, but the ledger holds no countries, so a state that would otherwise
+ * take route 2 takes route 3 while it is set.
+ *
  * A state filter (routes 2 and 3) reads rows with scope `all`, retired ones
  * included: the ledger describes every row of the catalog, so hiding retired
  * rows here would make `total` and the rows on the page disagree. `retired` is
@@ -1709,6 +1827,11 @@ export async function findPage<K extends ConstantKind>(
 ): Promise<ConstantPage<K>> {
   const state: ListStateFilter = query.state ?? "all";
   const q = query.q?.trim() === "" ? undefined : query.q?.trim();
+  // Only the two listed-instrument catalogs have a country; anywhere else the
+  // filter is ignored rather than answering an empty page.
+  const country = isMarketKind(kind)
+    ? (query.country?.trim() === "" ? undefined : query.country?.trim())
+    : undefined;
   const skip = (query.page - 1) * query.pageSize;
   const take = query.pageSize;
 
@@ -1724,9 +1847,13 @@ export async function findPage<K extends ConstantKind>(
   }
 
   if (state === "all") {
-    const filter: RowFilter = { q, scope: "live" };
+    const filter: RowFilter = { q, country, scope: "live" };
+    // ETFs and stocks list Canadian and US rows first, which takes an ordering
+    // Prisma cannot express; the count is the same typed query either way.
     const [rows, total] = await Promise.all([
-      queryRows(kind, { ...filter, skip, take }),
+      isMarketKind(kind)
+        ? queryMarketPage(kind, { q, country, skip, take })
+        : queryRows(kind, { ...filter, skip, take }),
       countRows(kind, filter),
     ]);
     return { rows: rows as CatalogRowOf<K>[], total };
@@ -1734,7 +1861,10 @@ export async function findPage<K extends ConstantKind>(
 
   const wanted: LedgerState[] = state === "pending" ? ["new", "changed"] : [state as LedgerState];
 
-  if (state !== "unknown" && q === undefined) {
+  // The ledger knows nothing about countries, so a market filter has to be
+  // answered by the catalog: it takes the scan route rather than the ledger
+  // page, which would drop rows out of a `total` it had already counted.
+  if (state !== "unknown" && q === undefined && country === undefined) {
     const [total, ids] = await Promise.all([
       countIdsInStates(kind, wanted),
       listIdsInStates(kind, wanted, { skip, take }),
@@ -1745,7 +1875,7 @@ export async function findPage<K extends ConstantKind>(
     return { rows, total };
   }
 
-  return scanForState(kind, { state, wanted, q, skip, take });
+  return scanForState(kind, { state, wanted, q, country, skip, take });
 }
 
 /**
@@ -1770,11 +1900,12 @@ async function scanForState<K extends ConstantKind>(
     state: ListStateFilter;
     wanted: readonly LedgerState[];
     q: string | undefined;
+    country: string | undefined;
     skip: number;
     take: number;
   },
 ): Promise<ConstantPage<K>> {
-  const { state, wanted, q, skip, take } = options;
+  const { state, wanted, q, country, skip, take } = options;
   const keep = new Set<string>(wanted);
   const matches = (rowState: PushState): boolean =>
     state === "unknown" ? rowState === "unknown" : keep.has(rowState);
@@ -1786,7 +1917,7 @@ async function scanForState<K extends ConstantKind>(
     let total = 0;
     let after: string | null = null;
     for (;;) {
-      const batch = await queryIds(kind, { scope: "all", after }, ID_SCAN_CHUNK);
+      const batch = await queryIds(kind, { scope: "all", country, after }, ID_SCAN_CHUNK);
       if (batch.length === 0) break;
       const states = await stateOfRows(kind, batch);
       for (const id of batch) {
@@ -1809,6 +1940,7 @@ async function scanForState<K extends ConstantKind>(
   for (;;) {
     const batch = await queryRows(kind, {
       q,
+      country,
       scope: "all",
       after,
       order: "id",

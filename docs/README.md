@@ -11,6 +11,7 @@ the architecture, then the topic you need.
 | [api.md](./api.md) | the API contract: envelope, error codes, rate limits, every endpoint. |
 | [database.md](./database.md) | the two databases, the Prisma clients, and the workflow for changing the admin schema (SQL in pgAdmin, then `db pull`). |
 | [constants.md](./constants.md) | the four shared reference catalogs, and what "push to the main database" does and does not do. |
+| [integrations.md](./integrations.md) | the external providers (TwelveData catalogs and quotes, Bank of Canada rates), the two watch lists, the scheduler, and how the consumer app asks for a quote or a rate. |
 | [sql/README.md](./sql/README.md) | the SQL scripts to run and in what order. |
 | [admin-access/README.md](./admin-access/README.md) | the original design note for the RBAC tables (allowlist, roles, actions, audit). |
 

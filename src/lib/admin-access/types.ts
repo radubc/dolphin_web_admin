@@ -39,6 +39,8 @@ export const ACTION_KEYS = [
   "can_write_catalogs",
   "can_manage_access_map",
   "can_read_services",
+  "can_read_integrations",
+  "can_write_integrations",
 ] as const;
 
 export type ActionKey = (typeof ACTION_KEYS)[number];
@@ -278,7 +280,16 @@ export interface UpsertPageRuleInput {
   description?: string | null;
 }
 
-export type EndpointAuthKind = "public" | "session" | "admin";
+/**
+ * Who may call an endpoint before any rule is consulted. Mirrors
+ * `EndpointAuthKind` in `./endpoint-registry.ts` and the `auth_kind` column of
+ * `admin_endpoints`:
+ * - `public`: no credential;
+ * - `session`: any signed-in user of the admin Cognito pool;
+ * - `admin`: the allowlist plus the endpoint's rule;
+ * - `service`: an `API_KEYS` machine client; the rule is not applied.
+ */
+export type EndpointAuthKind = "public" | "session" | "admin" | "service";
 
 /** One endpoint as the Access Map and the Services page show it. */
 export interface EndpointRule extends AccessRule {

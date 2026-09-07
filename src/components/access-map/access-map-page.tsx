@@ -25,7 +25,7 @@ import type { AdminCapabilities, EndpointRule, PageRule } from "@/lib/admin-acce
 import { formatRelativeTime, pluralise } from "@/lib/format";
 import { featureColors, surfaceColors } from "@/lib/theme/colors";
 import RuleDrawer from "./rule-drawer";
-import { ACCESS_MAP_COLOR, AUTH_KIND_LABELS, MethodTag, RuleSummary } from "./rule-meta";
+import { ACCESS_MAP_COLOR, AUTH_KIND_LABELS, authKindNotGatedHelp, MethodTag, RuleSummary } from "./rule-meta";
 import { useState } from "react";
 
 type View = "pages" | "endpoints";
@@ -138,7 +138,7 @@ export default function AccessMapPage({ capabilities }: { capabilities: AdminCap
         rule.authKind === "admin" ? (
           <RuleSummary rule={rule} registered={rule.registered} actions={store.actions} />
         ) : (
-          <Tooltip title={rule.authKind === "public" ? "No credential; the rule is not applied." : "Any signed-in Cognito user; the rule is not applied."}>
+          <Tooltip title={authKindNotGatedHelp(rule.authKind)}>
             <span style={{ color: surfaceColors.textTertiary }}>Not gated by the map</span>
           </Tooltip>
         ),

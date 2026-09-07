@@ -16,8 +16,8 @@ push jobs below exists because of that size.
 | `account_base_types` | `account_base_types` | `account_base_types` | UUID | name |
 | `account_types` | `account_types` | `account_types` | UUID | display name |
 | `cryptocurrencies` | `cryptocurrencies` | `preload_cryptocurrencies` | integer | symbol, base, quote |
-| `etfs` | `etfs` | `preload_etfs` | integer | symbol, exchange |
-| `stocks` | `stocks` | `preload_stocks` | integer | symbol, exchange |
+| `etfs` | `etfs` | `preload_etfs` | integer | Canada, then United States, then every other market; symbol, exchange inside each |
+| `stocks` | `stocks` | `preload_stocks` | integer | Canada, then United States, then every other market; symbol, exchange inside each |
 | `markets` | `markets` | `markets` | UUID | MIC code |
 
 The four market-data catalogs do **not** share their name across the two
@@ -150,9 +150,10 @@ Every compare and every push is a row in `admin_constant_jobs`: what was asked
 ## Listing, paging and search
 
 `GET /api/v1/admin/constants/[kind]` returns **one page**:
-`?page` (1-based), `?pageSize` (default 50, clamped to 200), `?q`, `?state`.
-The response carries the rows, `total` (rows matching the query),
-whole-catalog `counts`, `lastComparedAt` and `latestJob`.
+`?page` (1-based), `?pageSize` (default 50, clamped to 200), `?q`, `?state`,
+and `?country` for ETFs and stocks. The response carries the rows, `total`
+(rows matching the query), whole-catalog `counts`, `lastComparedAt` and
+`latestJob`.
 
 `?q` is a case-insensitive substring match across the kind's searchable
 columns:
@@ -184,17 +185,18 @@ what lets one ledger serve ten kinds, so the endpoint takes one of three
 routes:
 
 1. **no state filter** — a plain indexed page over the catalog with an exact
-   count;
-2. **a state, no search** — the *ledger* is paged (`skip`/`take` on
+   count (for ETFs and stocks that page is the raw preferred-markets-first
+   query below; the count is the same);
+2. **a state, no search and no market filter** — the *ledger* is paged (`skip`/`take` on
    `(kind, state)`) and the page's ids are read back as rows. Bounded and fast
    at any catalog size. Its `total` is the ledger's count, which can be a
    little high if the ledger still holds an id whose row was deleted straight
    in the database. A compare does **not** clear those: it re-labels the ids
    one of the two databases still has, and an entry for a row neither has is
    left alone — only a delete through the console removes it;
-3. **`unknown`, or a state together with a search** — neither table can answer
-   alone, so the catalog is scanned. **Without a search** the scan walks *ids
-   only*, in batches of 5000, with one ledger lookup per batch, and reads full
+3. **`unknown`, or a state together with a search or a market filter** —
+   neither table can answer alone, so the catalog is scanned. **Without a
+   search** the scan walks *ids only*, in batches of 5000, with one ledger lookup per batch, and reads full
    rows for the page's ids at the end. **With a search** it walks whole rows in
    batches of 1000. Memory is one batch plus the page and the count is exact
    either way, but the cost is a **full pass over the catalog per page** —
@@ -219,6 +221,37 @@ obvious next step if searching 300 000 stocks gets slow.
 `unknown` — the rows the ledger says nothing about, computed as
 total − (new + changed + synced) and never negative. It is measured against
 `total` rather than the live rows because a compare labels retired rows too.
+
+## Preferred markets and the market filter
+
+The console is mostly about **Canadian and US** markets, but the feed lists the
+same ticker on dozens of world exchanges — `SHOP` is a row on the TSX, on NEO,
+on NASDAQ and on a long tail of others. Ordering ETFs and stocks by symbol
+alone buried the listing an operator was looking for pages down, so those two
+kinds are listed **preferred markets first**: every row whose `country` is
+Canada, then every row whose `country` is United States, then the rest, and
+inside each tier the old order (symbol, exchange, id). The two names are
+`PREFERRED_COUNTRIES` in `src/lib/constants/types.ts`, spelled the way the
+market-data feed writes them.
+
+Prisma's `orderBy` cannot express that, so the page — and only the page, for
+`etfs` and `stocks`, and only on the default `all` filter — is read with a
+parameterised `$queryRaw` whose `where` is the same search and market filter
+the typed path builds (`queryMarketPage` in `src/lib/constants/repository.ts`).
+The count stays a plain Prisma `count`. A page under a state filter is sorted
+in memory after the scan, and that sort applies the same tiers, so the order an
+operator sees does not change when the filter does. The primary-key scans a
+compare and a push walk are untouched.
+
+`?country` narrows those same two kinds to one market, matched **exactly**
+against the stored spelling. The toolbar offers "All markets" (the default),
+Canada, United States and the dozen countries with the most listings; a market
+that is not in the list is still reachable by searching for its name, which is
+one of the searchable columns. The choice lives in the page's store beside `?q`
+and `?state`: changing it returns to page 1 and clears the selection, and it is
+dropped when the catalog is switched. Because the sync ledger holds no
+countries, a state filter combined with a market filter takes the scanning
+route (3) rather than the ledger page (2).
 
 ## Push
 

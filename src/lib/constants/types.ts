@@ -79,6 +79,62 @@ export function hasIntegerId(kind: ConstantKind): boolean {
 }
 
 /* -------------------------------------------------------------------------- */
+/*                             Listed instruments                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The two catalogs that carry a listing `country`: they are the only ones the
+ * market filter and the preferred-market ordering apply to.
+ */
+export const MARKET_KINDS = ["etfs", "stocks"] as const satisfies readonly ConstantKind[];
+
+export type MarketKind = (typeof MARKET_KINDS)[number];
+
+export function isMarketKind(kind: ConstantKind): kind is MarketKind {
+  return (MARKET_KINDS as readonly string[]).includes(kind);
+}
+
+/**
+ * The markets this console is mostly used for, most wanted first. ETFs and
+ * stocks are listed with these countries' rows ahead of every other country's,
+ * because the same ticker is listed on dozens of world exchanges and the
+ * Canadian or US listing is the one an operator is looking for. Inside each
+ * tier the order is the kind's usual one (symbol, exchange, id).
+ *
+ * The spellings are the market-data feed's own, as stored in the admin
+ * `stocks` / `etfs` tables ("Canada", "United States"), so an exact `=` in
+ * SQL matches. Changing one of these strings changes nothing but the order.
+ */
+export const PREFERRED_COUNTRIES = ["Canada", "United States"] as const;
+
+/**
+ * The markets the toolbar's Market filter offers, in the order it shows them:
+ * the two preferred ones first, then the countries with the most listings in
+ * the two catalogs. Free text is not offered — the filter is an exact match on
+ * the feed's spelling, and a typed country would silently return nothing.
+ */
+export const MARKET_FILTER_COUNTRIES = [
+  ...PREFERRED_COUNTRIES,
+  "Germany",
+  "United Kingdom",
+  "Italy",
+  "Switzerland",
+  "France",
+  "Netherlands",
+  "Japan",
+  "Australia",
+  "Hong Kong",
+  "Taiwan",
+  "India",
+  "China",
+  "South Korea",
+  "Brazil",
+] as const;
+
+/** The longest market name the list endpoint accepts, and what the column holds. */
+export const COUNTRY_FILTER_MAX = 64;
+
+/* -------------------------------------------------------------------------- */
 /*                                    Rows                                    */
 /* -------------------------------------------------------------------------- */
 
@@ -361,6 +417,13 @@ export interface ListQuery {
    * new + changed; `retired` for the retirable kinds' soft-deleted rows.
    */
   state?: PushState | "all" | "pending" | "retired";
+  /**
+   * Exact match on the listing country, for `etfs` and `stocks` only (see
+   * `MARKET_KINDS`); the other kinds ignore it. Undefined or empty means every
+   * market, which is the default — the preferred-market ordering already puts
+   * the Canadian and US listings first.
+   */
+  country?: string;
 }
 
 export const LIST_PAGE_SIZE_DEFAULT = 50;

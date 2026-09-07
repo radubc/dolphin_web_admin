@@ -13,9 +13,13 @@ interface AuthShellProps {
 }
 
 /**
- * Split-screen frame shared by every unauthenticated page: brand panel on one
- * side, a single card on the other. Kept in one place so /login and
- * /forgot-password cannot drift apart.
+ * Frame shared by every unauthenticated page: the brand mark above a single
+ * card, on the plain page background. Kept in one place so /login,
+ * /forgot-password, /setup and /no-access cannot drift apart.
+ *
+ * Only the symbol is shown, the same mark the nav bar uses: the full wordmark
+ * on disk is white and needs a coloured panel behind it, and the owner asked
+ * for exactly that panel to go.
  *
  * Server Component: antd's `Card` is safe to render from the server, but
  * `Typography.*` is not reachable through the client reference, hence the
@@ -27,24 +31,17 @@ export default function AuthShell({
   children,
 }: AuthShellProps) {
   return (
-    <div className="flex min-h-dvh flex-1 flex-col min-[900px]:flex-row">
-      {/* Brand panel: full height on wide screens, a compact band below 900px. */}
-      <aside className="relative flex items-center justify-center overflow-hidden bg-[#ff0000] px-6 py-10 min-[900px]:w-[45%] min-[900px]:py-16">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_40%,rgba(255,255,255,0.22),rgba(255,255,255,0)_62%)]"
-        />
-        <Image
-          src="/brand/logo-white.png"
-          alt="Penny Squeeze Admin"
-          width={2229}
-          height={1050}
-          priority
-          className="relative h-auto w-[220px] min-[900px]:w-[min(78%,420px)]"
-        />
-      </aside>
-
+    <div className="flex min-h-dvh flex-1 flex-col">
       <main className="flex flex-1 flex-col items-center justify-center bg-[#f6f6f7] px-6 py-12 text-[#141414]">
+        <Image
+          src="/brand/symbol.png"
+          alt="Penny Squeeze Admin"
+          width={1092}
+          height={1050}
+          sizes="72px"
+          priority
+          className="mb-6 h-[72px] w-auto rounded-2xl"
+        />
         <Card className="w-full max-w-[420px]">
           <Title level={2} style={{ fontSize: 24, marginBottom: 4 }}>
             {heading}

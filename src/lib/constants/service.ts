@@ -93,7 +93,7 @@ export async function listConstants<K extends ConstantKind>(
   );
 
   const [{ rows, total }, counts, comparedAt, job] = await Promise.all([
-    findPage(kind, { page, pageSize, q: query.q, state: query.state }),
+    findPage(kind, { page, pageSize, q: query.q, state: query.state, country: query.country }),
     stateCounts(kind),
     lastComparedAt(kind),
     latestJob(kind),

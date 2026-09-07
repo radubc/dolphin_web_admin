@@ -9,4 +9,5 @@ export const TAB_ROUTES = {
   support: "/support",
   accessMap: "/access-map",
   services: "/services",
+  integrations: "/integrations",
 } as const;

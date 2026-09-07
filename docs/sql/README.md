@@ -17,17 +17,24 @@ result afterwards.
 | 5 | [`005_constants_unique_indexes.sql`](./005_constants_unique_indexes.sql) | Case-insensitive unique indexes on currency codes, country codes, institution names and live category names per parent, so a duplicate is refused by the database and not only by the app. | Once, after step 4. Re-running is safe; fails (and applies nothing) if duplicates exist. |
 | 6 | [`006_account_types_unique_index.sql`](./006_account_types_unique_index.sql) | Case-insensitive unique index on live account type names per base type, for the two catalogs added to Constants (`account_base_types`, `account_types`). Creates no tables; base type names are already unique. | Once, after step 5. Re-running is safe; fails (and applies nothing) if duplicates exist. |
 | 7 | [`007_constants_sync_and_jobs.sql`](./007_constants_sync_and_jobs.sql) | The Constants sync ledger (`admin_constant_sync`) and job records (`admin_constant_jobs`), plus the three new endpoints (compare, jobs list, jobs get) and their action links. This is what lets a 300 000-row catalog be listed, compared and pushed. | Once, after step 6. Re-running is safe. |
+| 8 | [`008_integrations.sql`](./008_integrations.sql) | The Integrations feature: `admin_integrations` (three seeded providers), `admin_integration_runs`, the quote watch list and cache (`admin_quote_symbols`, `admin_quotes`) and the currency pair watch list and cache (`admin_currency_pairs`, `admin_exchange_rates`), plus two actions, the `integrations` page and the fifteen new endpoints. Also widens `admin_endpoints.auth_kind` to allow `'service'` (API-key machine clients). | Once, after step 7. Re-running is safe. |
+| 9 | [`009_markets_and_alpha_vantage.sql`](./009_markets_and_alpha_vantage.sql) | Two more integrations: `iso_mic_markets` (the ISO 10383 MIC register, which fills the empty `markets` catalog) and `alpha_vantage_quotes` (the quote fallback for TSX and other listings TwelveData's free plan refuses). Widens `admin_integrations.provider` to allow `'iso20022'` and `'alpha_vantage'`, and adds the nullable `admin_quote_symbols.provider` that routes each symbol to the provider which last served it. Creates no tables and registers no new endpoints — the integration routes are keyed by `[key]`. | Once, after step 8. Re-running is safe. |
 
 Until step 7 has run, the Constants list, compare, push and job endpoints
 answer 503 `admin_schema_missing`: the app does not fake a ledger it does not
-have.
+have. The same applies to step 8 and the Integrations endpoints, with two
+exceptions: the two service (API-key) lookups answer 200 with every item
+`unavailable`, and the scheduler logs one warning and then stays idle — a
+machine client and a background timer must not be handed a 503 they cannot
+act on.
 
 The four market-data catalogs (`cryptocurrencies`, `etfs`, `stocks`,
 `markets`) needed **no file of their own**: their tables already exist in the
 admin database and were created with the unique constraints the app relies on
 (`cryptocurrencies` on symbol + base + quote, `etfs` and `stocks` on
 symbol + exchange, `markets` on `mic_code`), and they are served by the same
-`[kind]` endpoints steps 4 and 7 registered.
+`[kind]` endpoints steps 4 and 7 registered. Step 9 fills the last of them:
+`markets` is empty until the `iso_mic_markets` integration has run once.
 
 Each file is one transaction: if a statement fails, nothing from that file is
 applied. Fix the cause and run the file again.
@@ -65,7 +72,7 @@ before the SQL has run).
 
 ## Adding a table or column later
 
-1. Write the change as a new numbered file here (`008_….sql`), transactional,
+1. Write the change as a new numbered file here (`010_….sql`), transactional,
    with comments saying what and why.
 2. Run it in pgAdmin.
 3. `npx prisma db pull --config prisma-admin.config.ts`, then

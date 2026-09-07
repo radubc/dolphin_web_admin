@@ -35,13 +35,32 @@ export const AUTH_KIND_LABELS: Readonly<Record<EndpointAuthKind, string>> = {
   public: "Public",
   session: "Signed in",
   admin: "Operator",
+  service: "API key",
 };
 
 export const AUTH_KIND_HELP: Readonly<Record<EndpointAuthKind, string>> = {
   public: "No credential needed. The rule below is informational; nothing gates a public endpoint.",
   session: "Any signed-in user of the admin Cognito pool, allowlisted or not. The rule below is not applied.",
   admin: "Requires an enabled admin user, then the rule below.",
+  service: "Machine client with an API key (API_KEYS); the access-map rule is not applied.",
 };
+
+/**
+ * The one-line explanation for an endpoint the access map does not gate. Only
+ * `admin` endpoints are evaluated against a rule; the other three credentials
+ * each have their own reason, and saying "any signed-in Cognito user" about a
+ * machine client would be plainly wrong.
+ */
+export function authKindNotGatedHelp(kind: EndpointAuthKind): string {
+  switch (kind) {
+    case "public":
+      return "No credential; the rule is not applied.";
+    case "service":
+      return "API-key machine client; the rule is not applied.";
+    default:
+      return "Any signed-in Cognito user; the rule is not applied.";
+  }
+}
 
 /**
  * The rule in words: "Super-admin only", "Any operator", or the list of actions

@@ -43,6 +43,8 @@ export const featureColors = {
   accessMap: "#5856D6",
   /** Teal — the service registry. */
   services: "#30B0C7",
+  /** Amber — external providers and scheduled runs. */
+  integrations: "#FF9F0A",
 } as const;
 
 export type FeatureColor = keyof typeof featureColors;

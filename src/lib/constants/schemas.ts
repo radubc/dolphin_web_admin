@@ -15,6 +15,7 @@
 import { z } from "zod";
 import {
   CATEGORY_TYPES,
+  COUNTRY_FILTER_MAX,
   LIST_PAGE_SIZE_DEFAULT,
   LIST_PAGE_SIZE_MAX,
   PUSH_IDS_MAX,
@@ -328,6 +329,16 @@ export const listQuerySchema = z.object({
     .optional()
     .transform((value) => (value === undefined || value === "" ? undefined : value)),
   state: z.enum([...PUSH_STATES, "all", "pending", "retired"]).default("all"),
+  // The market filter. Free text rather than an enum: the countries come from
+  // the market-data feed and the toolbar only offers the common ones, so a
+  // spelling the list does not carry must still be answerable. It is matched
+  // exactly against the `country` column, and only for `etfs` and `stocks`.
+  country: z
+    .string()
+    .trim()
+    .max(COUNTRY_FILTER_MAX)
+    .optional()
+    .transform((value) => (value === undefined || value === "" ? undefined : value)),
 }) satisfies z.ZodType<ListQuery, unknown>;
 
 /** `GET .../[kind]/jobs?limit=` — how many recent jobs to return. */

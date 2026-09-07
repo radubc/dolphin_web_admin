@@ -2,7 +2,7 @@
 
 # Penny Squeeze — admin app (dolphin_web_admin)
 
-Internal admin console for the Penny Squeeze personal-finance product: operator sign-in through an admin-only Cognito pool, default-deny role-based access, and read/write tooling over the consumer app's data. Next.js 16 (App Router) + React 19 + TypeScript on Node 24, Tailwind v4 + Ant Design 6 for UI, Prisma 7 (pg adapter) against two PostgreSQL databases, AWS Cognito for auth. Early stage: sign-in, session refresh and the authenticated shell (nav bar, side rail, quick actions) are ported from the consumer app; User Management, Access Map and Services run on the admin database through Prisma (`ADMIN_ACCESS_STORE=mock` selects the in-memory mock); Overview, Constants and Support are still blank. Human-readable guides live in `docs/*.md`. The consumer web app lives beside this repo at `../penny-squeeze-web` and is the reference implementation for the API toolkit, auth, and session code.
+Internal admin console for the Penny Squeeze personal-finance product: operator sign-in through an admin-only Cognito pool, default-deny role-based access, and read/write tooling over the consumer app's data. Next.js 16 (App Router) + React 19 + TypeScript on Node 24, Tailwind v4 + Ant Design 6 for UI, Prisma 7 (pg adapter) against two PostgreSQL databases, AWS Cognito for auth. Early stage: sign-in, session refresh and the authenticated shell (nav bar, side rail, quick actions) are ported from the consumer app; User Management, Access Map, Services, Constants and Integrations run on the admin database through Prisma (`ADMIN_ACCESS_STORE=mock` selects the in-memory mock); Overview and Support are still blank. Human-readable guides live in `docs/*.md`. The consumer web app lives beside this repo at `../penny-squeeze-web` and is the reference implementation for the API toolkit, auth, and session code.
 
 ## Commands
 - `npm run dev` — dev server (Turbopack) on http://localhost:3001 (3000 belongs to the consumer app)
@@ -15,15 +15,17 @@ Internal admin console for the Penny Squeeze personal-finance product: operator 
 
 ## Layout
 - `src/app/` — routes, root layout, global CSS
-- `src/app/(app)/` — the authenticated pages (`/` Overview, `/constants`, `/user-management`, `/support`)
+- `src/app/(app)/` — the authenticated pages (`/` Overview, `/constants`, `/integrations`, `/user-management`, `/support`, `/access-map`, `/services`)
 - `src/app/login/`, `src/app/forgot-password/` — the auth pages; `src/app/api/auth/` — refresh and logout routes
 - `src/app/api/` — Route Handlers; business endpoints under `/api/v1/`
 - `src/lib/api/` — API toolkit: handler wrapper, auth, validation, response/error helpers
 - `src/lib/security/` — rate limiting and client IP resolution
 - `src/lib/auth/` — Cognito sign-in, cookie session (`psa_` prefix), refresh
 - `src/lib/admin-access/` — access control: `types.ts` (model + `evaluateRule`), `repository.ts` (storage seam: `prisma-repository.ts` by default, `mock.ts` with `ADMIN_ACCESS_STORE=mock`), `authorize.ts` (`requireAdminSession`, `requirePageAccess`, `adminHandler`), `page-registry.ts` + `endpoint-registry.ts` (what the build ships; rules live in the DB), `client.ts` + stores (browser side)
-- `src/app/api/v1/admin/` — users, roles, actions, audit, pages, endpoints, usage, me; every handler goes through `adminHandler(fn, { endpoint })`
-- `src/components/user-management/`, `access-map/`, `services/` — the three built pages
+- `src/app/api/v1/admin/` — users, roles, actions, audit, pages, endpoints, usage, me, constants, integrations; every handler goes through `adminHandler(fn, { endpoint })`
+- `src/app/api/v1/service/` — machine endpoints for the consumer app (`quotes`, `exchange-rates`), exported through `serviceHandler` and authenticated with `API_KEYS`; each must be listed in `PUBLIC_API_PATHS` in `src/proxy.ts`
+- `src/lib/integrations/` — external providers: `types.ts` (wire model), `providers/` (TwelveData and Bank of Canada fetch + parse, no Prisma), `jobs/` (what each run does: catalogs, quotes, rates), `runs.ts` (in-process run records, mirrors `constants/jobs.ts`), `lookup.ts` (the on-demand paths behind the service endpoints), `schedule.ts` (next-run math) + `scheduler.ts` (the per-minute ticker started from `src/instrumentation.ts`), `service.ts` / `repository.ts` / `schemas.ts`, `client.ts` (browser side)
+- `src/components/user-management/`, `access-map/`, `services/`, `constants/`, `integrations/` — the built pages
 - `docs/sql/` — numbered SQL the owner runs in pgAdmin against the admin DB; `docs/*.md` — guides for people
 - `src/components/shell/` — nav bar, side rail, quick actions; tabs and actions are listed in `definitions.ts`, routes in `routes.ts`
 - `public/brand/` — logo assets copied from the consumer app
@@ -43,6 +45,9 @@ Names only; values live in `.env`, which is never read or quoted by an agent.
 - `ADMIN_COGNITO_CLIENT_SECRET` (fallback `COGNITO_CLIENT_SECRET`) — optional, only when the app client has a secret. Server-only, no public fallback
 - `ADMIN_SUB` — Cognito `sub` of the owner. The mock repository seeds its super-admin row with it; the Prisma version will use it only for the bootstrap insert, never for a runtime decision
 - `API_KEYS` — optional, comma-separated keys (min 32 chars each) for machine clients; two entries allow a rotation
+- `TWELVEDATA_API_KEY` — TwelveData key for the quote integration and the on-demand quote endpoint. Server-only; the Integrations page shows only whether it is set. The catalog download and the Bank of Canada rates need no key
+- `ALPHA_VANTAGE_API_KEY` — Alpha Vantage key for the `alpha_vantage_quotes` fallback (quotes for TSX and other listings TwelveData's free plan refuses). Server-only; Alpha Vantage accepts it only as a query parameter, so those URLs are redacted before any log or error. Without it the fallback is skipped
+- `INTEGRATIONS_SCHEDULER` — optional; `off` stops this process from running scheduled integrations (a second local dev server, a script). The Integrations page shows a banner when it is off
 - `TRUST_PROXY_HEADERS` — set to `true` only when a single trusted load balancer sits in front of the app. **Production must set it:** while it is unset the client IP is unknown and every per-IP rate limit is switched off
 
 ## Branches

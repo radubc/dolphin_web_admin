@@ -12,6 +12,7 @@
  */
 import {
   ApartmentOutlined,
+  ApiOutlined,
   BarChartOutlined,
   CloudServerOutlined,
   CustomerServiceOutlined,
@@ -42,6 +43,7 @@ export const PAGE_PRESENTATION: Readonly<Record<string, PagePresentation>> = {
   support: { color: "support", icon: CustomerServiceOutlined },
   access_map: { color: "accessMap", icon: ApartmentOutlined },
   services: { color: "services", icon: CloudServerOutlined },
+  integrations: { color: "integrations", icon: ApiOutlined },
   invite_user: { color: "users", icon: UserAddOutlined, subtitle: "Send an invitation to a new operator" },
 };
 

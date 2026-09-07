@@ -343,8 +343,11 @@ function instrumentColumns<T extends EtfRow>(): ColumnsType<T> {
       title: "Symbol",
       dataIndex: "symbol",
       width: 130,
+      // No default order: the server lists these two kinds preferred markets
+      // first (Canada, then United States, then the rest), and a default
+      // client sort by symbol would undo that on every page. The sorter is
+      // still there for an operator who wants the page by symbol.
       sorter: (a, b) => byText(a.symbol, b.symbol),
-      defaultSortOrder: "ascend",
       render: (value: string) => <code style={{ fontWeight: 600 }}>{value}</code>,
     },
     {

@@ -6,7 +6,8 @@
  * else is a 404.
  *
  * GET returns **one page** of the catalog (`?page`, `?pageSize`, `?q`,
- * `?state`), each row carrying the push state the sync ledger holds for it,
+ * `?state`, and `?country` for `etfs` and `stocks`), each row carrying the
+ * push state the sync ledger holds for it,
  * plus the whole-catalog counts, when the last compare finished and the most
  * recent job. It never compares the two databases: that is what
  * `POST …/compare` is for.

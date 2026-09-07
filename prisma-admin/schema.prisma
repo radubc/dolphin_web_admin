@@ -243,9 +243,13 @@ model admin_users {
   created_by                                                String?                         @db.Uuid
   updated_by                                                String?                         @db.Uuid
   admin_constant_jobs                                       admin_constant_jobs[]
+  admin_currency_pairs                                      admin_currency_pairs[]
   admin_endpoints                                           admin_endpoints[]
+  admin_integration_runs                                    admin_integration_runs[]
+  admin_integrations                                        admin_integrations[]
   admin_pages                                               admin_pages[]
   admin_permission_audit_events                             admin_permission_audit_events[]
+  admin_quote_symbols                                       admin_quote_symbols[]
   admin_role_actions                                        admin_role_actions[]
   admin_roles_admin_roles_created_byToadmin_users           admin_roles[]                   @relation("admin_roles_created_byToadmin_users")
   admin_roles_admin_roles_updated_byToadmin_users           admin_roles[]                   @relation("admin_roles_updated_byToadmin_users")
@@ -458,4 +462,165 @@ model admin_constant_jobs {
 
   @@index([kind, created_at(sort: Desc)], map: "idx_admin_constant_jobs_kind_created_at")
   @@index([status], map: "idx_admin_constant_jobs_status")
+}
+
+/// One outbound provider call the admin app makes on a schedule, or on demand
+/// when the consumer app asks for something the cache does not have. Three
+/// rows exist and the UI never creates a fourth. `api_key_env` is the *name*
+/// of an environment variable; the key itself is never stored here.
+/// Hand-written to match docs/sql/008_integrations.sql; `prisma db pull`
+/// should reproduce it.
+model admin_integrations {
+  key                    String                   @id
+  name                   String
+  description            String                   @default("")
+  /// twelvedata | bank_of_canada
+  provider               String
+  base_url               String
+  requires_api_key       Boolean                  @default(false)
+  api_key_env            String?
+  is_enabled             Boolean                  @default(true)
+  /// daily | weekly | monthly | off
+  schedule_frequency     String                   @default("daily")
+  schedule_hour          Int                      @default(1) @db.SmallInt
+  schedule_minute        Int                      @default(0) @db.SmallInt
+  /// 0 = Sunday. Only read for schedule_frequency = weekly.
+  schedule_weekday       Int                      @default(1) @db.SmallInt
+  /// 1..28, so every month has the day. Only read for monthly.
+  schedule_day_of_month  Int                      @default(1) @db.SmallInt
+  schedule_timezone      String                   @default("America/Toronto")
+  /// Provider knobs: catalogs, batchSize, creditsPerMinute.
+  settings               Json                     @default("{}")
+  last_run_at            DateTime?                @db.Timestamptz(6)
+  last_success_at        DateTime?                @db.Timestamptz(6)
+  next_run_at            DateTime?                @db.Timestamptz(6)
+  created_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_by             String?                  @db.Uuid
+  admin_users            admin_users?             @relation(fields: [updated_by], references: [id], onUpdate: NoAction)
+  admin_integration_runs admin_integration_runs[]
+
+  @@index([next_run_at], map: "idx_admin_integrations_next_run_at")
+}
+
+/// Every execution of an integration: trigger, progress, counters, outcome.
+/// `interrupted` is derived on read from a stale heartbeat_at, exactly as
+/// admin_constant_jobs does it. Mirrors docs/sql/008_integrations.sql.
+model admin_integration_runs {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  integration_key    String
+  /// scheduled | manual | on_demand
+  trigger            String
+  /// queued | running | succeeded | failed
+  status             String             @default("queued")
+  total              Int?
+  processed          Int                @default(0)
+  created            Int                @default(0)
+  updated            Int                @default(0)
+  unchanged          Int                @default(0)
+  failed             Int                @default(0)
+  error              String?
+  /// The request as received (forced, symbols asked for), for the record.
+  request            Json               @default("{}")
+  requested_by       String?            @db.Uuid
+  created_at         DateTime           @default(now()) @db.Timestamptz(6)
+  started_at         DateTime?          @db.Timestamptz(6)
+  finished_at        DateTime?          @db.Timestamptz(6)
+  heartbeat_at       DateTime?          @db.Timestamptz(6)
+  admin_integrations admin_integrations @relation(fields: [integration_key], references: [key], onUpdate: NoAction)
+  admin_users        admin_users?       @relation(fields: [requested_by], references: [id], onUpdate: NoAction)
+
+  @@index([integration_key, created_at(sort: Desc)], map: "idx_admin_integration_runs_key_created_at")
+  @@index([status], map: "idx_admin_integration_runs_status")
+}
+
+/// The quote watch list: symbols the TwelveData quote integration keeps
+/// current. `canonical` is what is sent to the provider and what the consumer
+/// app asks for. Mirrors docs/sql/008_integrations.sql.
+model admin_quote_symbols {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// stock | etf | crypto
+  kind           String
+  symbol         String
+  exchange       String?
+  canonical      String       @unique(map: "admin_quote_symbols_canonical_key")
+  name           String?
+  currency       String?
+  /// manual | request
+  source         String       @default("manual")
+  /// twelvedata | alpha_vantage | bank_of_canada | iso20022 — which provider
+  /// last served this symbol, so a run asks the one that works and neither
+  /// pays to be refused again. NULL until the first quote is saved.
+  provider       String?
+  is_active      Boolean      @default(true)
+  last_quoted_at DateTime?    @db.Timestamptz(6)
+  last_error     String?
+  created_at     DateTime     @default(now()) @db.Timestamptz(6)
+  created_by     String?      @db.Uuid
+  admin_users    admin_users? @relation(fields: [created_by], references: [id], onUpdate: NoAction)
+
+  @@index([is_active], map: "idx_admin_quote_symbols_is_active")
+  @@index([kind], map: "idx_admin_quote_symbols_kind")
+}
+
+/// Cached end-of-day quotes, one row per canonical symbol and trading day.
+/// Wider precision than the main app database on purpose: crypto prices do
+/// not fit NUMERIC(11,4). Mirrors docs/sql/008_integrations.sql.
+model admin_quotes {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  symbol         String
+  quote_date     DateTime @db.Date
+  close          Decimal  @db.Decimal(20, 8)
+  open           Decimal? @db.Decimal(20, 8)
+  high           Decimal? @db.Decimal(20, 8)
+  low            Decimal? @db.Decimal(20, 8)
+  currency       String   @default("")
+  change         Decimal? @db.Decimal(20, 8)
+  /// A fraction (0.0064 = 0.64 %), not the provider's percent units.
+  percent_change Decimal? @db.Decimal(12, 8)
+  provider       String   @default("twelvedata")
+  fetched_at     DateTime @default(now()) @db.Timestamptz(6)
+  created_at     DateTime @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([symbol, quote_date], map: "admin_quotes_symbol_date_key")
+  @@index([symbol, quote_date(sort: Desc)], map: "idx_admin_quotes_symbol_quote_date")
+}
+
+/// The currency pair watch list for the Bank of Canada integration.
+/// Mirrors docs/sql/008_integrations.sql.
+model admin_currency_pairs {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  from_currency String
+  to_currency   String
+  /// manual | request
+  source        String       @default("manual")
+  is_active     Boolean      @default(true)
+  last_rated_at DateTime?    @db.Timestamptz(6)
+  last_error    String?
+  created_at    DateTime     @default(now()) @db.Timestamptz(6)
+  created_by    String?      @db.Uuid
+  admin_users   admin_users? @relation(fields: [created_by], references: [id], onUpdate: NoAction)
+
+  @@unique([from_currency, to_currency], map: "admin_currency_pairs_from_to_key")
+  @@index([is_active], map: "idx_admin_currency_pairs_is_active")
+}
+
+/// Cached daily exchange rates, one row per pair and observation day. Wider
+/// precision than the main app database on purpose: NUMERIC(10,10) there
+/// cannot hold a rate of 1 or more. Mirrors docs/sql/008_integrations.sql.
+model admin_exchange_rates {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  from_currency String
+  to_currency   String
+  date          DateTime @db.Date
+  rate          Decimal  @db.Decimal(20, 10)
+  /// boc | derived
+  source        String   @default("boc")
+  fetched_at    DateTime @default(now()) @db.Timestamptz(6)
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([from_currency, to_currency, date], map: "admin_exchange_rates_from_to_date_key")
+  @@index([from_currency, to_currency, date(sort: Desc)], map: "idx_admin_exchange_rates_pair_date")
 }

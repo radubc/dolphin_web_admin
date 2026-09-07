@@ -55,6 +55,19 @@ export const PAGE_REGISTRY: readonly PageRegistryEntry[] = [
     },
   },
   {
+    key: "integrations",
+    kind: "page",
+    path: "/integrations",
+    name: "Integrations",
+    description:
+      "External providers: catalog downloads, quotes and exchange rates, and when they run.",
+    defaults: {
+      navOrder: 25,
+      requireSuperAdmin: false,
+      actionKeys: ["can_read_integrations", "can_write_integrations"],
+    },
+  },
+  {
     key: "user_management",
     kind: "page",
     path: "/user-management",

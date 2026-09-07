@@ -6,11 +6,11 @@
  *
  * The catalogs run to hundreds of thousands of rows (stocks, ETFs, crypto
  * pairs), so nothing here loads a whole one. The store holds a `ListQuery` —
- * page, page size, search text and the push-state filter — and the server
- * answers with that page plus whole-catalog figures (`counts`), the last
- * compare time and the most recent job. Search is debounced by 300 ms and any
- * change to the query drops back to page 1, so a filtered result never opens on
- * a page that no longer exists.
+ * page, page size, search text, the push-state filter and — for ETFs and
+ * stocks — the market filter — and the server answers with that page plus
+ * whole-catalog figures (`counts`), the last compare time and the most recent
+ * job. Search is debounced by 300 ms and any change to the query drops back to
+ * page 1, so a filtered result never opens on a page that no longer exists.
  *
  * Three lookup catalogs are still read in full, because a label needs the row
  * the page does not carry: currencies for the country column and form, account
@@ -38,7 +38,7 @@ import type {
   ListQuery,
   StateCounts,
 } from "@/lib/constants/types";
-import { LIST_PAGE_SIZE_DEFAULT, LIST_PAGE_SIZE_MAX } from "@/lib/constants/types";
+import { LIST_PAGE_SIZE_DEFAULT, LIST_PAGE_SIZE_MAX, isMarketKind } from "@/lib/constants/types";
 import { errorMessage } from "@/lib/format";
 
 /** A loaded page of a catalog, discriminated by `kind` so a table can narrow its rows. */
@@ -51,6 +51,16 @@ export type ConstantList = { [K in ConstantKind]: ConstantListResponse<K> }[Cons
  * markets).
  */
 export type StateFilter = NonNullable<ListQuery["state"]>;
+
+/**
+ * The Market filter above the table, for ETFs and stocks: a country exactly as
+ * the market-data feed spells it, or `""` for every market (the default, and
+ * the only value the other kinds ever hold).
+ */
+export type MarketFilter = string;
+
+/** What "every market" is, in the store and in the Select. */
+export const ALL_MARKETS: MarketFilter = "";
 
 /** The page sizes the table offers. */
 export const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
@@ -167,6 +177,9 @@ export interface ConstantsStore {
   setSearch: (search: string) => void;
   stateFilter: StateFilter;
   setStateFilter: (filter: StateFilter) => void;
+  /** ETFs and stocks only: the listing country the page is narrowed to, or `""`. */
+  market: MarketFilter;
+  setMarket: (market: MarketFilter) => void;
   filtersActive: boolean;
   clearFilters: () => void;
 
@@ -184,6 +197,7 @@ export function useConstantsStore(initialKind: ConstantKind): ConstantsStore {
   const [search, setSearchState] = useState("");
   const [query, setQuery] = useState("");
   const [stateFilter, setStateFilterState] = useState<StateFilter>("all");
+  const [market, setMarketState] = useState<MarketFilter>(ALL_MARKETS);
 
   const [loadedCurrencies, setLoadedCurrencies] = useState<CurrencyRow[]>([]);
   const [loadedBaseTypes, setLoadedBaseTypes] = useState<AccountBaseTypeRow[]>([]);
@@ -221,6 +235,7 @@ export function useConstantsStore(initialKind: ConstantKind): ConstantsStore {
       // swallow the next search for exactly the same words.
       queryRef.current = "";
       setStateFilterState("all");
+      setMarketState(ALL_MARKETS);
       setSelectedIds([]);
     },
     [kind],
@@ -253,11 +268,21 @@ export function useConstantsStore(initialKind: ConstantKind): ConstantsStore {
     setSelectedIds([]);
   }, []);
 
+  const setMarket = useCallback((next: MarketFilter) => {
+    setMarketState(next);
+    setPage(1);
+    // Same reasoning as the state filter: a row ticked under one market may
+    // not be on the page the next one answers, and a push must only ever act
+    // on rows the operator can still see.
+    setSelectedIds([]);
+  }, []);
+
   const clearFilters = useCallback(() => {
     setSearchState("");
     setQuery("");
     queryRef.current = "";
     setStateFilterState("all");
+    setMarketState(ALL_MARKETS);
     setPage(1);
     setSelectedIds([]);
   }, []);
@@ -285,7 +310,15 @@ export function useConstantsStore(initialKind: ConstantKind): ConstantsStore {
     void (async () => {
       setPending(true);
       try {
-        const next = await loadList(kind, { page, pageSize, q: query, state: stateFilter });
+        const next = await loadList(kind, {
+          page,
+          pageSize,
+          q: query,
+          state: stateFilter,
+          // Only ETFs and stocks carry a country; the server ignores it for the
+          // rest, and sending it would only make the URL misleading.
+          country: isMarketKind(kind) ? market : undefined,
+        });
         if (cancelled) return;
         setList(next);
         setError(null);
@@ -301,7 +334,7 @@ export function useConstantsStore(initialKind: ConstantKind): ConstantsStore {
     return () => {
       cancelled = true;
     };
-  }, [kind, page, pageSize, query, stateFilter, tick]);
+  }, [kind, page, pageSize, query, stateFilter, market, tick]);
 
   /* ----------------------------- the lookups ----------------------------- */
 
@@ -371,7 +404,7 @@ export function useConstantsStore(initialKind: ConstantKind): ConstantsStore {
   }, [list]);
 
   const counts = list?.counts ?? EMPTY_COUNTS;
-  const filtersActive = query !== "" || stateFilter !== "all";
+  const filtersActive = query !== "" || stateFilter !== "all" || market !== ALL_MARKETS;
 
   return {
     kind,
@@ -398,6 +431,8 @@ export function useConstantsStore(initialKind: ConstantKind): ConstantsStore {
     setSearch: setSearchState,
     stateFilter,
     setStateFilter,
+    market,
+    setMarket,
     filtersActive,
     clearFilters,
     selectedIds,
