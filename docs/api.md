@@ -87,25 +87,58 @@ Default rules as seeded; all editable on the Access Map.
 | `admin.endpoints.list` | `GET /api/v1/admin/endpoints` | Endpoint rules merged with the registry. | `can_manage_access_map` or `can_read_services` |
 | `admin.endpoints.upsert` | `PUT /api/v1/admin/endpoints/[key]` | Register or update an endpoint rule. | super-admin |
 | `admin.usage.list` | `GET /api/v1/admin/usage` | 30-day counters per endpoint plus the rate-limit presets. | `can_read_services` |
-| `admin.constants.list` | `GET /api/v1/admin/constants/[kind]` | One catalog with each row's push state, plus `mainOnlyIds`. | `can_read_catalogs` or `can_write_catalogs` |
+| `admin.constants.list` | `GET /api/v1/admin/constants/[kind]?page=&pageSize=&q=&state=` | One **page** of a catalog, each row labelled from the sync ledger, with catalog counts, `lastComparedAt` and `latestJob`. | `can_read_catalogs` or `can_write_catalogs` |
 | `admin.constants.create` | `POST /api/v1/admin/constants/[kind]` | Adds a row to the admin catalog. 201. | `can_write_catalogs` |
 | `admin.constants.get` | `GET /api/v1/admin/constants/[kind]/[id]` | One catalog row with its push state. | `can_read_catalogs` or `can_write_catalogs` |
 | `admin.constants.update` | `PATCH /api/v1/admin/constants/[kind]/[id]` | Partial edit; at least one field. | `can_write_catalogs` |
-| `admin.constants.delete` | `DELETE /api/v1/admin/constants/[kind]/[id]` | Retires a category, removes the other kinds. 204. | `can_write_catalogs` |
-| `admin.constants.push` | `POST /api/v1/admin/constants/[kind]/push` | Upserts into the main app database. Body `{ ids? }`. | `can_write_catalogs` |
+| `admin.constants.delete` | `DELETE /api/v1/admin/constants/[kind]/[id]` | Retires a category, account type or market, removes the other kinds. 204. | `can_write_catalogs` |
+| `admin.constants.push` | `POST /api/v1/admin/constants/[kind]/push` | Upserts into the main app database. Body: exactly one of `{ ids }` or `{ scope }`. Answers `{ job }`. | `can_write_catalogs` |
+| `admin.constants.compare` | `POST /api/v1/admin/constants/[kind]/compare` | Rebuilds the catalog's sync ledger against the main app database. No body. Answers `{ job }`. | `can_write_catalogs` |
+| `admin.constants.jobs.list` | `GET /api/v1/admin/constants/[kind]/jobs?limit=` | Recent compare and push jobs, newest first. `limit` 1..50, default 10. | `can_read_catalogs` or `can_write_catalogs` |
+| `admin.constants.jobs.get` | `GET /api/v1/admin/constants/[kind]/jobs/[jobId]` | One job, for polling. Non-uuid or another catalog's job is a 404. | `can_read_catalogs` or `can_write_catalogs` |
 
 `[kind]` is one of `countries`, `currencies`, `financial_institutions`,
-`categories`; any other value is a 404 `not_found`.
+`categories`, `account_base_types`, `account_types`, `cryptocurrencies`,
+`etfs`, `stocks`, `markets`; any other value is a 404 `not_found`.
 
-**Push semantics.** `admin.constants.push` is the only endpoint that writes to
-the main app database. It **upserts by id** inside one transaction and **never
+`[id]` is always a string. `cryptocurrencies`, `etfs` and `stocks` are keyed by
+an integer sequence rather than a UUID, so their ids are the decimal form of
+that integer; anything else in the segment is a 404 `not_found`, never a
+malformed query.
+
+**Listing.** `admin.constants.list` answers one page and never compares the
+two databases: `page` (1-based, default 1), `pageSize` (default 50, clamped to
+200), `q` (case-insensitive substring over the kind's searchable columns) and
+`state` (`all` — the default, every live row — one of `new` / `changed` /
+`synced` / `unknown`, `pending` for new + changed, or `retired`). The body is
+`{ kind, rows, page, pageSize, total, counts, lastComparedAt, latestJob }`,
+where `total` counts the rows matching the query and `counts` describes the
+whole catalog (`total`, `new`, `changed`, `synced`, `unknown`, `retired`,
+`mainOnly`). Each row's `pushState` comes from the sync ledger; a row nothing
+has compared is `unknown`.
+
+**Push and compare semantics.** `admin.constants.push` is the only endpoint
+that writes to the main app database. Its body is exactly one of
+`{ "ids": [...] }` (1..5000 rows), `{ "scope": "pending" }` (everything the
+ledger calls new or changed) or `{ "scope": "all" }`; both or neither is a 422,
+as is an empty `ids` array, and an unknown id is a 404 with nothing pushed. It
+**upserts by id** in batches of 1000, one transaction per batch, and **never
 deletes** there — rows are referenced by tenant data, so removal stays a
-deliberate act on the consumer side. Dependencies are written first (a
-country's currency, a category's ancestors) and reported under `dependencies`.
-Each row comes back as `created`, `updated` or `unchanged`; identical rows are
-skipped. Omitting `ids` pushes the whole catalog; an **empty** `ids` array is a
-422 `validation_failed`, never "everything". At most 2000 rows per push. Full
-details in [constants.md](./constants.md).
+deliberate act on the consumer side. Dependencies are written first, per batch
+(a country's currency, an account type's base type, a category's ancestors);
+the four market-data catalogs reference nothing and never carry any. A push
+into one of the integer-keyed `preload_*` tables also advances that table's
+sequence, so the consumer app cannot be handed an id the push just took.
+
+Both endpoints answer `{ "job": … }`. A push of at most 200 rows and a compare
+of a catalog of at most 5000 rows run **inline**, so the job comes back
+`succeeded` or `failed`; anything larger comes back `running` and is followed
+through the jobs endpoints. A job that is `running` with a stale heartbeat is
+reported as `interrupted` — rerun it. Only one compare or push runs per catalog
+at a time; a second request is a 409 `conflict` naming the job that holds it.
+Until [`docs/sql/007_constants_sync_and_jobs.sql`](./sql/007_constants_sync_and_jobs.sql)
+has run, all of these answer 503 `admin_schema_missing`. Full details in
+[constants.md](./constants.md).
 
 ## Calling from the browser
 

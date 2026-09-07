@@ -1,10 +1,15 @@
 /**
  * /api/v1/admin/constants/[kind]/[id] — one row of a reference catalog.
  *
- * GET returns it with its push state, PATCH applies a partial change, DELETE
- * retires a category (`deleted_at`) or removes a row of the other three kinds.
- * All three act on the **admin** database only: the main app database keeps
- * whatever it already has until the next push.
+ * GET returns it with the push state the sync ledger holds for it, PATCH
+ * applies a partial change, DELETE retires a category, an account type or a
+ * market (`deleted_at`) or removes a row of the other kinds. All three act on
+ * the **admin** database only: the main app database keeps whatever it already
+ * has until the next push.
+ *
+ * PATCH and DELETE also keep that one row's ledger entry current — an edit or
+ * a retirement is re-compared against the main database, a hard delete is
+ * forgotten — so the catalog's counts stay right without a compare job.
  */
 import { adminHandler } from "@/lib/admin-access/authorize";
 import { noContent, ok } from "@/lib/api/response";

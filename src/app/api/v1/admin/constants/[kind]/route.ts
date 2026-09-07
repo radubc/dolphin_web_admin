@@ -1,24 +1,32 @@
 /**
  * /api/v1/admin/constants/[kind] — one reference catalog in the admin
  * database. `[kind]` is one of `countries`, `currencies`,
- * `financial_institutions`, `categories`; anything else is a 404.
+ * `financial_institutions`, `categories`, `account_base_types`,
+ * `account_types`, `cryptocurrencies`, `etfs`, `stocks`, `markets`; anything
+ * else is a 404.
  *
- * GET lists every row with its state against the main app database, plus the
- * ids the main database still has that this catalog no longer does. POST adds
- * a row here only; nothing reaches the main database until a push.
+ * GET returns **one page** of the catalog (`?page`, `?pageSize`, `?q`,
+ * `?state`), each row carrying the push state the sync ledger holds for it,
+ * plus the whole-catalog counts, when the last compare finished and the most
+ * recent job. It never compares the two databases: that is what
+ * `POST …/compare` is for.
+ *
+ * POST adds a row here only; nothing reaches the main database until a push.
  */
 import { adminHandler } from "@/lib/admin-access/authorize";
 import { created, ok } from "@/lib/api/response";
-import { parseJsonBody } from "@/lib/api/validate";
-import { createSchemaFor } from "@/lib/constants/schemas";
-import { createWithState, listWithState, parseKind } from "@/lib/constants/service";
+import { parseJsonBody, parseSearchParams } from "@/lib/api/validate";
+import { createSchemaFor, listQuerySchema } from "@/lib/constants/schemas";
+import { createWithState, listConstants, parseKind } from "@/lib/constants/service";
 
 type Ctx = RouteContext<"/api/v1/admin/constants/[kind]">;
 
 export const GET = adminHandler<Ctx>(
-  async (_request, ctx) => {
+  async (request, ctx) => {
     const { kind } = await ctx.params;
-    return ok(await listWithState(parseKind(kind)));
+    const catalog = parseKind(kind);
+    const query = parseSearchParams(request.nextUrl, listQuerySchema);
+    return ok(await listConstants(catalog, query));
   },
   { endpoint: "admin.constants.list" },
 );

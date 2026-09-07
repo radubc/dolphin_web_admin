@@ -1,48 +1,63 @@
 "use client";
 
 /**
- * The Constants ribbon: Add, Push selected, Push all and Refresh.
+ * The Constants ribbon: Add, Push selected, Push pending, Push all, Compare and
+ * Refresh.
  *
- * Push is a write against the *main app* database, so all three write buttons
- * need `can_write_catalogs`; an operator without it sees Refresh alone rather
- * than a row of dead controls. Within the write set the buttons stay visible
- * and only change their enabled state, so the bar never reflows as a selection
- * changes.
+ * Push is a write against the *main app* database and Compare reads all of it,
+ * so every one of those needs `can_write_catalogs`; an operator without it sees
+ * Refresh alone rather than a row of dead controls. Within the write set the
+ * buttons stay visible and only change their enabled state, so the bar never
+ * reflows as a selection changes.
  *
- * Both bulk pushes ask first: they can write hundreds of rows into the app the
- * customers use, and the count in the confirmation is the last chance to
- * notice that the wrong catalog is on screen.
+ * Every bulk push asks first: it can write hundreds of thousands of rows into
+ * the app the customers use, and the count in the confirmation is the last
+ * chance to notice that the wrong catalog is on screen.
+ *
+ * The read-out carries the two figures the buttons above it depend on — how
+ * many rows the current query matches out of the catalog, and when the catalog
+ * was last compared, since every push state on screen is only as true as that
+ * compare.
  */
 
 import { Popconfirm } from "antd";
 import {
   CloudUploadOutlined,
+  DiffOutlined,
   LoadingOutlined,
   PlusOutlined,
   ReloadOutlined,
   SelectOutlined,
+  ThunderboltOutlined,
 } from "@ant-design/icons";
-import { RibbonBar, RibbonButton } from "@/components/ribbon-bar";
+import { RibbonBar, RibbonButton, RibbonDivider } from "@/components/ribbon-bar";
 import type { ConstantKind } from "@/lib/constants/types";
-import { formatRelativeTimeOrNever, pluralise } from "@/lib/format";
+import { formatRelativeTime } from "@/lib/format";
 import { surfaceColors } from "@/lib/theme/colors";
-import { KIND_META } from "./constants-meta";
+import { countOfKind, countOfRows, KIND_META } from "./constants-meta";
 
 interface ConstantsRibbonProps {
   kind: ConstantKind;
   canWrite: boolean;
-  /** A push is running: every write is held until it lands. */
+  /** A push or compare is in flight, or a job for this kind is running. */
   busy: boolean;
-  /** A refresh is running. Distinct from `busy`: it never blanks the table. */
+  /** A list fetch is running. Distinct from `busy`: it never blanks the table. */
   refreshing: boolean;
+  /** Ticked rows, across every page. */
   selectedCount: number;
+  /** Rows the current query matches, all pages. */
   filteredCount: number;
+  /** Every row in the catalog, filters ignored. */
   totalCount: number;
-  /** When the rows on screen were compared with the main app. */
-  comparedAt: string | null;
+  /** New + changed: what "Push pending" would write. */
+  pendingCount: number;
+  /** When the last compare job for this kind finished. */
+  lastComparedAt: string | null;
   onAdd: () => void;
   onPushSelected: () => void;
+  onPushPending: () => void;
   onPushAll: () => void;
+  onCompare: () => void;
   onRefresh: () => void;
 }
 
@@ -54,13 +69,17 @@ export default function ConstantsRibbon({
   selectedCount,
   filteredCount,
   totalCount,
-  comparedAt,
+  pendingCount,
+  lastComparedAt,
   onAdd,
   onPushSelected,
+  onPushPending,
   onPushAll,
+  onCompare,
   onRefresh,
 }: ConstantsRibbonProps) {
   const meta = KIND_META[kind];
+  const filtered = filteredCount !== totalCount;
 
   const readout = (
     <span
@@ -69,16 +88,16 @@ export default function ConstantsRibbon({
     >
       {busy && (
         <>
-          <LoadingOutlined aria-hidden /> Pushing to the main app…{" · "}
+          <LoadingOutlined aria-hidden /> Working…{" · "}
         </>
       )}
-      {filteredCount} of {pluralise(totalCount, meta.singular, meta.plural)}
-      {comparedAt !== null && (
-        <>
-          {" · compared "}
-          {formatRelativeTimeOrNever(comparedAt)}
-        </>
-      )}
+      {filtered
+        ? `${filteredCount.toLocaleString()} of ${countOfKind(totalCount, kind)}`
+        : countOfKind(totalCount, kind)}
+      {" · "}
+      {lastComparedAt === null
+        ? "Never compared"
+        : `Last compared ${formatRelativeTime(lastComparedAt).toLowerCase()}`}
     </span>
   );
 
@@ -87,7 +106,7 @@ export default function ConstantsRibbon({
       {canWrite && (
         <>
           <RibbonButton
-            label={`Add ${meta.singular === "financial institution" ? "institution" : meta.singular}`}
+            label={`Add ${meta.addLabel}`}
             icon={<PlusOutlined />}
             onClick={onAdd}
             disabled={busy}
@@ -96,7 +115,7 @@ export default function ConstantsRibbon({
 
           <Popconfirm
             title="Push the ticked rows"
-            description={`Upsert ${pluralise(selectedCount, "row")} into the main app database. Nothing is deleted there.`}
+            description={`Upsert ${countOfRows(selectedCount)} into the main app database. Nothing is deleted there.`}
             okText="Push"
             cancelText="Cancel"
             disabled={busy || selectedCount === 0}
@@ -110,7 +129,29 @@ export default function ConstantsRibbon({
                 tooltip={
                   selectedCount === 0
                     ? "Tick the rows to push"
-                    : `Push ${pluralise(selectedCount, "ticked row")} to the main app`
+                    : `Push ${countOfRows(selectedCount)} to the main app`
+                }
+              />
+            </span>
+          </Popconfirm>
+
+          <Popconfirm
+            title="Push everything pending"
+            description={`Upsert the ${countOfRows(pendingCount)} that are new or changed into the main app database. Nothing is deleted there.`}
+            okText="Push pending"
+            cancelText="Cancel"
+            disabled={busy || pendingCount === 0}
+            onConfirm={onPushPending}
+          >
+            <span className="inline-flex">
+              <RibbonButton
+                label="Push Pending"
+                icon={busy ? <LoadingOutlined /> : <ThunderboltOutlined />}
+                disabled={busy || pendingCount === 0}
+                tooltip={
+                  pendingCount === 0
+                    ? "Nothing is new or changed; compare again if you expected some"
+                    : `Push the ${countOfRows(pendingCount)} that are new or changed`
                 }
               />
             </span>
@@ -118,7 +159,7 @@ export default function ConstantsRibbon({
 
           <Popconfirm
             title={`Push every ${meta.singular}`}
-            description={`Upsert all ${pluralise(totalCount, meta.singular, meta.plural)} into the main app database, filters ignored. Nothing is deleted there.`}
+            description={`Upsert all ${countOfKind(totalCount, kind)} into the main app database, filters ignored. Nothing is deleted there.`}
             okText="Push all"
             cancelText="Cancel"
             disabled={busy || totalCount === 0}
@@ -133,6 +174,16 @@ export default function ConstantsRibbon({
               />
             </span>
           </Popconfirm>
+
+          <RibbonDivider />
+
+          <RibbonButton
+            label="Compare"
+            icon={busy ? <LoadingOutlined /> : <DiffOutlined />}
+            onClick={onCompare}
+            disabled={busy || totalCount === 0}
+            tooltip="Walk the catalog against the main app and rebuild every row's push state"
+          />
         </>
       )}
 
@@ -140,8 +191,8 @@ export default function ConstantsRibbon({
         label="Refresh"
         icon={refreshing ? <LoadingOutlined /> : <ReloadOutlined />}
         onClick={onRefresh}
-        disabled={busy || refreshing}
-        tooltip="Reload the catalog and compare it with the main app again"
+        disabled={refreshing}
+        tooltip="Reload this page of the catalog and its figures"
       />
     </RibbonBar>
   );

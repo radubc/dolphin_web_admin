@@ -1,178 +1,168 @@
 "use client";
 
 /**
- * The Constants screen's state: which catalog is on show, its rows and their
- * push state, the filters over them, and the ticked rows.
+ * The Constants screen's state: which catalog is on show, the *page* of it the
+ * table is drawing, the query that page answers, and the ticked rows.
  *
- * One kind is loaded at a time — the four catalogs are independent and each
- * comparison against the main app database costs a query there — plus the
- * currency list whenever countries are on screen, because a country's currency
- * is an id that has to be read as `CAD · Canadian dollar`.
+ * The catalogs run to hundreds of thousands of rows (stocks, ETFs, crypto
+ * pairs), so nothing here loads a whole one. The store holds a `ListQuery` —
+ * page, page size, search text and the push-state filter — and the server
+ * answers with that page plus whole-catalog figures (`counts`), the last
+ * compare time and the most recent job. Search is debounced by 300 ms and any
+ * change to the query drops back to page 1, so a filtered result never opens on
+ * a page that no longer exists.
+ *
+ * Three lookup catalogs are still read in full, because a label needs the row
+ * the page does not carry: currencies for the country column and form, account
+ * base types for the account-type column and form, and the category tree for
+ * `Parent › Child`. They are small by nature and are read in pages of
+ * `LIST_PAGE_SIZE_MAX` up to `LOOKUP_MAX_ROWS`; past that the label degrades to
+ * the id rather than the page hanging on a runaway fetch.
  *
  * Every write goes through `constantsApi`, which announces itself on `window`;
- * the store listens and reloads, so a create, an edit, a delete and a push all
- * refresh the same way and the ribbon never has to thread a callback through.
+ * the store listens and reloads, so a create, an edit, a delete, a push and a
+ * finished job all refresh the same way and the ribbon never has to thread a
+ * callback through.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { constantsApi, onConstantsChanged } from "@/lib/constants/client";
 import type {
+  AccountBaseTypeRow,
   CategoryRow,
+  ConstantJob,
   ConstantKind,
   ConstantListResponse,
-  ConstantRow,
+  ConstantRowOf,
   CurrencyRow,
-  PushState,
+  ListQuery,
+  StateCounts,
 } from "@/lib/constants/types";
+import { LIST_PAGE_SIZE_DEFAULT, LIST_PAGE_SIZE_MAX } from "@/lib/constants/types";
 import { errorMessage } from "@/lib/format";
-import { categoryPath, currencyLabel, isRetired } from "./constants-meta";
 
-/** A loaded catalog, discriminated by `kind` so a table can narrow its rows. */
+/** A loaded page of a catalog, discriminated by `kind` so a table can narrow its rows. */
 export type ConstantList = { [K in ConstantKind]: ConstantListResponse<K> }[ConstantKind];
 
-/** The push-state segment above the table. `retired` only exists for categories. */
-export type StateFilter = "all" | PushState | "retired";
+/**
+ * The push-state segment above the table, which is exactly what the list
+ * endpoint accepts: `all`, one push state, `pending` (new + changed) or
+ * `retired` (only for the kinds that retire — categories, account types,
+ * markets).
+ */
+export type StateFilter = NonNullable<ListQuery["state"]>;
 
-export interface ConstantCounts {
-  total: number;
-  new: number;
-  changed: number;
-  synced: number;
-  retired: number;
-}
+/** The page sizes the table offers. */
+export const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
+
+/** How long typing settles before the query is sent. */
+const SEARCH_DEBOUNCE_MS = 300;
+
+/** The ceiling on a lookup catalog read in full, so a huge one cannot hang the page. */
+const LOOKUP_MAX_ROWS = 5000;
+
+const EMPTY_COUNTS: StateCounts = {
+  total: 0,
+  new: 0,
+  changed: 0,
+  synced: 0,
+  unknown: 0,
+  retired: 0,
+  mainOnly: 0,
+};
 
 /**
  * The typed fetch. A generic call with a union `kind` would widen the response
  * to a union of row *arrays*, which no longer narrows; switching keeps each
  * branch concrete.
  */
-function loadList(kind: ConstantKind): Promise<ConstantList> {
+function loadList(kind: ConstantKind, query: ListQuery): Promise<ConstantList> {
   switch (kind) {
     case "countries":
-      return constantsApi.list("countries");
+      return constantsApi.list("countries", query);
     case "currencies":
-      return constantsApi.list("currencies");
+      return constantsApi.list("currencies", query);
     case "financial_institutions":
-      return constantsApi.list("financial_institutions");
+      return constantsApi.list("financial_institutions", query);
     case "categories":
-      return constantsApi.list("categories");
+      return constantsApi.list("categories", query);
+    case "account_base_types":
+      return constantsApi.list("account_base_types", query);
+    case "account_types":
+      return constantsApi.list("account_types", query);
+    case "cryptocurrencies":
+      return constantsApi.list("cryptocurrencies", query);
+    case "etfs":
+      return constantsApi.list("etfs", query);
+    case "stocks":
+      return constantsApi.list("stocks", query);
+    case "markets":
+      return constantsApi.list("markets", query);
   }
-}
-
-function matchesState(row: ConstantRow, filter: StateFilter): boolean {
-  if (filter === "all") return true;
-  if (filter === "retired") return isRetired(row);
-  // Retired rows keep a push state, but they belong to their own bucket: a
-  // "Not pushed" filter that hands back retired rows reads as a bug.
-  return row.pushState === filter && !isRetired(row);
-}
-
-function contains(haystack: string, needle: string): boolean {
-  return haystack.toLowerCase().includes(needle);
 }
 
 /**
- * Narrows a loaded catalog to what the search box and the state segment leave,
- * keeping the discriminated union intact.
+ * Every row of a lookup catalog, page by page. `kind` is a single literal at
+ * each call site, so the return type stays the concrete row type.
  */
-function filterList(
-  list: ConstantList,
-  search: string,
-  stateFilter: StateFilter,
-  currencies: readonly CurrencyRow[],
-): ConstantList {
-  const needle = search.trim().toLowerCase();
-
-  switch (list.kind) {
-    case "countries":
-      return {
-        ...list,
-        rows: list.rows.filter(
-          (row) =>
-            matchesState(row, stateFilter) &&
-            (needle === "" ||
-              contains(
-                `${row.name} ${row.alpha2Code} ${row.alpha3Code} ${currencyLabel(row.currencyId, currencies)}`,
-                needle,
-              )),
-        ),
-      };
-    case "currencies":
-      return {
-        ...list,
-        rows: list.rows.filter(
-          (row) =>
-            matchesState(row, stateFilter) &&
-            (needle === "" || contains(`${row.code} ${row.name} ${row.symbol ?? ""}`, needle)),
-        ),
-      };
-    case "financial_institutions":
-      return {
-        ...list,
-        rows: list.rows.filter(
-          (row) =>
-            matchesState(row, stateFilter) &&
-            (needle === "" || contains(`${row.name} ${row.institutionNumber} ${row.type}`, needle)),
-        ),
-      };
-    case "categories": {
-      const all = list.rows;
-      return {
-        ...list,
-        rows: all.filter(
-          (row) =>
-            matchesState(row, stateFilter) &&
-            (needle === "" || contains(`${categoryPath(row, all)} ${row.type ?? ""}`, needle)),
-        ),
-      };
+async function loadLookup<K extends ConstantKind>(kind: K): Promise<ConstantRowOf<K>[]> {
+  const rows: ConstantRowOf<K>[] = [];
+  let page = 1;
+  for (;;) {
+    const response = await constantsApi.list(kind, { page, pageSize: LIST_PAGE_SIZE_MAX });
+    rows.push(...response.rows);
+    if (
+      response.rows.length === 0 ||
+      rows.length >= response.total ||
+      rows.length >= LOOKUP_MAX_ROWS
+    ) {
+      return rows;
     }
+    page += 1;
   }
-}
-
-/** The rows of any loaded catalog, as the common row type. */
-function rowsOf(list: ConstantList): ConstantRow[] {
-  return list.rows;
-}
-
-function countOf(rows: readonly ConstantRow[]): ConstantCounts {
-  const counts: ConstantCounts = { total: rows.length, new: 0, changed: 0, synced: 0, retired: 0 };
-  for (const row of rows) {
-    // A retired row belongs to its own bucket, not to the push-state bucket it
-    // also carries: counting it in both makes the rail's bars sum past the
-    // catalog's total.
-    if (isRetired(row)) {
-      counts.retired += 1;
-    } else {
-      counts[row.pushState] += 1;
-    }
-  }
-  return counts;
 }
 
 export interface ConstantsStore {
   kind: ConstantKind;
   setKind: (kind: ConstantKind) => void;
 
-  /** Everything the kind has, before the filters. */
+  /** The page the table is drawing, or null before the first one lands. */
   list: ConstantList | null;
-  /** What the filters leave, same shape. */
-  visible: ConstantList | null;
-  counts: ConstantCounts;
-  /** For the country column and the country form; the currency catalog itself when that kind is on show. */
+  /** Whole-catalog figures, not narrowed by the query. */
+  counts: StateCounts;
+  /** Rows matching the current query, all pages. */
+  total: number;
+  /** When the last compare job for this kind finished; null before the first. */
+  lastComparedAt: string | null;
+  /** The newest job for this kind, so the page can resume polling after a reload. */
+  latestJob: ConstantJob | null;
+
+  page: number;
+  pageSize: number;
+  /** From the table's pagination; a new page size always returns to page 1. */
+  setPaging: (page: number, pageSize: number) => void;
+
+  /** For the country column and the country form. */
   currencies: CurrencyRow[];
-  /** For the parent column and the category form. */
+  /** For the account-type column and form. */
+  baseTypes: AccountBaseTypeRow[];
+  /** The whole category tree, so a child can name a parent the page does not carry. */
   categories: CategoryRow[];
-  /** Distinct institution types already in use, for the form's autocomplete. */
+  /** Distinct institution types on the page in view, for the form's autocomplete. */
   institutionTypes: string[];
 
+  /** A first load or a kind switch: there is nothing to show yet. */
   loading: boolean;
+  /** A fetch over rows that are still on screen — paging, searching, refreshing. */
+  refreshing: boolean;
   error: string | null;
   /** Set when the currency catalog failed to load alongside countries; `currencies` still falls back to `[]`. */
   currenciesError: string | null;
+  /** Set when the base-type catalog failed to load alongside account types; `baseTypes` still falls back to `[]`. */
+  baseTypesError: string | null;
   reload: () => void;
-  /** True from the moment `reload` is called until the fetch it started settles; distinct from `loading`, which blanks the table. */
-  refreshing: boolean;
 
+  /** What is in the box right now; the query follows it after the debounce. */
   search: string;
   setSearch: (search: string) => void;
   stateFilter: StateFilter;
@@ -180,80 +170,188 @@ export interface ConstantsStore {
   filtersActive: boolean;
   clearFilters: () => void;
 
+  /** Kept across pages, so a selection can span them. */
   selectedIds: string[];
   setSelectedIds: (ids: string[]) => void;
-  /** The ticked rows the filters still show: what a bulk action acts on. */
-  selectedVisibleIds: string[];
+  clearSelection: () => void;
 }
 
 export function useConstantsStore(initialKind: ConstantKind): ConstantsStore {
   const [kind, setKindState] = useState<ConstantKind>(initialKind);
   const [list, setList] = useState<ConstantList | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(LIST_PAGE_SIZE_DEFAULT);
+  const [search, setSearchState] = useState("");
+  const [query, setQuery] = useState("");
+  const [stateFilter, setStateFilterState] = useState<StateFilter>("all");
+
   const [loadedCurrencies, setLoadedCurrencies] = useState<CurrencyRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadedBaseTypes, setLoadedBaseTypes] = useState<AccountBaseTypeRow[]>([]);
+  const [loadedCategories, setLoadedCategories] = useState<CategoryRow[]>([]);
+
+  const [pending, setPending] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currenciesError, setCurrenciesError] = useState<string | null>(null);
+  const [baseTypesError, setBaseTypesError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
-  const [refreshing, setRefreshing] = useState(false);
-  const [search, setSearch] = useState("");
-  const [stateFilter, setStateFilter] = useState<StateFilter>("all");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
+  // The search box types faster than the server can answer, so the query only
+  // follows it once the operator stops. `queryRef` mirrors the query the store
+  // last sent, which keeps the timer from resetting the page when the text ends
+  // up where it started — and keeps a cleared box from swallowing a repeat of
+  // the same search.
+  const queryRef = useRef("");
+
   const reload = useCallback(() => {
-    // Loading blanks the table; a refresh must not, so it gets its own flag
-    // for the ribbon button to show while the fetch is in flight.
-    setRefreshing(true);
     setTick((value) => value + 1);
   }, []);
 
   const setKind = useCallback(
     (next: ConstantKind) => {
       if (next === kind) return;
-      // A selection, a search and a state segment all mean something about the
-      // catalog that was on screen; none of them carries over.
+      // A selection, a search, a page and a state segment all mean something
+      // about the catalog that was on screen; none of them carries over.
       setKindState(next);
       setList(null);
-      setLoading(true);
-      setSearch("");
-      setStateFilter("all");
+      setPage(1);
+      setSearchState("");
+      setQuery("");
+      // The debounce compares against this; leaving the old text in it would
+      // swallow the next search for exactly the same words.
+      queryRef.current = "";
+      setStateFilterState("all");
       setSelectedIds([]);
     },
     [kind],
   );
 
+  const setPaging = useCallback(
+    (nextPage: number, nextPageSize: number) => {
+      // antd reports both together; a new page size renumbers the catalog, so
+      // the only page that still means anything afterwards is the first. A
+      // plain page change leaves what is selected alone — cross-page
+      // selection is the point — but a page-size change reshuffles which rows
+      // fall on which page, so a selection kept past it could no longer be
+      // what is on screen.
+      setPageSize(nextPageSize);
+      if (nextPageSize === pageSize) {
+        setPage(nextPage);
+        return;
+      }
+      setPage(1);
+      setSelectedIds([]);
+    },
+    [pageSize],
+  );
+
+  const setStateFilter = useCallback((next: StateFilter) => {
+    setStateFilterState(next);
+    setPage(1);
+    // A row ticked under one state filter may not exist under the next; a
+    // push must only ever act on rows the operator can still see.
+    setSelectedIds([]);
+  }, []);
+
+  const clearFilters = useCallback(() => {
+    setSearchState("");
+    setQuery("");
+    queryRef.current = "";
+    setStateFilterState("all");
+    setPage(1);
+    setSelectedIds([]);
+  }, []);
+
+  const clearSelection = useCallback(() => setSelectedIds([]), []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (queryRef.current === search.trim()) return;
+      queryRef.current = search.trim();
+      setQuery(queryRef.current);
+      setPage(1);
+      // The rows behind a selection made under the old search text may not
+      // match the new one; a push must only ever act on rows the operator can
+      // still see.
+      setSelectedIds([]);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  /* ------------------------------ the page ------------------------------- */
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      setError(null);
-      setCurrenciesError(null);
+      setPending(true);
       try {
-        // Countries show and edit a currency, so that catalog comes along.
-        // Its failure must not fail the country load: it falls back to `[]`,
-        // but the failure is recorded so the page and the drawer can say so.
-        const currencyPromise: Promise<CurrencyRow[]> =
-          kind === "countries"
-            ? constantsApi
-                .list("currencies")
-                .then((response) => response.rows)
-                .catch((cause) => {
-                  if (!cancelled) setCurrenciesError(errorMessage(cause));
-                  return [];
-                })
-            : Promise.resolve([]);
-        const [nextList, nextCurrencies] = await Promise.all([loadList(kind), currencyPromise]);
+        const next = await loadList(kind, { page, pageSize, q: query, state: stateFilter });
         if (cancelled) return;
-        setList(nextList);
-        setLoadedCurrencies(nextCurrencies);
+        setList(next);
+        setError(null);
       } catch (cause) {
         // A failed *refresh* keeps what is on screen and says so above the
         // table; only a first load (or a kind switch, which clears the list)
         // leaves nothing to show, and then the page shows the error itself.
         if (!cancelled) setError(errorMessage(cause));
       } finally {
-        if (!cancelled) {
-          setLoading(false);
-          setRefreshing(false);
+        if (!cancelled) setPending(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [kind, page, pageSize, query, stateFilter, tick]);
+
+  /* ----------------------------- the lookups ----------------------------- */
+
+  // Keyed on the kind alone: paging through stocks must not re-read the
+  // currency catalog. A lookup failure is soft — the column falls back to the
+  // id — but it is recorded so the page and the drawer can say so.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      setCurrenciesError(null);
+      setBaseTypesError(null);
+      if (kind === "countries") {
+        try {
+          const rows = await loadLookup("currencies");
+          if (!cancelled) setLoadedCurrencies(rows);
+        } catch (cause) {
+          if (!cancelled) {
+            setCurrenciesError(errorMessage(cause));
+            setLoadedCurrencies([]);
+          }
         }
+      } else if (!cancelled) {
+        setLoadedCurrencies([]);
+      }
+
+      if (kind === "account_types") {
+        try {
+          const rows = await loadLookup("account_base_types");
+          if (!cancelled) setLoadedBaseTypes(rows);
+        } catch (cause) {
+          if (!cancelled) {
+            setBaseTypesError(errorMessage(cause));
+            setLoadedBaseTypes([]);
+          }
+        }
+      } else if (!cancelled) {
+        setLoadedBaseTypes([]);
+      }
+
+      if (kind === "categories") {
+        try {
+          const rows = await loadLookup("categories");
+          if (!cancelled) setLoadedCategories(rows);
+        } catch {
+          // The tree is only used for labels and the parent picker; without it
+          // a category still reads by its own name.
+          if (!cancelled) setLoadedCategories([]);
+        }
+      } else if (!cancelled) {
+        setLoadedCategories([]);
       }
     })();
     return () => {
@@ -261,70 +359,49 @@ export function useConstantsStore(initialKind: ConstantKind): ConstantsStore {
     };
   }, [kind, tick]);
 
-  // Any write anywhere in the app (this page's drawer, a push, another tab of
-  // the same app) reloads what is on screen.
+  // Any write anywhere in the app (this page's drawer, a push, a finished job,
+  // another tab of the same app) reloads what is on screen.
   useEffect(() => onConstantsChanged(reload), [reload]);
 
-  const currencies = useMemo<CurrencyRow[]>(
-    () => (list !== null && list.kind === "currencies" ? list.rows : loadedCurrencies),
-    [list, loadedCurrencies],
-  );
-
-  const categories = useMemo<CategoryRow[]>(
-    () => (list !== null && list.kind === "categories" ? list.rows : []),
-    [list],
-  );
-
   const institutionTypes = useMemo<string[]>(() => {
+    // The page in view, not the catalog: this only feeds an autocomplete, and
+    // reading 300k institutions to fill it would cost far more than it is worth.
     if (list === null || list.kind !== "financial_institutions") return [];
     return [...new Set(list.rows.map((row) => row.type.trim()).filter((type) => type !== ""))].sort();
   }, [list]);
 
-  const visible = useMemo(
-    () => (list === null ? null : filterList(list, search, stateFilter, currencies)),
-    [list, search, stateFilter, currencies],
-  );
-
-  const counts = useMemo<ConstantCounts>(
-    () => countOf(list === null ? [] : rowsOf(list)),
-    [list],
-  );
-
-  const selectedVisibleIds = useMemo(() => {
-    if (visible === null) return [];
-    const shown = new Set(rowsOf(visible).map((row) => row.id));
-    return selectedIds.filter((id) => shown.has(id));
-  }, [visible, selectedIds]);
-
-  const filtersActive = search.trim() !== "" || stateFilter !== "all";
-
-  const clearFilters = useCallback(() => {
-    setSearch("");
-    setStateFilter("all");
-  }, []);
+  const counts = list?.counts ?? EMPTY_COUNTS;
+  const filtersActive = query !== "" || stateFilter !== "all";
 
   return {
     kind,
     setKind,
     list,
-    visible,
     counts,
-    currencies,
-    categories,
+    total: list?.total ?? 0,
+    lastComparedAt: list?.lastComparedAt ?? null,
+    latestJob: list?.latestJob ?? null,
+    page,
+    pageSize,
+    setPaging,
+    currencies: loadedCurrencies,
+    baseTypes: loadedBaseTypes,
+    categories: loadedCategories,
     institutionTypes,
-    loading,
+    loading: pending && list === null,
+    refreshing: pending && list !== null,
     error,
     currenciesError,
+    baseTypesError,
     reload,
-    refreshing,
     search,
-    setSearch,
+    setSearch: setSearchState,
     stateFilter,
     setStateFilter,
     filtersActive,
     clearFilters,
     selectedIds,
     setSelectedIds,
-    selectedVisibleIds,
+    clearSelection,
   };
 }

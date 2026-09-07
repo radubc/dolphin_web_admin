@@ -3,7 +3,7 @@
 /**
  * Add / edit one reference row.
  *
- * One drawer for all four catalogs: the chrome, the footer and the error
+ * One drawer for every catalog: the chrome, the footer and the error
  * handling are identical, and only the fields between them change, so the kind
  * picks a field set rather than a whole component. It follows the User
  * Management form's conventions — a `FormSection` block, Save in the footer
@@ -16,11 +16,25 @@
  */
 
 import { useMemo, useRef, useState } from "react";
-import { Alert, AutoComplete, Button, Drawer, Form, Input, Select, Space, Typography } from "antd";
+import {
+  Alert,
+  AutoComplete,
+  Button,
+  Drawer,
+  Form,
+  Input,
+  Select,
+  Space,
+  Switch,
+  Typography,
+} from "antd";
 import { DatabaseOutlined } from "@ant-design/icons";
 import FormSection from "@/components/form-section";
 import { constantsApi } from "@/lib/constants/client";
 import type {
+  AccountBaseTypeInput,
+  AccountBaseTypeRow,
+  AccountTypeInput,
   CategoryInput,
   CategoryRow,
   CategoryType,
@@ -28,9 +42,14 @@ import type {
   ConstantPatchOf,
   ConstantRowOf,
   CountryInput,
+  CryptocurrencyInput,
   CurrencyInput,
   CurrencyRow,
+  EtfInput,
+  EtfRow,
   FinancialInstitutionInput,
+  MarketInput,
+  StockInput,
 } from "@/lib/constants/types";
 import { CATEGORY_TYPES } from "@/lib/constants/types";
 import { errorMessage, trimToNull } from "@/lib/format";
@@ -75,6 +94,32 @@ interface ConstantFormValues {
   categoryType: CategoryType | null;
   parentId: string | null;
   discretionary: Discretionary;
+  displayName: string;
+  baseTypeId: string | null;
+  isAsset: boolean;
+  isBanking: boolean;
+  isInvestment: boolean;
+  /** The ticker of a cryptocurrency pair, an ETF or a stock; `symbol` above is a currency's sign. */
+  tickerSymbol: string;
+  availableExchanges: string;
+  currencyBase: string;
+  currencyQuote: string;
+  /** An instrument's trading currency; `code` above is the currency catalog's own field. */
+  instrumentCurrency: string;
+  exchange: string;
+  micCode: string;
+  /** An instrument's country as the feed names it ("United States"), not a code. */
+  country: string;
+  figiCode: string;
+  cfiCode: string;
+  isin: string;
+  cusip: string;
+  /** A stock's instrument type ("Common Stock"); `institutionType` above is the bank's. */
+  instrumentType: string;
+  operatingMic: string;
+  marketName: string;
+  isoCountryCode: string;
+  city: string;
 }
 
 const upper = (value: unknown) => (typeof value === "string" ? value.toUpperCase() : value);
@@ -85,6 +130,9 @@ export interface ConstantFormDrawerProps {
   currencies: readonly CurrencyRow[];
   /** Set when the currency catalog failed to load; disables the country form's Currency field. */
   currenciesError: string | null;
+  baseTypes: readonly AccountBaseTypeRow[];
+  /** Set when the base-type catalog failed to load; disables the account-type form's Base type field. */
+  baseTypesError: string | null;
   categories: readonly CategoryRow[];
   /** Distinct types already in the institution catalog, for the autocomplete. */
   institutionTypes: readonly string[];
@@ -97,10 +145,120 @@ export interface ConstantFormDrawerProps {
 /* The fields                                                                 */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * The fields an ETF and a stock share, plus the stock's instrument type. Both
+ * rows carry the same shape, so the field set is written once; the four
+ * identifiers at the bottom are reference numbers the feed may not carry, so
+ * they are optional and an empty one is saved as an empty string, never
+ * invented.
+ *
+ * `Form.Item` reads the surrounding `Form` through context, so this renders
+ * inside `FormBody`'s form without threading the instance through.
+ */
+function InstrumentFields({ withType }: { withType: boolean }) {
+  return (
+    <>
+      <Form.Item
+        name="tickerSymbol"
+        label="Symbol"
+        tooltip="The ticker as the exchange lists it, e.g. AAPL. Unique together with the exchange."
+        normalize={upper}
+        rules={[{ required: true, whitespace: true, message: "Symbol is required" }]}
+      >
+        <Input placeholder="AAPL" maxLength={40} autoComplete="off" style={{ width: 180 }} />
+      </Form.Item>
+
+      <Form.Item
+        name="name"
+        label="Name"
+        rules={[{ required: true, whitespace: true, message: "Name is required" }]}
+      >
+        <Input placeholder="e.g., Apple Inc." maxLength={200} autoComplete="off" />
+      </Form.Item>
+
+      <Form.Item
+        name="instrumentCurrency"
+        label="Currency"
+        tooltip="The currency the instrument trades in, e.g. USD."
+        normalize={upper}
+        rules={[{ required: true, whitespace: true, message: "Currency is required" }]}
+      >
+        <Input placeholder="USD" maxLength={12} autoComplete="off" style={{ width: 140 }} />
+      </Form.Item>
+
+      <Form.Item
+        name="exchange"
+        label="Exchange"
+        tooltip="The exchange's name as the feed writes it, e.g. NASDAQ."
+        rules={[{ required: true, whitespace: true, message: "Exchange is required" }]}
+      >
+        <Input placeholder="NASDAQ" maxLength={80} autoComplete="off" style={{ width: 260 }} />
+      </Form.Item>
+
+      <Form.Item
+        name="micCode"
+        label="MIC"
+        tooltip="The ISO 10383 code of the exchange, e.g. XNGS. It is what the Markets catalog keys on."
+        normalize={upper}
+        rules={[{ required: true, whitespace: true, message: "MIC is required" }]}
+      >
+        <Input placeholder="XNGS" maxLength={12} autoComplete="off" style={{ width: 160 }} />
+      </Form.Item>
+
+      <Form.Item
+        name="country"
+        label="Country"
+        tooltip="The country as the feed names it, e.g. United States. A name, not a code."
+        rules={[{ required: true, whitespace: true, message: "Country is required" }]}
+      >
+        <Input placeholder="United States" maxLength={80} autoComplete="off" style={{ width: 260 }} />
+      </Form.Item>
+
+      {withType && (
+        <Form.Item
+          name="instrumentType"
+          label="Type"
+          tooltip="Free text from the feed, e.g. Common Stock or Depositary Receipt."
+          rules={[{ required: true, whitespace: true, message: "Type is required" }]}
+        >
+          <Input placeholder="Common Stock" maxLength={80} autoComplete="off" style={{ width: 260 }} />
+        </Form.Item>
+      )}
+
+      <Form.Item
+        name="figiCode"
+        label="FIGI"
+        tooltip="Optional. The Financial Instrument Global Identifier, e.g. BBG000B9XRY4."
+      >
+        <Input placeholder="Optional" maxLength={40} autoComplete="off" style={{ width: 260 }} />
+      </Form.Item>
+
+      <Form.Item name="cfiCode" label="CFI" tooltip="Optional. The ISO 10962 instrument classification, e.g. ESVUFR.">
+        <Input placeholder="Optional" maxLength={40} autoComplete="off" style={{ width: 260 }} />
+      </Form.Item>
+
+      <Form.Item name="isin" label="ISIN" tooltip="Optional. The ISO 6166 security number, e.g. US0378331005.">
+        <Input placeholder="Optional" maxLength={40} autoComplete="off" style={{ width: 260 }} />
+      </Form.Item>
+
+      <Form.Item
+        name="cusip"
+        label="CUSIP"
+        className="mb-0"
+        tooltip="Optional. The North American security number, e.g. 037833100."
+      >
+        <Input placeholder="Optional" maxLength={40} autoComplete="off" style={{ width: 260 }} />
+      </Form.Item>
+    </>
+  );
+}
+
 function FormBody({
   target,
   currencies,
   currenciesError,
+  baseTypes,
+  baseTypesError,
   categories,
   institutionTypes,
   busy,
@@ -112,6 +270,8 @@ function FormBody({
   target: ConstantFormTarget;
   currencies: readonly CurrencyRow[];
   currenciesError: string | null;
+  baseTypes: readonly AccountBaseTypeRow[];
+  baseTypesError: string | null;
   categories: readonly CategoryRow[];
   institutionTypes: readonly string[];
   busy: boolean;
@@ -164,6 +324,59 @@ function FormBody({
           discretionary: toDiscretionary(target.row?.isDiscretionary ?? null),
         };
       }
+      case "account_base_types":
+        return { name: target.row?.name ?? "" };
+      case "account_types":
+        return {
+          name: target.row?.name ?? "",
+          displayName: target.row?.displayName ?? "",
+          baseTypeId: target.row?.baseTypeId ?? null,
+          isAsset: target.row?.isAsset ?? false,
+          isBanking: target.row?.isBanking ?? false,
+          isInvestment: target.row?.isInvestment ?? false,
+        };
+      case "cryptocurrencies":
+        return {
+          tickerSymbol: target.row?.symbol ?? "",
+          currencyBase: target.row?.currencyBase ?? "",
+          currencyQuote: target.row?.currencyQuote ?? "",
+          availableExchanges: target.row?.availableExchanges ?? "",
+        };
+      case "etfs":
+        return {
+          tickerSymbol: target.row?.symbol ?? "",
+          name: target.row?.name ?? "",
+          instrumentCurrency: target.row?.currency ?? "",
+          exchange: target.row?.exchange ?? "",
+          micCode: target.row?.micCode ?? "",
+          country: target.row?.country ?? "",
+          figiCode: target.row?.figiCode ?? "",
+          cfiCode: target.row?.cfiCode ?? "",
+          isin: target.row?.isin ?? "",
+          cusip: target.row?.cusip ?? "",
+        };
+      case "stocks":
+        return {
+          tickerSymbol: target.row?.symbol ?? "",
+          name: target.row?.name ?? "",
+          instrumentCurrency: target.row?.currency ?? "",
+          exchange: target.row?.exchange ?? "",
+          micCode: target.row?.micCode ?? "",
+          country: target.row?.country ?? "",
+          instrumentType: target.row?.type ?? "",
+          figiCode: target.row?.figiCode ?? "",
+          cfiCode: target.row?.cfiCode ?? "",
+          isin: target.row?.isin ?? "",
+          cusip: target.row?.cusip ?? "",
+        };
+      case "markets":
+        return {
+          micCode: target.row?.micCode ?? "",
+          marketName: target.row?.marketName ?? "",
+          operatingMic: target.row?.operatingMic ?? "",
+          isoCountryCode: target.row?.isoCountryCode ?? "",
+          city: target.row?.city ?? "",
+        };
     }
   }, [target]);
 
@@ -201,6 +414,14 @@ function FormBody({
   const typeOptions = useMemo(
     () => institutionTypes.map((type) => ({ value: type })),
     [institutionTypes],
+  );
+
+  const baseTypeOptions = useMemo(
+    () =>
+      [...baseTypes]
+        .map((baseType) => ({ value: baseType.id, label: baseType.name }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [baseTypes],
   );
 
   const meta = KIND_META[target.kind];
@@ -426,6 +647,197 @@ function FormBody({
             </Form.Item>
           </>
         )}
+
+        {target.kind === "account_base_types" && (
+          <Form.Item
+            name="name"
+            label="Name"
+            className="mb-0"
+            tooltip="The grouping account types sit in, e.g. Banking. Account types point at it by id."
+            rules={[{ required: true, whitespace: true, message: "Name is required" }]}
+          >
+            <Input placeholder="e.g., Banking" maxLength={120} autoComplete="off" />
+          </Form.Item>
+        )}
+
+        {target.kind === "account_types" && (
+          <>
+            <Form.Item
+              name="name"
+              label="Name"
+              tooltip="The machine name the main app matches on, e.g. Chequing. Unique among live account types."
+              rules={[{ required: true, whitespace: true, message: "Name is required" }]}
+            >
+              <Input placeholder="e.g., Chequing" maxLength={120} autoComplete="off" />
+            </Form.Item>
+
+            <Form.Item
+              name="displayName"
+              label="Display name"
+              tooltip="What the app shows a user. Often the same as the name."
+              rules={[{ required: true, whitespace: true, message: "Display name is required" }]}
+            >
+              <Input placeholder="e.g., Chequing" maxLength={120} autoComplete="off" />
+            </Form.Item>
+
+            <Form.Item
+              name="baseTypeId"
+              label="Base type"
+              tooltip="The grouping this account type belongs to. Pushing the account type pushes its base type first."
+              help={
+                baseTypesError !== null
+                  ? "Account base types could not be loaded, so this field is disabled to avoid saving it as empty."
+                  : undefined
+              }
+              validateStatus={baseTypesError !== null ? "warning" : undefined}
+            >
+              <Select
+                allowClear
+                showSearch
+                disabled={baseTypesError !== null}
+                placeholder="No base type"
+                options={baseTypeOptions}
+                optionFilterProp="label"
+                notFoundContent="No base type matches"
+              />
+            </Form.Item>
+
+            <Form.Item
+              name="isAsset"
+              label="Asset"
+              valuePropName="checked"
+              tooltip="Its balance counts towards the user's assets rather than their debts."
+            >
+              <Switch />
+            </Form.Item>
+
+            <Form.Item
+              name="isBanking"
+              label="Banking"
+              valuePropName="checked"
+              tooltip="A day-to-day banking account: chequing, savings, and the like."
+            >
+              <Switch />
+            </Form.Item>
+
+            <Form.Item
+              name="isInvestment"
+              label="Investment"
+              className="mb-0"
+              valuePropName="checked"
+              tooltip="Holds investments, so the app treats its balance as a portfolio value."
+            >
+              <Switch />
+            </Form.Item>
+          </>
+        )}
+        {target.kind === "cryptocurrencies" && (
+          <>
+            <Form.Item
+              name="tickerSymbol"
+              label="Symbol"
+              tooltip="The pair as the market-data feed writes it, e.g. BTC/USD."
+              normalize={upper}
+              rules={[{ required: true, whitespace: true, message: "Symbol is required" }]}
+            >
+              <Input placeholder="BTC/USD" maxLength={40} autoComplete="off" style={{ width: 220 }} />
+            </Form.Item>
+
+            <Form.Item
+              name="currencyBase"
+              label="Base currency"
+              tooltip="What is being bought, e.g. BTC."
+              normalize={upper}
+              rules={[{ required: true, whitespace: true, message: "Base currency is required" }]}
+            >
+              <Input placeholder="BTC" maxLength={20} autoComplete="off" style={{ width: 180 }} />
+            </Form.Item>
+
+            <Form.Item
+              name="currencyQuote"
+              label="Quote currency"
+              tooltip="What it is priced in, e.g. USD."
+              normalize={upper}
+              rules={[{ required: true, whitespace: true, message: "Quote currency is required" }]}
+            >
+              <Input placeholder="USD" maxLength={20} autoComplete="off" style={{ width: 180 }} />
+            </Form.Item>
+
+            <Form.Item
+              name="availableExchanges"
+              label="Exchanges"
+              className="mb-0"
+              tooltip="Free text from the feed: the exchanges that list the pair, usually comma-separated."
+              rules={[{ required: true, whitespace: true, message: "Exchanges are required" }]}
+            >
+              <Input.TextArea
+                placeholder="Binance, Coinbase Pro, Kraken"
+                maxLength={2000}
+                autoSize={{ minRows: 2, maxRows: 6 }}
+                autoComplete="off"
+              />
+            </Form.Item>
+          </>
+        )}
+
+        {(target.kind === "etfs" || target.kind === "stocks") && (
+          <InstrumentFields withType={target.kind === "stocks"} />
+        )}
+
+        {target.kind === "markets" && (
+          <>
+            <Form.Item
+              name="micCode"
+              label="MIC"
+              tooltip="The ISO 10383 market identifier code, e.g. XNGS. Unique across markets."
+              normalize={upper}
+              rules={[{ required: true, whitespace: true, message: "MIC is required" }]}
+            >
+              <Input placeholder="XNGS" maxLength={12} autoComplete="off" style={{ width: 160 }} />
+            </Form.Item>
+
+            <Form.Item
+              name="marketName"
+              label="Name"
+              rules={[{ required: true, whitespace: true, message: "Name is required" }]}
+            >
+              <Input
+                placeholder="e.g., NASDAQ/NGS (GLOBAL SELECT MARKET)"
+                maxLength={160}
+                autoComplete="off"
+              />
+            </Form.Item>
+
+            <Form.Item
+              name="operatingMic"
+              label="Operating MIC"
+              tooltip="The venue this segment operates under. For an operating market itself it is the same as the MIC."
+              normalize={upper}
+              rules={[{ required: true, whitespace: true, message: "Operating MIC is required" }]}
+            >
+              <Input placeholder="XNAS" maxLength={12} autoComplete="off" style={{ width: 160 }} />
+            </Form.Item>
+
+            <Form.Item
+              name="isoCountryCode"
+              label="Country code"
+              tooltip="The two-letter ISO 3166-1 code of the country the market sits in, e.g. US."
+              normalize={upper}
+              rules={[{ required: true, whitespace: true, message: "Country code is required" }]}
+            >
+              <Input placeholder="US" maxLength={8} autoComplete="off" style={{ width: 140 }} />
+            </Form.Item>
+
+            <Form.Item
+              name="city"
+              label="City"
+              className="mb-0"
+              rules={[{ required: true, whitespace: true, message: "City is required" }]}
+            >
+              <Input placeholder="e.g., New York" maxLength={120} autoComplete="off" />
+            </Form.Item>
+          </>
+        )}
       </FormSection>
 
       {target.row !== null && (
@@ -441,6 +853,48 @@ function FormBody({
 }
 
 /* -------------------------------------------------------------------------- */
+/* Saving                                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The fields an ETF and a stock share, read off the form. A stock adds `type`
+ * on top; everything else is identical, so the trimming and the uppercasing
+ * live in one place and the two kinds cannot drift apart.
+ */
+function instrumentInput(values: ConstantFormValues): EtfInput {
+  return {
+    symbol: values.tickerSymbol.trim().toUpperCase(),
+    name: values.name.trim(),
+    currency: values.instrumentCurrency.trim().toUpperCase(),
+    exchange: values.exchange.trim(),
+    micCode: values.micCode.trim().toUpperCase(),
+    country: values.country.trim(),
+    // The four identifiers are optional: an empty box stays an empty string
+    // rather than becoming a value the feed never gave.
+    figiCode: values.figiCode.trim(),
+    cfiCode: values.cfiCode.trim(),
+    isin: values.isin.trim(),
+    cusip: values.cusip.trim(),
+  };
+}
+
+/** Only what the operator actually changed, so a PATCH never rewrites untouched fields. */
+function instrumentPatch(input: EtfInput, row: EtfRow): Partial<EtfInput> {
+  const patch: Partial<EtfInput> = {};
+  if (input.symbol !== row.symbol) patch.symbol = input.symbol;
+  if (input.name !== row.name) patch.name = input.name;
+  if (input.currency !== row.currency) patch.currency = input.currency;
+  if (input.exchange !== row.exchange) patch.exchange = input.exchange;
+  if (input.micCode !== row.micCode) patch.micCode = input.micCode;
+  if (input.country !== row.country) patch.country = input.country;
+  if (input.figiCode !== row.figiCode) patch.figiCode = input.figiCode;
+  if (input.cfiCode !== row.cfiCode) patch.cfiCode = input.cfiCode;
+  if (input.isin !== row.isin) patch.isin = input.isin;
+  if (input.cusip !== row.cusip) patch.cusip = input.cusip;
+  return patch;
+}
+
+/* -------------------------------------------------------------------------- */
 /* The drawer                                                                 */
 /* -------------------------------------------------------------------------- */
 
@@ -448,6 +902,8 @@ export default function ConstantFormDrawer({
   target,
   currencies,
   currenciesError,
+  baseTypes,
+  baseTypesError,
   categories,
   institutionTypes,
   onClose,
@@ -554,6 +1010,122 @@ export default function ConstantFormDrawer({
         await constantsApi.update("categories", current.row.id, patch);
         return `Saved ${input.name}.`;
       }
+
+      case "account_base_types": {
+        const input: AccountBaseTypeInput = { name: values.name.trim() };
+        if (current.row === null) {
+          await constantsApi.create("account_base_types", input);
+          return `Added ${input.name}.`;
+        }
+        const patch: ConstantPatchOf<"account_base_types"> = {};
+        if (input.name !== current.row.name) patch.name = input.name;
+        if (Object.keys(patch).length === 0) return null;
+        await constantsApi.update("account_base_types", current.row.id, patch);
+        return `Saved ${input.name}.`;
+      }
+
+      case "account_types": {
+        const input: AccountTypeInput = {
+          name: values.name.trim(),
+          displayName: values.displayName.trim(),
+          isAsset: values.isAsset === true,
+          isBanking: values.isBanking === true,
+          isInvestment: values.isInvestment === true,
+          baseTypeId: values.baseTypeId ?? null,
+        };
+        if (current.row === null) {
+          await constantsApi.create("account_types", input);
+          return `Added ${input.displayName}.`;
+        }
+        const patch: ConstantPatchOf<"account_types"> = {};
+        if (input.name !== current.row.name) patch.name = input.name;
+        if (input.displayName !== current.row.displayName) patch.displayName = input.displayName;
+        if (input.baseTypeId !== current.row.baseTypeId) patch.baseTypeId = input.baseTypeId;
+        if (input.isAsset !== current.row.isAsset) patch.isAsset = input.isAsset;
+        if (input.isBanking !== current.row.isBanking) patch.isBanking = input.isBanking;
+        if (input.isInvestment !== current.row.isInvestment) patch.isInvestment = input.isInvestment;
+        if (Object.keys(patch).length === 0) return null;
+        await constantsApi.update("account_types", current.row.id, patch);
+        return `Saved ${input.displayName}.`;
+      }
+
+      case "cryptocurrencies": {
+        const input: CryptocurrencyInput = {
+          symbol: values.tickerSymbol.trim().toUpperCase(),
+          currencyBase: values.currencyBase.trim().toUpperCase(),
+          currencyQuote: values.currencyQuote.trim().toUpperCase(),
+          availableExchanges: values.availableExchanges.trim(),
+        };
+        if (current.row === null) {
+          await constantsApi.create("cryptocurrencies", input);
+          return `Added ${input.symbol}.`;
+        }
+        const patch: ConstantPatchOf<"cryptocurrencies"> = {};
+        if (input.symbol !== current.row.symbol) patch.symbol = input.symbol;
+        if (input.currencyBase !== current.row.currencyBase) patch.currencyBase = input.currencyBase;
+        if (input.currencyQuote !== current.row.currencyQuote) {
+          patch.currencyQuote = input.currencyQuote;
+        }
+        if (input.availableExchanges !== current.row.availableExchanges) {
+          patch.availableExchanges = input.availableExchanges;
+        }
+        if (Object.keys(patch).length === 0) return null;
+        await constantsApi.update("cryptocurrencies", current.row.id, patch);
+        return `Saved ${input.symbol}.`;
+      }
+
+      case "etfs": {
+        const input: EtfInput = instrumentInput(values);
+        if (current.row === null) {
+          await constantsApi.create("etfs", input);
+          return `Added ${input.symbol}.`;
+        }
+        const patch: ConstantPatchOf<"etfs"> = instrumentPatch(input, current.row);
+        if (Object.keys(patch).length === 0) return null;
+        await constantsApi.update("etfs", current.row.id, patch);
+        return `Saved ${input.symbol}.`;
+      }
+
+      case "stocks": {
+        const input: StockInput = {
+          ...instrumentInput(values),
+          type: values.instrumentType.trim(),
+        };
+        if (current.row === null) {
+          await constantsApi.create("stocks", input);
+          return `Added ${input.symbol}.`;
+        }
+        const patch: ConstantPatchOf<"stocks"> = instrumentPatch(input, current.row);
+        if (input.type !== current.row.type) patch.type = input.type;
+        if (Object.keys(patch).length === 0) return null;
+        await constantsApi.update("stocks", current.row.id, patch);
+        return `Saved ${input.symbol}.`;
+      }
+
+      case "markets": {
+        const input: MarketInput = {
+          micCode: values.micCode.trim().toUpperCase(),
+          marketName: values.marketName.trim(),
+          operatingMic: values.operatingMic.trim().toUpperCase(),
+          isoCountryCode: values.isoCountryCode.trim().toUpperCase(),
+          city: values.city.trim(),
+        };
+        if (current.row === null) {
+          await constantsApi.create("markets", input);
+          return `Added ${input.micCode}.`;
+        }
+        const patch: ConstantPatchOf<"markets"> = {};
+        if (input.micCode !== current.row.micCode) patch.micCode = input.micCode;
+        if (input.marketName !== current.row.marketName) patch.marketName = input.marketName;
+        if (input.operatingMic !== current.row.operatingMic) patch.operatingMic = input.operatingMic;
+        if (input.isoCountryCode !== current.row.isoCountryCode) {
+          patch.isoCountryCode = input.isoCountryCode;
+        }
+        if (input.city !== current.row.city) patch.city = input.city;
+        if (Object.keys(patch).length === 0) return null;
+        await constantsApi.update("markets", current.row.id, patch);
+        return `Saved ${input.micCode}.`;
+      }
     }
   };
 
@@ -620,6 +1192,8 @@ export default function ConstantFormDrawer({
           target={display}
           currencies={currencies}
           currenciesError={currenciesError}
+          baseTypes={baseTypes}
+          baseTypesError={baseTypesError}
           categories={categories}
           institutionTypes={institutionTypes}
           busy={saving}

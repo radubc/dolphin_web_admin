@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 };
 
 /**
- * The Constants route: the four reference catalogs the admin database masters,
+ * The Constants route: the reference catalogs the admin database masters,
  * and their state against the main app database.
  *
  * `?kind=` names the catalog to open on, so a link can point at one of them.

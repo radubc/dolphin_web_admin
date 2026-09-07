@@ -8,12 +8,14 @@
 import { apiFetch } from "@/lib/api/client";
 import type {
   ConstantInputOf,
+  ConstantJob,
   ConstantKind,
   ConstantListResponse,
   ConstantPatchOf,
   ConstantRowOf,
+  JobResponse,
+  ListQuery,
   PushInput,
-  PushResponse,
 } from "./types";
 
 const BASE = "/api/v1/admin/constants";
@@ -38,8 +40,20 @@ export function onConstantsChanged(listener: (kind: ConstantKind) => void): () =
 const kindPath = (kind: ConstantKind) => `${BASE}/${encodeURIComponent(kind)}`;
 const rowPath = (kind: ConstantKind, id: string) => `${kindPath(kind)}/${encodeURIComponent(id)}`;
 
+function listSearch(query: ListQuery): string {
+  const params = new URLSearchParams();
+  if (query.page !== undefined) params.set("page", String(query.page));
+  if (query.pageSize !== undefined) params.set("pageSize", String(query.pageSize));
+  if (query.q !== undefined && query.q.trim() !== "") params.set("q", query.q.trim());
+  if (query.state !== undefined && query.state !== "all") params.set("state", query.state);
+  const text = params.toString();
+  return text === "" ? "" : `?${text}`;
+}
+
 export const constantsApi = {
-  list: <K extends ConstantKind>(kind: K) => apiFetch<ConstantListResponse<K>>(kindPath(kind)),
+  /** One page of a catalog; see `ListQuery` for paging, search and the state filter. */
+  list: <K extends ConstantKind>(kind: K, query: ListQuery = {}) =>
+    apiFetch<ConstantListResponse<K>>(`${kindPath(kind)}${listSearch(query)}`),
 
   get: <K extends ConstantKind>(kind: K, id: string) => apiFetch<ConstantRowOf<K>>(rowPath(kind, id)),
 
@@ -55,16 +69,36 @@ export const constantsApi = {
     return row;
   },
 
-  /** Categories are retired (soft-deleted); the other kinds are removed from the admin catalog. */
+  /** Categories, account types and markets are retired (soft-deleted); the other kinds are removed from the admin catalog. */
   remove: async (kind: ConstantKind, id: string) => {
     await apiFetch<void>(rowPath(kind, id), { method: "DELETE" });
     notifyConstantsChanged(kind);
   },
 
-  /** Pushes the given ids, or every row of the kind when `ids` is omitted. An empty array is refused (422). */
-  push: async (kind: ConstantKind, input: PushInput = {}) => {
-    const result = await apiFetch<PushResponse>(`${kindPath(kind)}/push`, { method: "POST", json: input });
-    notifyConstantsChanged(kind);
-    return result;
+  /**
+   * Starts a push: `{ ids }` for chosen rows, `{ scope: "pending" }` for
+   * everything new or changed, `{ scope: "all" }` for the whole catalog. Small
+   * requests come back already finished; large ones come back `running` and
+   * are followed with `job()`.
+   */
+  push: async (kind: ConstantKind, input: PushInput) => {
+    const { job } = await apiFetch<JobResponse>(`${kindPath(kind)}/push`, { method: "POST", json: input });
+    if (job.status === "succeeded" || job.status === "failed") notifyConstantsChanged(kind);
+    return job;
   },
+
+  /** Starts a compare job that rebuilds the sync ledger for the kind. */
+  compare: async (kind: ConstantKind) => {
+    const { job } = await apiFetch<JobResponse>(`${kindPath(kind)}/compare`, { method: "POST", json: {} });
+    if (job.status === "succeeded" || job.status === "failed") notifyConstantsChanged(kind);
+    return job;
+  },
+
+  /** Recent jobs for the kind, newest first. */
+  jobs: (kind: ConstantKind, limit = 10) =>
+    apiFetch<ConstantJob[]>(`${kindPath(kind)}/jobs?limit=${encodeURIComponent(String(limit))}`),
+
+  /** One job by id, for polling. */
+  job: (kind: ConstantKind, jobId: string) =>
+    apiFetch<ConstantJob>(`${kindPath(kind)}/jobs/${encodeURIComponent(jobId)}`),
 };

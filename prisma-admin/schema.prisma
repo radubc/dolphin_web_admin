@@ -242,6 +242,7 @@ model admin_users {
   updated_at                                                DateTime                        @default(now()) @db.Timestamptz(6)
   created_by                                                String?                         @db.Uuid
   updated_by                                                String?                         @db.Uuid
+  admin_constant_jobs                                       admin_constant_jobs[]
   admin_endpoints                                           admin_endpoints[]
   admin_pages                                               admin_pages[]
   admin_permission_audit_events                             admin_permission_audit_events[]
@@ -413,4 +414,48 @@ model admin_endpoint_usage {
 
   @@id([endpoint_key, day])
   @@index([day(sort: Desc)], map: "idx_admin_endpoint_usage_day")
+}
+
+/// Sync ledger for the Constants page: one row per (kind, id) saying how the
+/// admin catalog row relates to the main app database, written by compare and
+/// push jobs and maintained by create / update / delete. Hand-written to match
+/// docs/sql/007_constants_sync_and_jobs.sql; `prisma db pull` should reproduce it.
+model admin_constant_sync {
+  kind        String
+  row_id      String
+  /// new | changed | synced | main_only
+  state       String
+  compared_at DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([kind, row_id])
+  @@index([kind, state], map: "idx_admin_constant_sync_kind_state")
+}
+
+/// Compare and push jobs for the Constants page: progress, counters, outcome.
+model admin_constant_jobs {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  kind            String
+  /// compare | push
+  type            String
+  /// queued | running | succeeded | failed
+  status          String       @default("queued")
+  total           Int?
+  processed       Int          @default(0)
+  created         Int          @default(0)
+  updated         Int          @default(0)
+  unchanged       Int          @default(0)
+  dependency_rows Int          @default(0)
+  main_only       Int          @default(0)
+  error           String?
+  /// The push request as received (ids or scope), for the record.
+  request         Json         @default("{}")
+  requested_by    String?      @db.Uuid
+  created_at      DateTime     @default(now()) @db.Timestamptz(6)
+  started_at      DateTime?    @db.Timestamptz(6)
+  finished_at     DateTime?    @db.Timestamptz(6)
+  heartbeat_at    DateTime?    @db.Timestamptz(6)
+  admin_users     admin_users? @relation(fields: [requested_by], references: [id], onUpdate: NoAction)
+
+  @@index([kind, created_at(sort: Desc)], map: "idx_admin_constant_jobs_kind_created_at")
+  @@index([status], map: "idx_admin_constant_jobs_status")
 }

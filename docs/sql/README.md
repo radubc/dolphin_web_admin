@@ -15,6 +15,19 @@ result afterwards.
 | 3 | [`003_bootstrap_owner.sql`](./003_bootstrap_owner.sql) | Inserts you as the first super-admin. Check the sub and email first. | Once, after step 2. Re-running is safe. |
 | 4 | [`004_constants.sql`](./004_constants.sql) | Registers the six Constants endpoints and their action links, and lets the audit trail record `target_type = 'catalog'` (written once per push). Creates no tables. | Once, after step 3. Re-running is safe. |
 | 5 | [`005_constants_unique_indexes.sql`](./005_constants_unique_indexes.sql) | Case-insensitive unique indexes on currency codes, country codes, institution names and live category names per parent, so a duplicate is refused by the database and not only by the app. | Once, after step 4. Re-running is safe; fails (and applies nothing) if duplicates exist. |
+| 6 | [`006_account_types_unique_index.sql`](./006_account_types_unique_index.sql) | Case-insensitive unique index on live account type names per base type, for the two catalogs added to Constants (`account_base_types`, `account_types`). Creates no tables; base type names are already unique. | Once, after step 5. Re-running is safe; fails (and applies nothing) if duplicates exist. |
+| 7 | [`007_constants_sync_and_jobs.sql`](./007_constants_sync_and_jobs.sql) | The Constants sync ledger (`admin_constant_sync`) and job records (`admin_constant_jobs`), plus the three new endpoints (compare, jobs list, jobs get) and their action links. This is what lets a 300 000-row catalog be listed, compared and pushed. | Once, after step 6. Re-running is safe. |
+
+Until step 7 has run, the Constants list, compare, push and job endpoints
+answer 503 `admin_schema_missing`: the app does not fake a ledger it does not
+have.
+
+The four market-data catalogs (`cryptocurrencies`, `etfs`, `stocks`,
+`markets`) needed **no file of their own**: their tables already exist in the
+admin database and were created with the unique constraints the app relies on
+(`cryptocurrencies` on symbol + base + quote, `etfs` and `stocks` on
+symbol + exchange, `markets` on `mic_code`), and they are served by the same
+`[kind]` endpoints steps 4 and 7 registered.
 
 Each file is one transaction: if a statement fails, nothing from that file is
 applied. Fix the cause and run the file again.
@@ -52,7 +65,7 @@ before the SQL has run).
 
 ## Adding a table or column later
 
-1. Write the change as a new numbered file here (`006_….sql`), transactional,
+1. Write the change as a new numbered file here (`008_….sql`), transactional,
    with comments saying what and why.
 2. Run it in pgAdmin.
 3. `npx prisma db pull --config prisma-admin.config.ts`, then
