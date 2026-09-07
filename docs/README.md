@@ -10,6 +10,7 @@ the architecture, then the topic you need.
 | [access-control.md](./access-control.md) | who may open which page and call which endpoint: the allowlist, roles, actions, the **access map**, and what happens in the background. |
 | [api.md](./api.md) | the API contract: envelope, error codes, rate limits, every endpoint. |
 | [database.md](./database.md) | the two databases, the Prisma clients, and the workflow for changing the admin schema (SQL in pgAdmin, then `db pull`). |
+| [constants.md](./constants.md) | the four shared reference catalogs, and what "push to the main database" does and does not do. |
 | [sql/README.md](./sql/README.md) | the SQL scripts to run and in what order. |
 | [admin-access/README.md](./admin-access/README.md) | the original design note for the RBAC tables (allowlist, roles, actions, audit). |
 

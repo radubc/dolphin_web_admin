@@ -13,6 +13,8 @@ result afterwards.
 | 1 | [`001_admin_access.sql`](./001_admin_access.sql) | Allowlist, actions, roles, grants, audit trail, plus the seeded catalog and three system roles. | Once, on a fresh admin database. |
 | 2 | [`002_access_map_and_services.sql`](./002_access_map_and_services.sql) | Access map (`admin_pages`, `admin_page_actions`), service registry (`admin_endpoints`, `admin_endpoint_actions`), usage counters, two new actions, seeds for every page and endpoint. | Once, after step 1. |
 | 3 | [`003_bootstrap_owner.sql`](./003_bootstrap_owner.sql) | Inserts you as the first super-admin. Check the sub and email first. | Once, after step 2. Re-running is safe. |
+| 4 | [`004_constants.sql`](./004_constants.sql) | Registers the six Constants endpoints and their action links, and lets the audit trail record `target_type = 'catalog'` (written once per push). Creates no tables. | Once, after step 3. Re-running is safe. |
+| 5 | [`005_constants_unique_indexes.sql`](./005_constants_unique_indexes.sql) | Case-insensitive unique indexes on currency codes, country codes, institution names and live category names per parent, so a duplicate is refused by the database and not only by the app. | Once, after step 4. Re-running is safe; fails (and applies nothing) if duplicates exist. |
 
 Each file is one transaction: if a statement fails, nothing from that file is
 applied. Fix the cause and run the file again.
@@ -50,7 +52,7 @@ before the SQL has run).
 
 ## Adding a table or column later
 
-1. Write the change as a new numbered file here (`004_….sql`), transactional,
+1. Write the change as a new numbered file here (`006_….sql`), transactional,
    with comments saying what and why.
 2. Run it in pgAdmin.
 3. `npx prisma db pull --config prisma-admin.config.ts`, then

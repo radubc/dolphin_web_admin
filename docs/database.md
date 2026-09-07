@@ -37,7 +37,7 @@ The full DDL with comments is in `docs/sql/`. The Prisma models in
 The app never migrates a database. The workflow is:
 
 1. **Write SQL** as a new numbered, transactional file in `docs/sql/`
-   (`004_….sql`), with comments. Include seeds if the change needs data.
+   (`006_….sql`), with comments. Include seeds if the change needs data.
 2. **Run it in pgAdmin** against `admin_penny_squeeze`. See
    [sql/README.md](./sql/README.md).
 3. **Pull the schema into Prisma** so the models match the live database:
@@ -73,6 +73,15 @@ Its schema is introspected from the consumer app's database
 (`npx prisma db pull`, default config) and many models carry row-level
 security. Treat it as read-only from this app until a feature explicitly needs
 a write, and never run a migration against it from here.
+
+**The one deliberate write path** is the Constants push: `pushConstants` in
+`src/lib/constants/push.ts` upserts four reference tables **by id** —
+`countries`, `currencies`, `financial_institutions`, `categories` — from the
+admin catalogs the console edits. It never deletes a row there, because tenant
+data (accounts, transactions, budgets) references these ids; a category that is
+retired in the admin database travels across as a `deleted_at` timestamp, not
+as a delete. None of the four tables has row-level security. See
+[constants.md](./constants.md).
 
 ## Mock or real
 

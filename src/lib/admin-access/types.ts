@@ -141,7 +141,9 @@ export type AuditTargetType =
   | "admin_user_role"
   | "admin_role_action"
   | "admin_page"
-  | "admin_endpoint";
+  | "admin_endpoint"
+  /** A reference catalog (Constants); the row names the kind in `target_label`. */
+  | "catalog";
 
 export interface AuditEvent {
   id: string;

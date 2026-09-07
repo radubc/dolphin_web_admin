@@ -87,6 +87,25 @@ Default rules as seeded; all editable on the Access Map.
 | `admin.endpoints.list` | `GET /api/v1/admin/endpoints` | Endpoint rules merged with the registry. | `can_manage_access_map` or `can_read_services` |
 | `admin.endpoints.upsert` | `PUT /api/v1/admin/endpoints/[key]` | Register or update an endpoint rule. | super-admin |
 | `admin.usage.list` | `GET /api/v1/admin/usage` | 30-day counters per endpoint plus the rate-limit presets. | `can_read_services` |
+| `admin.constants.list` | `GET /api/v1/admin/constants/[kind]` | One catalog with each row's push state, plus `mainOnlyIds`. | `can_read_catalogs` or `can_write_catalogs` |
+| `admin.constants.create` | `POST /api/v1/admin/constants/[kind]` | Adds a row to the admin catalog. 201. | `can_write_catalogs` |
+| `admin.constants.get` | `GET /api/v1/admin/constants/[kind]/[id]` | One catalog row with its push state. | `can_read_catalogs` or `can_write_catalogs` |
+| `admin.constants.update` | `PATCH /api/v1/admin/constants/[kind]/[id]` | Partial edit; at least one field. | `can_write_catalogs` |
+| `admin.constants.delete` | `DELETE /api/v1/admin/constants/[kind]/[id]` | Retires a category, removes the other kinds. 204. | `can_write_catalogs` |
+| `admin.constants.push` | `POST /api/v1/admin/constants/[kind]/push` | Upserts into the main app database. Body `{ ids? }`. | `can_write_catalogs` |
+
+`[kind]` is one of `countries`, `currencies`, `financial_institutions`,
+`categories`; any other value is a 404 `not_found`.
+
+**Push semantics.** `admin.constants.push` is the only endpoint that writes to
+the main app database. It **upserts by id** inside one transaction and **never
+deletes** there — rows are referenced by tenant data, so removal stays a
+deliberate act on the consumer side. Dependencies are written first (a
+country's currency, a category's ancestors) and reported under `dependencies`.
+Each row comes back as `created`, `updated` or `unchanged`; identical rows are
+skipped. Omitting `ids` pushes the whole catalog; an **empty** `ids` array is a
+422 `validation_failed`, never "everything". At most 2000 rows per push. Full
+details in [constants.md](./constants.md).
 
 ## Calling from the browser
 
