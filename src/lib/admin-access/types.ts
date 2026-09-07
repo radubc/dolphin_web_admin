@@ -25,6 +25,7 @@ export const ACTION_KEYS = [
   "can_read_admin_audit",
   "can_read_user_list",
   "can_read_user_detail",
+  "can_invite_users",
   "can_write_user",
   "can_disable_user",
   "can_read_tenant_list",
@@ -145,7 +146,9 @@ export type AuditTargetType =
   | "admin_page"
   | "admin_endpoint"
   /** A reference catalog (Constants); the row names the kind in `target_label`. */
-  | "catalog";
+  | "catalog"
+  /** An invitation to the consumer app; `target_label` is the email address. */
+  | "customer_invite";
 
 export interface AuditEvent {
   id: string;

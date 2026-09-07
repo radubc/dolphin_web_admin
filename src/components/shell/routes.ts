@@ -5,6 +5,7 @@
 export const TAB_ROUTES = {
   overview: "/",
   constants: "/constants",
+  customers: "/customers",
   userManagement: "/user-management",
   support: "/support",
   accessMap: "/access-map",

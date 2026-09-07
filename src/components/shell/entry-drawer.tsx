@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { App } from "antd";
+import InviteCustomerDrawer from "@/components/customers/invite-customer-drawer";
 import UserFormDrawer from "@/components/user-management/user-form-drawer";
 import { adminAccessApi } from "@/lib/admin-access/client";
 import type { AdminCapabilities, AdminRole } from "@/lib/admin-access/types";
@@ -19,18 +20,25 @@ interface EntryDrawerProps {
  *
  * As in the consumer app, every kind renders the same form its own page uses,
  * in add mode, and stays mounted with its own `open` so it can play its
- * slide-out. There is one kind so far: "Invite user" mounts the User
- * Management page's form. It loads the role catalog itself when it opens —
- * the shell has no store — and announces the new user through the API client
- * so the page refreshes if it is on screen.
+ * slide-out. Two kinds so far:
+ *
+ * - "Invite user" mounts the User Management page's form. It loads the role
+ *   catalog itself when it opens — the shell has no store — and announces the
+ *   new user through the API client so the page refreshes if it is on screen.
+ * - "Invite customer" mounts the Customers page's invite drawer, which is
+ *   already self-contained: it owns its own toast and announces the new
+ *   invitation, so there is nothing for the shell to wire up.
  */
 export default function EntryDrawer({ kind, capabilities, onClose }: EntryDrawerProps) {
   return (
-    <InviteUserEntryDrawer
-      open={kind === "invite_user"}
-      capabilities={capabilities}
-      onClose={onClose}
-    />
+    <>
+      <InviteUserEntryDrawer
+        open={kind === "invite_user"}
+        capabilities={capabilities}
+        onClose={onClose}
+      />
+      <InviteCustomerDrawer open={kind === "invite_customer"} onClose={onClose} />
+    </>
   );
 }
 

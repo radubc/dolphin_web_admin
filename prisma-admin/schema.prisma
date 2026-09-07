@@ -244,6 +244,7 @@ model admin_users {
   updated_by                                                String?                         @db.Uuid
   admin_constant_jobs                                       admin_constant_jobs[]
   admin_currency_pairs                                      admin_currency_pairs[]
+  admin_customer_invites                                    admin_customer_invites[]
   admin_endpoints                                           admin_endpoints[]
   admin_integration_runs                                    admin_integration_runs[]
   admin_integrations                                        admin_integrations[]
@@ -623,4 +624,41 @@ model admin_exchange_rates {
 
   @@unique([from_currency, to_currency, date], map: "admin_exchange_rates_from_to_date_key")
   @@index([from_currency, to_currency, date(sort: Desc)], map: "idx_admin_exchange_rates_pair_date")
+}
+
+/// Invitations to the **consumer** app: one row per invitation an operator
+/// sent, so the Customers page can show who was invited, by whom, when, how
+/// often the email went out and whether the person has shown up.
+///
+/// The Cognito account itself lives in the customer pool; this table only
+/// records what we did and what Cognito answered. A temporary password is
+/// never seen here and never stored.
+///
+/// This model contains a partial expression index Prisma cannot express:
+/// `CREATE UNIQUE INDEX … ON admin_customer_invites (lower(email)) WHERE
+/// status = 'invited'`, which is what makes a second live invitation for the
+/// same address impossible. Mirrors docs/sql/010_customers.sql.
+model admin_customer_invites {
+  id               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email            String
+  /// The username the pool account was created with (the email address).
+  cognito_username String
+  /// The account's `sub`, once Cognito answered; NULL when the create failed.
+  cognito_sub      String?
+  /// invited | accepted | revoked | failed
+  status           String       @default("invited")
+  note             String?
+  invited_by       String?      @db.Uuid
+  created_at       DateTime     @default(now()) @db.Timestamptz(6)
+  last_sent_at     DateTime?    @db.Timestamptz(6)
+  send_count       Int          @default(0)
+  accepted_at      DateTime?    @db.Timestamptz(6)
+  revoked_at       DateTime?    @db.Timestamptz(6)
+  /// Cognito's message when a create or a resend was refused.
+  error            String?
+  admin_users      admin_users? @relation(fields: [invited_by], references: [id], onUpdate: NoAction)
+
+  @@index([cognito_sub], map: "idx_admin_customer_invites_cognito_sub")
+  @@index([created_at(sort: Desc)], map: "idx_admin_customer_invites_created_at")
+  @@index([status], map: "idx_admin_customer_invites_status")
 }

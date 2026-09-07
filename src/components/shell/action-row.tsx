@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { RightOutlined } from "@ant-design/icons";
 import { featureColors, surfaceColors } from "@/lib/theme/colors";
 import type { FeatureColor } from "@/lib/theme/colors";
@@ -10,6 +11,13 @@ interface ActionRowProps {
   title: string;
   subtitle: string;
   color: FeatureColor;
+  /**
+   * When the row goes somewhere, the route. Given one, the row *is* a link —
+   * so the settings menu can be middle-clicked, copied and prefetched like the
+   * rail tabs — and `onClick` only closes the popover behind it. Quick actions
+   * open a drawer instead and pass no href.
+   */
+  href?: string;
   onClick: () => void;
 }
 
@@ -24,14 +32,11 @@ export default function ActionRow({
   title,
   subtitle,
   color,
+  href,
   onClick,
 }: ActionRowProps) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex w-full cursor-pointer items-center gap-3 rounded-lg border-0 bg-transparent px-2.5 py-2 text-left transition-colors hover:bg-black/[0.04]"
-    >
+  const body = (
+    <>
       <Icon
         style={{ fontSize: 20, color: featureColors[color], flexShrink: 0 }}
       />
@@ -50,6 +55,19 @@ export default function ActionRow({
         className="ms-auto"
         style={{ fontSize: 11, color: surfaceColors.textTertiary }}
       />
+    </>
+  );
+
+  const className =
+    "flex w-full cursor-pointer items-center gap-3 rounded-lg border-0 bg-transparent px-2.5 py-2 text-left transition-colors hover:bg-black/[0.04]";
+
+  return href === undefined ? (
+    <button type="button" onClick={onClick} className={className}>
+      {body}
     </button>
+  ) : (
+    <Link href={href} onClick={onClick} className={className}>
+      {body}
+    </Link>
   );
 }

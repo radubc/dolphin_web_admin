@@ -76,9 +76,24 @@ and the browser:
 | Place | Function | What it does |
 | --- | --- | --- |
 | Every page in `src/app/(app)/` | `requirePageAccess("<key>")` | verifies session + allowlist, evaluates the page's rule, redirects to `/no-access` if refused. |
-| The `(app)` layout | `accessiblePages(principal)` | filters the rail tabs and the "New" menu to what the rule allows. This is presentation; the page check above is the boundary. |
+| The `(app)` layout | `accessiblePages(principal)` | filters the rail tabs, the gear menu and the "New" menu to what the rule allows. This is presentation; the page check above is the boundary. |
 | Every operator route in `src/app/api/v1/admin/` | `adminHandler(fn, { endpoint: "<key>" })` | authenticates, resolves the allowlist row, loads the endpoint's rule, refuses with 403 `forbidden` (or 503 when disabled), then runs the handler. |
 | Inside pages | `canDo(capabilities, "<action>")` | greys out or hides controls. Not a boundary; the API re-checks. |
+
+### Where a page is drawn
+
+The access map decides *who* may open a page; it does not decide *where* the
+shell puts it. That is the `section` field on each entry in
+`src/lib/admin-access/page-registry.ts`: `main` (the default) puts a page on
+the left rail, `settings` puts it in the gear menu beside the bell in the nav
+bar. The `(app)` layout splits the pages `accessiblePages` returned into those
+two lists and hands both to the shell, so an operator only ever sees a gear row
+they are allowed to open — the same filter the rail gets.
+
+The section is code, not data, on purpose: moving a page from the rail into the
+gear menu is a layout decision the build owns, and it changes nothing about the
+page's route, its key or its rule. User Management is the one page under
+Settings today; everything else, Customers included, is on the rail.
 
 `auth_kind` on an endpoint says whether the map applies at all: `public`
 endpoints (health, the auth routes) and `session` endpoints (`/api/v1/me`,
@@ -99,7 +114,8 @@ order (pages) or operator notes (endpoints). Every save writes an audit event
    through `adminHandler(fn, { endpoint: "<key>" })` (or `apiHandler` /
    `protectedHandler` with `{ endpoint }` for public and session endpoints).
 2. Add the entry to the matching registry with sensible defaults. Pages also
-   get an icon in `src/components/shell/definitions.ts`.
+   choose a `section` (rail or gear menu) and get an icon in
+   `src/components/shell/definitions.ts`.
 3. Deploy. The entry appears on the Access Map as **Not registered**; press
    **Register** (or **Register Missing**), then adjust the rule. Or add an
    `INSERT` to a new numbered file in `docs/sql/`.

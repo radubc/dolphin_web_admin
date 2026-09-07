@@ -8,7 +8,12 @@ import NavBar from "./nav-bar";
 import NotificationCenter from "./notification-center";
 import SideRail from "./side-rail";
 import type { AdminCapabilities } from "@/lib/admin-access/types";
-import type { QuickActionKind, ShellQuickAction, ShellTab } from "./definitions";
+import type {
+  QuickActionKind,
+  ShellQuickAction,
+  ShellSettingsEntry,
+  ShellTab,
+} from "./definitions";
 import { INITIAL_NOTIFICATIONS, type ShellNotification } from "./notifications";
 
 interface AppShellProps {
@@ -20,6 +25,8 @@ interface AppShellProps {
   capabilities: AdminCapabilities;
   /** Rail tabs the operator may open, in order, per the access map. */
   tabs: readonly ShellTab[];
+  /** Gear-menu pages the operator may open, in order, per the access map. */
+  settingsEntries: readonly ShellSettingsEntry[];
   /** Quick actions the operator may use, in order, per the access map. */
   quickActions: readonly ShellQuickAction[];
   /** The active page, rendered in the scrolling content area. */
@@ -41,6 +48,7 @@ export default function AppShell({
   name,
   capabilities,
   tabs,
+  settingsEntries,
   quickActions,
   children,
 }: AppShellProps) {
@@ -81,6 +89,7 @@ export default function AppShell({
         name={name}
         notifications={notifications}
         quickActions={quickActions}
+        settingsEntries={settingsEntries}
         onQuickAction={setEntryKind}
         onOpenHelp={() => setHelpOpen(true)}
         onOpenNotificationCenter={() => setNotificationCenterOpen(true)}

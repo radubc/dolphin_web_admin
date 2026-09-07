@@ -15,17 +15,18 @@ Internal admin console for the Penny Squeeze personal-finance product: operator 
 
 ## Layout
 - `src/app/` — routes, root layout, global CSS
-- `src/app/(app)/` — the authenticated pages (`/` Overview, `/constants`, `/integrations`, `/user-management`, `/support`, `/access-map`, `/services`)
+- `src/app/(app)/` — the authenticated pages (`/` Overview, `/constants`, `/integrations`, `/customers`, `/user-management`, `/support`, `/access-map`, `/services`). `page-registry.ts` gives each a `section`: `main` pages are rail tabs, `settings` pages (User Management) live in the nav bar's gear menu; the access map still decides who may open each
 - `src/app/login/`, `src/app/forgot-password/` — the auth pages; `src/app/api/auth/` — refresh and logout routes
 - `src/app/api/` — Route Handlers; business endpoints under `/api/v1/`
 - `src/lib/api/` — API toolkit: handler wrapper, auth, validation, response/error helpers
 - `src/lib/security/` — rate limiting and client IP resolution
 - `src/lib/auth/` — Cognito sign-in, cookie session (`psa_` prefix), refresh
 - `src/lib/admin-access/` — access control: `types.ts` (model + `evaluateRule`), `repository.ts` (storage seam: `prisma-repository.ts` by default, `mock.ts` with `ADMIN_ACCESS_STORE=mock`), `authorize.ts` (`requireAdminSession`, `requirePageAccess`, `adminHandler`), `page-registry.ts` + `endpoint-registry.ts` (what the build ships; rules live in the DB), `client.ts` + stores (browser side)
-- `src/app/api/v1/admin/` — users, roles, actions, audit, pages, endpoints, usage, me, constants, integrations; every handler goes through `adminHandler(fn, { endpoint })`
+- `src/app/api/v1/admin/` — users, roles, actions, audit, pages, endpoints, usage, me, constants, integrations, customers; every handler goes through `adminHandler(fn, { endpoint })`
 - `src/app/api/v1/service/` — machine endpoints for the consumer app (`quotes`, `exchange-rates`), exported through `serviceHandler` and authenticated with `API_KEYS`; each must be listed in `PUBLIC_API_PATHS` in `src/proxy.ts`
 - `src/lib/integrations/` — external providers: `types.ts` (wire model), `providers/` (TwelveData and Bank of Canada fetch + parse, no Prisma), `jobs/` (what each run does: catalogs, quotes, rates), `runs.ts` (in-process run records, mirrors `constants/jobs.ts`), `lookup.ts` (the on-demand paths behind the service endpoints), `schedule.ts` (next-run math) + `scheduler.ts` (the per-minute ticker started from `src/instrumentation.ts`), `service.ts` / `repository.ts` / `schemas.ts`, `client.ts` (browser side)
-- `src/components/user-management/`, `access-map/`, `services/`, `constants/`, `integrations/` — the built pages
+- `src/components/user-management/`, `access-map/`, `services/`, `constants/`, `integrations/`, `customers/` — the built pages
+- `src/lib/customers/` — the consumer app's users read from the main database (read-only), their status in the **customer** Cognito pool, and invitations (`AdminCreateUser` on that pool, recorded in `admin_customer_invites`); `config.ts` reads the `CUSTOMER_COGNITO_*` variables and never falls back to the admin pool
 - `docs/sql/` — numbered SQL the owner runs in pgAdmin against the admin DB; `docs/*.md` — guides for people
 - `src/components/shell/` — nav bar, side rail, quick actions; tabs and actions are listed in `definitions.ts`, routes in `routes.ts`
 - `public/brand/` — logo assets copied from the consumer app
@@ -43,6 +44,7 @@ Names only; values live in `.env`, which is never read or quoted by an agent.
 - `ADMIN_DATABASE_URL` — admin PostgreSQL connection string (`admin_penny_squeeze`)
 - `ADMIN_COGNITO_REGION`, `ADMIN_COGNITO_USER_POOL_ID`, `ADMIN_COGNITO_CLIENT_ID` — the **admin-only** Cognito pool. `src/lib/auth/config.ts` reads these first, then `COGNITO_*` / `AWS_REGION`, then `NEXT_PUBLIC_COGNITO_*`; the `.env` currently uses the `NEXT_PUBLIC_` spellings and points at the admin pool
 - `ADMIN_COGNITO_CLIENT_SECRET` (fallback `COGNITO_CLIENT_SECRET`) — optional, only when the app client has a secret. Server-only, no public fallback
+- `CUSTOMER_COGNITO_USER_POOL_ID`, `CUSTOMER_COGNITO_REGION` — the **consumer app's** Cognito pool, for the Customers page and invitations only. Never the admin pool; the pool id has no fallback on purpose. The Admin* calls are signed with AWS credentials from the SDK's default chain (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` in `.env`, a profile, or an instance role) that allow `cognito-idp:ListUsers`, `AdminCreateUser`, `AdminGetUser` and `AdminDeleteUser` on that pool
 - `ADMIN_SUB` — Cognito `sub` of the owner. The mock repository seeds its super-admin row with it; the Prisma version will use it only for the bootstrap insert, never for a runtime decision
 - `API_KEYS` — optional, comma-separated keys (min 32 chars each) for machine clients; two entries allow a rotation
 - `TWELVEDATA_API_KEY` — TwelveData key for the quote integration and the on-demand quote endpoint. Server-only; the Integrations page shows only whether it is set. The catalog download and the Bank of Canada rates need no key

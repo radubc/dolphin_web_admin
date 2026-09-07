@@ -7,12 +7,14 @@ import {
   BellOutlined,
   PlusCircleFilled,
   QuestionCircleOutlined,
+  SettingOutlined,
 } from "@ant-design/icons";
 import { surfaceColors } from "@/lib/theme/colors";
 import NotificationsPopover from "./notifications-popover";
 import QuickActions from "./quick-actions";
+import SettingsPopover from "./settings-popover";
 import UserMenu from "./user-menu";
-import type { QuickActionKind, ShellQuickAction } from "./definitions";
+import type { QuickActionKind, ShellQuickAction, ShellSettingsEntry } from "./definitions";
 import { unreadCountOf, type ShellNotification } from "./notifications";
 
 /** Nav bar height, matching the consumer app's 60pt toolbar. */
@@ -37,6 +39,8 @@ interface NavBarProps {
   name: string | null;
   notifications: readonly ShellNotification[];
   quickActions: readonly ShellQuickAction[];
+  /** Pages the operator may open from the gear menu, per the access map. */
+  settingsEntries: readonly ShellSettingsEntry[];
   onQuickAction: (kind: QuickActionKind) => void;
   onOpenHelp: () => void;
   onOpenNotificationCenter: () => void;
@@ -63,9 +67,11 @@ function displayNameFor(name: string | null, email: string | null): string {
  * middle, help / notifications / account on the right.
  *
  * Same chrome as the consumer web app's bar — a white surface with a hairline
- * under it — minus the global search and the settings gear, which have nothing
- * to search or configure in the admin console yet. Both slot back in beside the
- * bell when they do.
+ * under it — minus the global search, which has nothing to search in the admin
+ * console yet; it slots back in beside the bell when it does. The gear beside
+ * the bell lists the pages the build files under Settings (User Management,
+ * Customers) rather than on the rail, filtered by the access map like every
+ * other entry.
  *
  * The popovers are owned here because they hang off these buttons; anything
  * they *open* — drawers, the notification centre — is shell state and is raised
@@ -76,6 +82,7 @@ export default function NavBar({
   name,
   notifications,
   quickActions,
+  settingsEntries,
   onQuickAction,
   onOpenHelp,
   onOpenNotificationCenter,
@@ -86,6 +93,7 @@ export default function NavBar({
 }: NavBarProps) {
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const unread = unreadCountOf(notifications);
 
@@ -197,6 +205,27 @@ export default function NavBar({
               />
             </Badge>
           </span>
+        </Popover>
+
+        <Popover
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+          trigger="click"
+          placement="bottomRight"
+          content={
+            <SettingsPopover
+              entries={settingsEntries}
+              onSelect={() => setSettingsOpen(false)}
+            />
+          }
+        >
+          <Button
+            type="text"
+            shape="circle"
+            title="Settings"
+            aria-label="Settings"
+            icon={<SettingOutlined style={TOOLBAR_ICON_STYLE} />}
+          />
         </Popover>
 
         <UserMenu email={email} />

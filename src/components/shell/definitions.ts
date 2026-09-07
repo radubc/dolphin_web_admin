@@ -15,6 +15,7 @@ import {
   ApiOutlined,
   BarChartOutlined,
   CloudServerOutlined,
+  ContactsOutlined,
   CustomerServiceOutlined,
   DatabaseOutlined,
   TeamOutlined,
@@ -40,11 +41,17 @@ export const PAGE_PRESENTATION: Readonly<Record<string, PagePresentation>> = {
   overview: { color: "overview", icon: BarChartOutlined },
   constants: { color: "constants", icon: DatabaseOutlined },
   user_management: { color: "users", icon: TeamOutlined },
+  customers: { color: "users", icon: ContactsOutlined },
   support: { color: "support", icon: CustomerServiceOutlined },
   access_map: { color: "accessMap", icon: ApartmentOutlined },
   services: { color: "services", icon: CloudServerOutlined },
   integrations: { color: "integrations", icon: ApiOutlined },
   invite_user: { color: "users", icon: UserAddOutlined, subtitle: "Send an invitation to a new operator" },
+  invite_customer: {
+    color: "users",
+    icon: UserAddOutlined,
+    subtitle: "Create a consumer-app account and email the invitation",
+  },
 };
 
 export const DEFAULT_PRESENTATION: PagePresentation = { color: "neutral", icon: DatabaseOutlined };
@@ -64,6 +71,20 @@ export interface ShellTab {
   label: string;
 }
 
+/**
+ * A page the caller may open from the nav bar's gear menu instead of the rail:
+ * the same access-map decision as a tab, drawn somewhere else. The `section`
+ * field in `src/lib/admin-access/page-registry.ts` is what sorts a page into
+ * one list or the other.
+ */
+export interface ShellSettingsEntry {
+  key: string;
+  href: string;
+  label: string;
+  /** The row's second line, from the access map's description. */
+  description: string;
+}
+
 /** A quick action the caller may use, already filtered and ordered by the access map. */
 export interface ShellQuickAction {
   key: string;
@@ -72,7 +93,7 @@ export interface ShellQuickAction {
 }
 
 /** Identifies which entry drawer a quick action opens. Keys match `admin_pages`. */
-export type QuickActionKind = "invite_user";
+export type QuickActionKind = "invite_user" | "invite_customer";
 
 /** Width of the entry drawers, matching the consumer app's 600pt. */
 export const ENTRY_DRAWER_WIDTH = 600;
