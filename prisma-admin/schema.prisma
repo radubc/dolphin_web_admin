@@ -29,6 +29,7 @@ model account_types {
   @@index([name], map: "idx_account_types_name")
 }
 
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
 model categories {
   id               String       @id
   name             String
@@ -46,6 +47,7 @@ model categories {
   @@index([type], map: "idx_categories_type")
 }
 
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
 model countries {
   id          String      @id
   name        String
@@ -69,6 +71,7 @@ model cryptocurrencies {
   @@index([symbol], map: "idx_preload_crypto_symbol")
 }
 
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
 model currencies {
   id         String      @id
   code       String
@@ -98,6 +101,7 @@ model etfs {
   @@index([symbol], map: "idx_preload_etfs_symbol")
 }
 
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
 model financial_institutions {
   id                 String @id
   name               String

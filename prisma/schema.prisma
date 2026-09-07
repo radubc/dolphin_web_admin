@@ -1,6 +1,7 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
@@ -27,7 +28,6 @@ model account_balances {
   @@index([tenant_id], map: "idx_account_balances_tenant_id")
 }
 
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model account_base_types {
   id            String          @id
   name          String          @unique
@@ -56,7 +56,6 @@ model account_external_identifiers {
   @@index([external_plaid_id], map: "idx_external_plaid_id")
 }
 
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model account_types {
   id                 String              @id
   name               String
@@ -377,7 +376,6 @@ model budgets {
   @@index([tenant_id], map: "idx_budgets_tenant_id")
 }
 
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model categories {
   id                               String                             @id
   name                             String
@@ -414,6 +412,16 @@ model chart_color_assignments {
 
   @@unique([tenant_id, domain, label])
   @@index([tenant_id], map: "idx_chart_color_assignments_tenant_id")
+}
+
+model countries {
+  id          String      @id
+  name        String
+  alpha2_code String
+  alpha3_code String
+  currency_id String?
+  created_at  DateTime?   @default(now()) @db.Timestamptz(6)
+  currencies  currencies? @relation(fields: [currency_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -469,6 +477,37 @@ model cryptocurrencies {
   @@index([tenant_id], map: "idx_cryptocurrencies_tenant_id")
 }
 
+model currencies {
+  id         String      @id
+  code       String
+  name       String
+  symbol     String?
+  created_at DateTime?   @default(now()) @db.Timestamptz(6)
+  countries  countries[]
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model documents {
+  id              String    @id
+  tenant_id       String
+  owner_type      String
+  owner_id        String
+  file_name       String
+  file_path       String
+  file_size       Int?
+  mime_type       String?
+  attachment_type String?   @default("document")
+  notes           String?
+  uploaded_at     DateTime? @default(now()) @db.Timestamptz(6)
+  created_at      DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime? @default(now()) @db.Timestamptz(6)
+  deleted_at      DateTime? @db.Timestamptz(6)
+  tenants         tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([owner_type, owner_id], map: "idx_documents_owner")
+  @@index([tenant_id], map: "idx_documents_tenant_id")
+}
+
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model exchange_rates {
   id                 String    @id
@@ -487,7 +526,6 @@ model exchange_rates {
   @@index([tenant_id], map: "idx_exchange_rates_tenant_id")
 }
 
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model financial_institutions {
   id                 String           @id
   name               String
@@ -652,6 +690,24 @@ model loans {
   @@index([tenant_id], map: "idx_loans_tenant_id")
 }
 
+model markets {
+  id               String    @id
+  mic_code         String    @unique
+  operating_mic    String
+  market_name      String
+  iso_country_code String
+  city             String
+  created_at       DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime? @default(now()) @db.Timestamptz(6)
+  deleted_at       DateTime? @db.Timestamptz(6)
+
+  @@index([city], map: "idx_markets_city")
+  @@index([iso_country_code], map: "idx_markets_country_code")
+  @@index([deleted_at], map: "idx_markets_deleted_at")
+  @@index([mic_code], map: "idx_markets_mic_code")
+  @@index([market_name], map: "idx_markets_name")
+}
+
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model net_worth_classes {
   id          String    @id
@@ -782,6 +838,60 @@ model portfolios {
   @@index([deleted_at], map: "idx_portfolios_deleted_at")
   @@index([name], map: "idx_portfolios_name")
   @@index([tenant_id], map: "idx_portfolios_tenant_id")
+}
+
+model preload_cryptocurrencies {
+  id                  Int       @id @default(autoincrement())
+  symbol              String
+  available_exchanges String
+  currency_base       String
+  currency_quote      String
+  created_at          DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@unique([symbol, currency_base, currency_quote])
+  @@index([currency_base], map: "idx_preload_crypto_currency_base")
+  @@index([symbol], map: "idx_preload_crypto_symbol")
+}
+
+model preload_etfs {
+  id         Int       @id @default(autoincrement())
+  symbol     String
+  name       String
+  currency   String
+  exchange   String
+  mic_code   String
+  country    String
+  figi_code  String
+  cfi_code   String
+  isin       String
+  cusip      String
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@unique([symbol, exchange])
+  @@index([mic_code], map: "idx_preload_etfs_mic_code")
+  @@index([name], map: "idx_preload_etfs_name")
+  @@index([symbol], map: "idx_preload_etfs_symbol")
+}
+
+model preload_stocks {
+  id         Int       @id @default(autoincrement())
+  symbol     String
+  name       String
+  currency   String
+  exchange   String
+  mic_code   String
+  country    String
+  type       String
+  figi_code  String
+  cfi_code   String
+  isin       String
+  cusip      String
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@unique([symbol, exchange])
+  @@index([mic_code], map: "idx_preload_stocks_mic_code")
+  @@index([name], map: "idx_preload_stocks_name")
+  @@index([symbol], map: "idx_preload_stocks_symbol")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -1390,7 +1500,7 @@ model transfers {
 
 model user_tenants {
   id         String    @id
-  user_id    String
+  user_id    String    @unique(map: "user_tenants_one_primary_per_user", where: raw("(is_primary AND (deleted_at IS NULL))"))
   tenant_id  String
   is_primary Boolean?  @default(false)
   created_at DateTime? @default(now()) @db.Timestamptz(6)
@@ -1405,14 +1515,14 @@ model user_tenants {
 }
 
 model users {
-  id           String         @id
-  cognito_sub  String
+  id           String        @id
+  cognito_sub  String        @unique(map: "users_cognito_sub_live_key", where: raw("(deleted_at IS NULL)"))
   email        String
-  is_primary   Boolean?       @default(false)
-  created_at   DateTime?      @default(now()) @db.Timestamptz(6)
-  updated_at   DateTime?      @default(now()) @db.Timestamptz(6)
-  deleted_at   DateTime?      @db.Timestamptz(6)
-  user_tenants user_tenants[]
+  is_primary   Boolean?      @default(false)
+  created_at   DateTime?     @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime?     @default(now()) @db.Timestamptz(6)
+  deleted_at   DateTime?     @db.Timestamptz(6)
+  user_tenants user_tenants?
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -1608,117 +1718,4 @@ model watchlists {
   @@index([deleted_at], map: "idx_watchlists_deleted_at")
   @@index([name], map: "idx_watchlists_name")
   @@index([tenant_id], map: "idx_watchlists_tenant_id")
-}
-
-model countries {
-  id          String      @id
-  name        String
-  alpha2_code String
-  alpha3_code String
-  currency_id String?
-  created_at  DateTime?   @default(now()) @db.Timestamptz(6)
-  currencies  currencies? @relation(fields: [currency_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-}
-
-model currencies {
-  id         String      @id
-  code       String
-  name       String
-  symbol     String?
-  created_at DateTime?   @default(now()) @db.Timestamptz(6)
-  countries  countries[]
-}
-
-/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
-model documents {
-  id              String    @id
-  tenant_id       String
-  owner_type      String
-  owner_id        String
-  file_name       String
-  file_path       String
-  file_size       Int?
-  mime_type       String?
-  attachment_type String?   @default("document")
-  notes           String?
-  uploaded_at     DateTime? @default(now()) @db.Timestamptz(6)
-  created_at      DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at      DateTime? @default(now()) @db.Timestamptz(6)
-  deleted_at      DateTime? @db.Timestamptz(6)
-  tenants         tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@index([owner_type, owner_id], map: "idx_documents_owner")
-  @@index([tenant_id], map: "idx_documents_tenant_id")
-}
-
-model markets {
-  id               String    @id
-  mic_code         String    @unique
-  operating_mic    String
-  market_name      String
-  iso_country_code String
-  city             String
-  created_at       DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at       DateTime? @default(now()) @db.Timestamptz(6)
-  deleted_at       DateTime? @db.Timestamptz(6)
-
-  @@index([city], map: "idx_markets_city")
-  @@index([iso_country_code], map: "idx_markets_country_code")
-  @@index([deleted_at], map: "idx_markets_deleted_at")
-  @@index([mic_code], map: "idx_markets_mic_code")
-  @@index([market_name], map: "idx_markets_name")
-}
-
-model preload_cryptocurrencies {
-  id                  Int       @id @default(autoincrement())
-  symbol              String
-  available_exchanges String
-  currency_base       String
-  currency_quote      String
-  created_at          DateTime? @default(now()) @db.Timestamptz(6)
-
-  @@unique([symbol, currency_base, currency_quote])
-  @@index([currency_base], map: "idx_preload_crypto_currency_base")
-  @@index([symbol], map: "idx_preload_crypto_symbol")
-}
-
-model preload_etfs {
-  id         Int       @id @default(autoincrement())
-  symbol     String
-  name       String
-  currency   String
-  exchange   String
-  mic_code   String
-  country    String
-  figi_code  String
-  cfi_code   String
-  isin       String
-  cusip      String
-  created_at DateTime? @default(now()) @db.Timestamptz(6)
-
-  @@unique([symbol, exchange])
-  @@index([mic_code], map: "idx_preload_etfs_mic_code")
-  @@index([name], map: "idx_preload_etfs_name")
-  @@index([symbol], map: "idx_preload_etfs_symbol")
-}
-
-model preload_stocks {
-  id         Int       @id @default(autoincrement())
-  symbol     String
-  name       String
-  currency   String
-  exchange   String
-  mic_code   String
-  country    String
-  type       String
-  figi_code  String
-  cfi_code   String
-  isin       String
-  cusip      String
-  created_at DateTime? @default(now()) @db.Timestamptz(6)
-
-  @@unique([symbol, exchange])
-  @@index([mic_code], map: "idx_preload_stocks_mic_code")
-  @@index([name], map: "idx_preload_stocks_name")
-  @@index([symbol], map: "idx_preload_stocks_symbol")
 }
