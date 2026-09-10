@@ -45,6 +45,12 @@ jobs:
       - name: Generate Prisma clients
         run: npm run prisma:generate
 
+      # `PageProps`, `LayoutProps` and `RouteContext` are global type helpers that
+      # Next generates into .next/types. A fresh runner has no .next directory, so
+      # generate them before type-checking (next build does the same internally).
+      - name: Generate Next route types
+        run: npx next typegen
+
       - name: Type check
         run: npx tsc --noEmit
 
