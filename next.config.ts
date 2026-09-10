@@ -41,6 +41,16 @@ if (process.env.NODE_ENV === "production") {
 const nextConfig: NextConfig = {
   // `x-powered-by: Next.js` tells an attacker which CVE list to read.
   poweredByHeader: false,
+  // Docker deployment: trace and copy only the files each route needs into
+  // `.next/standalone`, so the runtime image ships without `node_modules`.
+  // See the Dockerfile at the repo root.
+  output: "standalone",
+  // Version-skew protection for the ECS rolling deployment: the deploy
+  // workflow builds one image per commit SHA and passes it in as the
+  // `BUILD_ID` build ARG (see the Dockerfile), which becomes this env var at
+  // build time. A client whose deployment id no longer matches the server's
+  // gets a hard reload instead of a broken client-side navigation.
+  deploymentId: process.env.BUILD_ID,
   async headers() {
     return [
       {

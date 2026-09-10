@@ -51,9 +51,11 @@ Names only; values live in `.env`, which is never read or quoted by an agent.
 - `ALPHA_VANTAGE_API_KEY` — Alpha Vantage key for the `alpha_vantage_quotes` fallback (quotes for TSX and other listings TwelveData's free plan refuses). Server-only; Alpha Vantage accepts it only as a query parameter, so those URLs are redacted before any log or error. Without it the fallback is skipped
 - `INTEGRATIONS_SCHEDULER` — optional; `off` stops this process from running scheduled integrations (a second local dev server, a script). The Integrations page shows a banner when it is off
 - `TRUST_PROXY_HEADERS` — set to `true` only when a single trusted load balancer sits in front of the app. **Production must set it:** while it is unset the client IP is unknown and every per-IP rate limit is switched off
+- `DATABASE_POOL_MAX` — optional; the `pg` pool size (`max`) for both `prisma` and `prismaAdmin` (`src/lib/prisma.ts`, `src/lib/prisma-admin.ts`). Integer, default `10` (pg's own default; the ECS task definition sets `5`) when unset or not a positive integer. The same value applies to both clients, so a container opens up to `DATABASE_POOL_MAX * 2` connections total
+- `BUILD_ID` — build-time only, not read at runtime. The deploy workflow sets it to the commit SHA and passes it as a Docker build ARG; `next.config.ts` reads it into `deploymentId` so a rolling deployment can detect version skew between old and new instances
 
 ## Branches
-Only `main` exists so far (GitHub default and PR target). Mirror the consumer app once more branches are needed: `develop` (working branch) → `stage` → `production`, never pushing to `stage` or `production` directly. Until then, branch off `main`.
+Mirrors the consumer app: `develop` (working branch) → `stage` → `production`. `main` is the GitHub default and PR target. Never push to `stage` or `production` directly.
 
 ## Working rules
 Detailed rules live in `.claude/rules/` (orchestration, Next.js, database, api, auth) and load automatically. The non-negotiables:
@@ -62,4 +64,4 @@ Detailed rules live in `.claude/rules/` (orchestration, Next.js, database, api, 
 3. Never read `.env`. Never hand-edit generated Prisma code. Never run destructive DB commands. Never migrate either database from this repo: schema changes are numbered SQL files in `docs/sql/` that the owner runs in pgAdmin, followed by `npx prisma db pull --config prisma-admin.config.ts` and `npm run prisma:generate`.
 4. Authorization is default-deny and lives in the admin database: pages call `requirePageAccess("<key>")`, routes export through `adminHandler(fn, { endpoint: "<key>" })`, and the required actions come from the access map (`admin_pages`, `admin_endpoints`), never from code. A new page or endpoint gets a registry entry and is super-admin only until registered on the Access Map. Never derive access from the main database's `users` table or the end-user Cognito pool.
 5. The main session orchestrates; subagents (max 4) in `.claude/agents/` do the work: `implementer` (Sonnet) for simple tasks, `architect` (Opus) for complex ones, `explorer` and `reviewer` for read-only research and review.
-6. Commit only when asked. Branch off `main` until `develop` exists.
+6. Commit only when asked. Branch off `develop`.
