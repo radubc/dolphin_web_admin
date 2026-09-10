@@ -1,0 +1,650 @@
+# ==============================================================================
+# fairsums-admin-stage / fairsums-admin-production — the internal admin console
+# ==============================================================================
+#
+# WHAT THIS STACK CREATES
+#   * An Amazon ECS Express Mode service running the FairSums admin console on
+#     Fargate. It uses the same subnets and the same task security group as the
+#     consumer web service, which is what makes ECS Express put both services
+#     behind ONE Application Load Balancer instead of two — one load balancer
+#     bill, two host names.
+#   * A task role letting the console list, create, read and delete users in
+#     the CUSTOMERS' Cognito pool (the Customers page and its invitations), and
+#     nothing else.
+#   * A per-service execution role that can read only the six
+#     `fairsums/<env>/admin/...` secrets.
+#   * A regional AWS WAF web ACL attached to that shared load balancer:
+#       rule 0  block every request for the admin host name unless it comes
+#               from an address you listed in `AdminAllowedCidrs`;
+#       rule 1  rate limit the admin sign-in paths to 100 requests per 5
+#               minutes per source address;
+#       rule 2  the AWS managed Core rule set, in COUNT mode, so you can see
+#               what it would have blocked before you let it block anything.
+#     Rules 0 and 1 only match the admin host name, so the consumer app sharing
+#     the load balancer is not affected by them. Rule 2 counts on both host
+#     names; counting changes nothing, it only produces metrics.
+#
+# ONE INSTANCE ONLY, ON PURPOSE
+#   MinTasks and MaxTasks both default to 1. The admin console runs the
+#   integrations scheduler in-process (`src/instrumentation.ts` with
+#   INTEGRATIONS_SCHEDULER on) and keeps its integration run records in memory,
+#   so two copies would fetch quotes and exchange rates twice and disagree
+#   about what has run. Do not raise MaxTasks until that state moves into the
+#   database.
+#   Caveat you cannot configure away: ECS Express deploys with a canary, so
+#   during a deployment the old task and the new one overlap for a few minutes
+#   and the scheduler can tick in both. It is idempotent enough to survive
+#   that, but expect a duplicated run entry around a deploy.
+#
+# WHEN TO RUN IT
+#   Never by hand. The GitHub Actions workflow in this repository runs:
+#       aws cloudformation deploy --template-file infra/service-admin.yaml \
+#         --stack-name fairsums-admin-<env> --capabilities CAPABILITY_NAMED_IAM \
+#         --parameter-overrides Environment=<env> ImageTag=<commit sha>
+#   Every other parameter has a default. AdminAllowedCidrs is the one you
+#   should change: set it to your home IP followed by /32, in this template,
+#   and push. Until you do, the WAF blocks nobody and the console is reachable
+#   by anyone who guesses the host name (they still need a Cognito account).
+#
+# ROUGH COST
+#   Fargate, 0.5 vCPU + 1 GB, one task all month .... ~USD 18 / month
+#   Application Load Balancer ....................... shared with the consumer
+#                                                     app, billed once there
+#   AWS WAF web ACL ................................. USD 5 / month
+#   AWS WAF rules, 3 of them ........................ USD 3 / month
+#   AWS WAF requests ................................ USD 0.60 per million
+#   The AWS managed Core rule set is free; only the intelligent-threat groups
+#   (Bot Control, Account Takeover Prevention) cost extra, and none is used.
+# ==============================================================================
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  FairSums admin console on Amazon ECS Express Mode (single instance), sharing
+  the consumer app's load balancer, with a WAF web ACL that restricts the admin
+  host name to known addresses and rate limits its sign-in paths.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Deployment
+        Parameters:
+          - Environment
+          - ImageTag
+      - Label:
+          default: Who may reach the admin console
+        Parameters:
+          - AdminAllowedCidrs
+          - AdminHostMatch
+          - AuthPathRateLimit
+      - Label:
+          default: Size and scaling
+        Parameters:
+          - Cpu
+          - Memory
+          - MinTasks
+          - MaxTasks
+          - ScalingMetric
+          - ScalingTargetValue
+      - Label:
+          default: Runtime
+        Parameters:
+          - HealthCheckPath
+          - LogStreamPrefix
+          - DatabasePoolMax
+          - IntegrationsScheduler
+
+Parameters:
+  Environment:
+    Type: String
+    Default: stage
+    AllowedValues:
+      - stage
+      - production
+    Description: >-
+      Which environment to deploy into. Decides which `fairsums-<env>` stack
+      this one reads its secrets, log group and Cognito settings from. Supplied
+      by the deployment workflow.
+
+  ImageTag:
+    Type: String
+    Default: latest
+    MinLength: 1
+    Description: >-
+      The tag of the image in the `fairsums-admin` ECR repository to run. The
+      workflow passes the Git commit SHA, so a rollback is a redeploy of the
+      previous SHA.
+
+  AdminAllowedCidrs:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: >-
+      The internet addresses allowed to open the admin console, comma
+      separated, each written as an address followed by /32 — for example
+      203.0.113.24/32,198.51.100.7/32. Leave this EMPTY and no address is
+      blocked (the firewall rule is not created at all); that is the safe
+      default for a first deployment, not a good permanent setting. Fill it in
+      as soon as you know your address. If your home address changes, the
+      console stops answering until you update this and redeploy.
+
+  AdminHostMatch:
+    Type: String
+    Default: ""
+    Description: >-
+      Advanced, normally left empty. The text the firewall looks for in the
+      request's Host header to recognise the admin console. Empty means
+      `fairsums-admin-<environment>.`, which is how ECS Express names the
+      address. Set it only if the deployed address turns out to look different
+      (the ServiceEndpoint output shows the real one).
+
+  AuthPathRateLimit:
+    Type: Number
+    Default: 100
+    MinValue: 10
+    MaxValue: 100000
+    Description: >-
+      How many requests to /login, /forgot-password and /api/auth/ a single
+      address may make in any five-minute window before the firewall starts
+      blocking it. 100 is generous for a person and hostile to a password
+      guesser.
+
+  Cpu:
+    Type: String
+    Default: "512"
+    AllowedValues: ["256", "512", "1024", "2048", "4096"]
+    Description: >-
+      CPU units per task; 1024 is a whole vCPU. Fargate only allows certain
+      CPU/memory pairs, and 512 permits 1024 to 4096 MB of memory.
+
+  Memory:
+    Type: String
+    Default: "1024"
+    AllowedValues: ["512", "1024", "2048", "3072", "4096", "8192"]
+    Description: >-
+      Memory per task in megabytes. Must pair with the CPU above; 512 CPU with
+      1024 MB is valid.
+
+  MinTasks:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 1
+    Description: >-
+      How many copies of the admin console run. Locked to 1: the console runs
+      the integrations scheduler inside the web process, so a second copy would
+      duplicate every scheduled job.
+
+  MaxTasks:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 1
+    Description: >-
+      The ceiling auto scaling may grow to. Locked to 1 for the same reason as
+      MinTasks. Raising it needs a code change first, not a parameter change.
+
+  ScalingMetric:
+    Type: String
+    Default: AVERAGE_CPU
+    AllowedValues:
+      - AVERAGE_CPU
+      - AVERAGE_MEMORY
+      - REQUEST_COUNT_PER_TARGET
+    Description: >-
+      What auto scaling watches. With MinTasks and MaxTasks both 1 this never
+      actually scales anything; it is here so the setting is explicit.
+
+  ScalingTargetValue:
+    Type: Number
+    Default: 60
+    MinValue: 10
+    MaxValue: 90
+    Description: >-
+      The level auto scaling aims to hold the metric at, as a percentage for
+      the CPU and memory metrics.
+
+  HealthCheckPath:
+    Type: String
+    Default: /api/health
+    AllowedPattern: ^/.*$
+    Description: >-
+      The URL the load balancer calls to decide whether the task is healthy.
+      The console answers 200 only when both of its databases are reachable.
+
+  LogStreamPrefix:
+    Type: String
+    Default: admin
+    Description: >-
+      Prefix on each container's log stream inside the admin log group, so the
+      two apps are easy to tell apart in CloudWatch.
+
+  DatabasePoolMax:
+    Type: String
+    Default: "5"
+    AllowedPattern: ^[1-9][0-9]?$
+    Description: >-
+      Connections one container may hold open to PostgreSQL. The admin console
+      opens two pools (the consumer database and the admin database), so this
+      is the ceiling for each.
+
+  IntegrationsScheduler:
+    Type: String
+    Default: "on"
+    AllowedValues:
+      - "on"
+      - "off"
+    Description: >-
+      Whether this deployment runs the scheduled market-data integrations
+      (quotes, exchange rates, catalogs). Exactly one deployment should have it
+      `on`. Set it `off` in stage if you do not want stage burning your
+      TwelveData quota.
+
+Conditions:
+  # An empty parameter arrives as a single empty entry, so joining it back
+  # together and comparing with "" is the reliable emptiness test.
+  HasAdminAllowedCidrs: !Not [!Equals [!Join ["", !Ref AdminAllowedCidrs], ""]]
+  HasCustomAdminHostMatch: !Not [!Equals [!Ref AdminHostMatch, ""]]
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # What the application code may do in AWS
+  #
+  # src/lib/customers/ signs Cognito Admin* calls with the SDK's default
+  # credential chain, which on Fargate is this role. It is scoped to the
+  # customers' pool ARN that the environment stack exports, so the console can
+  # never touch the operators' own pool — the pool that decides who is allowed
+  # to use the console at all.
+  # ---------------------------------------------------------------------------
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub fairsums-admin-${Environment}-task
+      Description: >-
+        What the FairSums admin console itself may do in AWS: manage users in
+        the customers' Cognito pool.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: customer-user-pool
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: CustomerPoolOnly
+                Effect: Allow
+                Action:
+                  - cognito-idp:AdminCreateUser
+                  - cognito-idp:AdminDeleteUser
+                  - cognito-idp:AdminGetUser
+                  - cognito-idp:ListUsers
+                Resource: !ImportValue
+                  Fn::Sub: fairsums-${Environment}-CustomerUserPoolArn
+      Tags:
+        - Key: Application
+          Value: fairsums
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Component
+          Value: admin
+
+  # ---------------------------------------------------------------------------
+  # What the ECS agent may do while starting the task
+  #
+  # Per-service, like the consumer app's, so the console's provider API keys and
+  # admin-database password stay out of the consumer app's reach and vice versa.
+  # No kms:Decrypt statement is needed while the secrets use the AWS-managed
+  # `aws/secretsmanager` key.
+  # ---------------------------------------------------------------------------
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub fairsums-admin-${Environment}-execution
+      Description: >-
+        Lets the ECS agent pull the admin console image, write its logs, and
+        read only the admin console's secrets.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: read-own-secrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: AdminConsoleSecretsOnly
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !ImportValue
+                    Fn::Sub: fairsums-${Environment}-AdminDatabaseUrlSecretArn
+                  - !ImportValue
+                    Fn::Sub: fairsums-${Environment}-AdminAdminDatabaseUrlSecretArn
+                  - !ImportValue
+                    Fn::Sub: fairsums-${Environment}-AdminCognitoClientSecretArn
+                  - !ImportValue
+                    Fn::Sub: fairsums-${Environment}-AdminApiKeysSecretArn
+                  - !ImportValue
+                    Fn::Sub: fairsums-${Environment}-AdminTwelveDataApiKeySecretArn
+                  - !ImportValue
+                    Fn::Sub: fairsums-${Environment}-AdminAlphaVantageApiKeySecretArn
+      Tags:
+        - Key: Application
+          Value: fairsums
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Component
+          Value: admin
+
+  # ---------------------------------------------------------------------------
+  # The service
+  #
+  # Same subnets and same security group as `fairsums-web-<env>`: that is the
+  # condition under which ECS Express reuses one Application Load Balancer for
+  # both services and gives each its own host-header listener rule.
+  #
+  # Non-secret settings are read from Parameter Store with `{{resolve:ssm:...}}`
+  # dynamic references, which CloudFormation resolves while deploying this
+  # stack. Change one of those parameters and this stack will not notice until
+  # the next deployment.
+  # ---------------------------------------------------------------------------
+  Service:
+    Type: AWS::ECS::ExpressGatewayService
+    Properties:
+      ServiceName: !Sub fairsums-admin-${Environment}
+      Cluster: !ImportValue fairsums-foundation-ClusterName
+      InfrastructureRoleArn: !ImportValue fairsums-foundation-InfrastructureRoleArn
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      Cpu: !Ref Cpu
+      Memory: !Ref Memory
+      HealthCheckPath: !Ref HealthCheckPath
+      NetworkConfiguration:
+        Subnets: !Split [",", !ImportValue fairsums-foundation-PublicSubnetIds]
+        SecurityGroups:
+          - !ImportValue
+            Fn::Sub: fairsums-${Environment}-TaskSecurityGroupId
+      ScalingTarget:
+        AutoScalingMetric: !Ref ScalingMetric
+        AutoScalingTargetValue: !Ref ScalingTargetValue
+        MinTaskCount: !Ref MinTasks
+        MaxTaskCount: !Ref MaxTasks
+      PrimaryContainer:
+        Image: !Join
+          - ":"
+          - - !ImportValue fairsums-foundation-AdminRepositoryUri
+            - !Ref ImageTag
+        ContainerPort: 3001
+        AwsLogsConfiguration:
+          LogGroup: !ImportValue
+            Fn::Sub: fairsums-${Environment}-AdminLogGroupName
+          LogStreamPrefix: !Ref LogStreamPrefix
+        Environment:
+          - Name: NODE_ENV
+            Value: production
+          - Name: PORT
+            Value: "3001"
+          # Next defaults to binding 0.0.0.0 anyway; set explicitly so the
+          # value is visible in the task definition.
+          - Name: HOSTNAME
+            Value: 0.0.0.0
+          # One load balancer in front, so X-Forwarded-For can be trusted and
+          # the per-IP rate limits actually work.
+          - Name: TRUST_PROXY_HEADERS
+            Value: "true"
+          - Name: DATABASE_POOL_MAX
+            Value: !Ref DatabasePoolMax
+          - Name: INTEGRATIONS_SCHEDULER
+            Value: !Ref IntegrationsScheduler
+          - Name: AWS_REGION
+            Value: !Ref AWS::Region
+          - Name: ADMIN_COGNITO_REGION
+            Value: !Sub "{{resolve:ssm:/fairsums/${Environment}/admin/ADMIN_COGNITO_REGION}}"
+          - Name: ADMIN_COGNITO_USER_POOL_ID
+            Value: !Sub "{{resolve:ssm:/fairsums/${Environment}/admin/ADMIN_COGNITO_USER_POOL_ID}}"
+          - Name: ADMIN_COGNITO_CLIENT_ID
+            Value: !Sub "{{resolve:ssm:/fairsums/${Environment}/admin/ADMIN_COGNITO_CLIENT_ID}}"
+          - Name: CUSTOMER_COGNITO_REGION
+            Value: !Sub "{{resolve:ssm:/fairsums/${Environment}/admin/CUSTOMER_COGNITO_REGION}}"
+          - Name: CUSTOMER_COGNITO_USER_POOL_ID
+            Value: !Sub "{{resolve:ssm:/fairsums/${Environment}/admin/CUSTOMER_COGNITO_USER_POOL_ID}}"
+          - Name: ADMIN_SUB
+            Value: !Sub "{{resolve:ssm:/fairsums/${Environment}/admin/ADMIN_SUB}}"
+        Secrets:
+          - Name: DATABASE_URL
+            ValueFrom: !ImportValue
+              Fn::Sub: fairsums-${Environment}-AdminDatabaseUrlSecretArn
+          - Name: ADMIN_DATABASE_URL
+            ValueFrom: !ImportValue
+              Fn::Sub: fairsums-${Environment}-AdminAdminDatabaseUrlSecretArn
+          - Name: ADMIN_COGNITO_CLIENT_SECRET
+            ValueFrom: !ImportValue
+              Fn::Sub: fairsums-${Environment}-AdminCognitoClientSecretArn
+          - Name: API_KEYS
+            ValueFrom: !ImportValue
+              Fn::Sub: fairsums-${Environment}-AdminApiKeysSecretArn
+          - Name: TWELVEDATA_API_KEY
+            ValueFrom: !ImportValue
+              Fn::Sub: fairsums-${Environment}-AdminTwelveDataApiKeySecretArn
+          - Name: ALPHA_VANTAGE_API_KEY
+            ValueFrom: !ImportValue
+              Fn::Sub: fairsums-${Environment}-AdminAlphaVantageApiKeySecretArn
+      Tags:
+        - Key: Application
+          Value: fairsums
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Component
+          Value: admin
+
+  # ---------------------------------------------------------------------------
+  # Firewall
+  # ---------------------------------------------------------------------------
+  AllowedIpSet:
+    Type: AWS::WAFv2::IPSet
+    Condition: HasAdminAllowedCidrs
+    Properties:
+      Name: !Sub fairsums-admin-${Environment}-allowed
+      Description: Addresses allowed to open the FairSums admin console.
+      Scope: REGIONAL
+      IPAddressVersion: IPV4
+      Addresses: !Ref AdminAllowedCidrs
+
+  WebAcl:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub fairsums-admin-${Environment}
+      Description: >-
+        Restricts the FairSums admin console host name to known addresses,
+        rate limits its sign-in paths, and counts what the AWS Core rule set
+        would block.
+      Scope: REGIONAL
+      DefaultAction:
+        # The same load balancer serves the consumer app, which must stay open
+        # to the public. Everything is allowed unless a rule below says no.
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub fairsumsAdmin${Environment}
+      Rules:
+        # --- 0: the admin console is not for the public ----------------------
+        # Only created when AdminAllowedCidrs is not empty. With no list there
+        # is nobody to let in, and a rule that blocked everyone would lock you
+        # out of the console you just deployed.
+        - !If
+          - HasAdminAllowedCidrs
+          - Name: BlockAdminHostFromUnknownAddresses
+            Priority: 0
+            Action:
+              Block: {}
+            Statement:
+              AndStatement:
+                Statements:
+                  - ByteMatchStatement:
+                      FieldToMatch:
+                        SingleHeader:
+                          Name: host
+                      PositionalConstraint: CONTAINS
+                      SearchString: !If
+                        - HasCustomAdminHostMatch
+                        - !Ref AdminHostMatch
+                        # The trailing dot keeps this from matching a host name
+                        # that merely starts with the same text.
+                        - !Sub fairsums-admin-${Environment}.
+                      TextTransformations:
+                        - Priority: 0
+                          Type: LOWERCASE
+                  - NotStatement:
+                      Statement:
+                        IPSetReferenceStatement:
+                          Arn: !GetAtt AllowedIpSet.Arn
+            VisibilityConfig:
+              SampledRequestsEnabled: true
+              CloudWatchMetricsEnabled: true
+              MetricName: !Sub fairsumsAdmin${Environment}HostBlock
+          - !Ref AWS::NoValue
+
+        # --- 1: slow down password guessing ----------------------------------
+        # Scoped to the admin host name so the consumer app's own sign-in,
+        # which shares this load balancer, keeps its own (application level)
+        # limits and is not throttled by a rule the admin stack installed.
+        - Name: RateLimitAdminAuthPaths
+          Priority: 1
+          Action:
+            Block: {}
+          Statement:
+            RateBasedStatement:
+              Limit: !Ref AuthPathRateLimit
+              AggregateKeyType: IP
+              EvaluationWindowSec: 300
+              ScopeDownStatement:
+                AndStatement:
+                  Statements:
+                    - ByteMatchStatement:
+                        FieldToMatch:
+                          SingleHeader:
+                            Name: host
+                        PositionalConstraint: CONTAINS
+                        SearchString: !If
+                          - HasCustomAdminHostMatch
+                          - !Ref AdminHostMatch
+                          - !Sub fairsums-admin-${Environment}.
+                        TextTransformations:
+                          - Priority: 0
+                            Type: LOWERCASE
+                    - OrStatement:
+                        Statements:
+                          - ByteMatchStatement:
+                              FieldToMatch:
+                                UriPath: {}
+                              PositionalConstraint: STARTS_WITH
+                              SearchString: /login
+                              TextTransformations:
+                                - Priority: 0
+                                  Type: LOWERCASE
+                          - ByteMatchStatement:
+                              FieldToMatch:
+                                UriPath: {}
+                              PositionalConstraint: STARTS_WITH
+                              SearchString: /forgot-password
+                              TextTransformations:
+                                - Priority: 0
+                                  Type: LOWERCASE
+                          - ByteMatchStatement:
+                              FieldToMatch:
+                                UriPath: {}
+                              PositionalConstraint: STARTS_WITH
+                              SearchString: /api/auth/
+                              TextTransformations:
+                                - Priority: 0
+                                  Type: LOWERCASE
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: !Sub fairsumsAdmin${Environment}AuthRate
+
+        # --- 2: the AWS Core rule set, watching only -------------------------
+        # COUNT, not BLOCK. The Core rule set has false positives on real
+        # applications, so it runs as an observation first. Look at the
+        # CloudWatch metric and the sampled requests for a couple of weeks,
+        # then change OverrideAction to `None: {}` to make it enforce, or add
+        # RuleActionOverrides for the individual rules that misfire.
+        # Not scoped to the admin host: counting costs nothing and the metrics
+        # are just as useful for the consumer app.
+        - Name: AwsCommonRuleSetCountOnly
+          Priority: 2
+          OverrideAction:
+            Count: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: !Sub fairsumsAdmin${Environment}CommonRules
+
+  # The web ACL attaches to the load balancer ECS Express created for this
+  # service, which is the same one the consumer app uses. CloudFormation orders
+  # this after the service because it reads an attribute of it.
+  #
+  # NOTE: an Application Load Balancer can have exactly one web ACL. If the
+  # consumer app's stack ever grows one of its own, the two must be merged into
+  # a single ACL rather than both trying to attach.
+  WebAclAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !GetAtt Service.ECSManagedResourceArns.IngressPath.LoadBalancerArn
+      WebACLArn: !GetAtt WebAcl.Arn
+
+Outputs:
+  ServiceEndpoint:
+    Description: >-
+      The HTTPS address of the admin console. Check that its host name really
+      does contain `fairsums-admin-<env>.`; if it does not, set the
+      AdminHostMatch parameter to whatever it does contain, or the firewall
+      rule protects nothing.
+    Value: !GetAtt Service.Endpoint
+    Export:
+      Name: !Sub fairsums-admin-${Environment}-ServiceEndpoint
+
+  ServiceArn:
+    Description: The ECS service.
+    Value: !GetAtt Service.ServiceArn
+    Export:
+      Name: !Sub fairsums-admin-${Environment}-ServiceArn
+
+  LoadBalancerArn:
+    Description: >-
+      The Application Load Balancer, shared with the consumer app. Its target
+      groups are where you set the deregistration delay to 30 seconds.
+    Value: !GetAtt Service.ECSManagedResourceArns.IngressPath.LoadBalancerArn
+    Export:
+      Name: !Sub fairsums-admin-${Environment}-LoadBalancerArn
+
+  WebAclArn:
+    Description: The firewall attached to that load balancer.
+    Value: !GetAtt WebAcl.Arn
+    Export:
+      Name: !Sub fairsums-admin-${Environment}-WebAclArn
+
+  AdminAccessRuleActive:
+    Description: >-
+      `yes` when AdminAllowedCidrs was set and the console is restricted to
+      those addresses; `no` when the console is reachable from anywhere.
+    Value: !If [HasAdminAllowedCidrs, "yes", "no"]

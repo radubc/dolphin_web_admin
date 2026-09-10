@@ -1,0 +1,257 @@
+name: Deploy to AWS
+
+# `stage` and `production` are protected branches (never pushed to directly —
+# merges land here through a PR). Either push triggers a real deployment.
+# `workflow_dispatch` lets someone re-run a deploy by hand (e.g. to retry a
+# failed health check) without an empty commit.
+#
+# Required GitHub configuration for this workflow:
+#   - Repository secret `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` — a base64-encoded
+#     32-byte AES key generated with `openssl rand -base64 32`. Use the same
+#     value for both the `stage` and `production` environments so an image
+#     built on `stage` and re-tagged for `production` (see below) keeps
+#     working; it's fine for this to be the same value as the consumer app's
+#     key or a different one — the two apps never need to decrypt each
+#     other's Server Function closures. See the Dockerfile for why every
+#     build needs this key and the "Server Functions encryption key" section
+#     of node_modules/next/dist/docs/01-app/02-guides/self-hosting.md for
+#     background.
+on:
+  push:
+    branches: [stage, production]
+  workflow_dispatch:
+
+# One deploy at a time per branch; a second push waits for the first to
+# finish rather than racing it (no `cancel-in-progress`, since cancelling
+# midway through a CloudFormation update can leave the stack in a stuck
+# state that needs manual intervention in the AWS console).
+concurrency:
+  group: deploy-aws-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  # Lets `aws-actions/configure-aws-credentials` exchange this workflow run's
+  # OIDC token for temporary AWS credentials — no long-lived AWS access key
+  # stored in GitHub.
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # Matches a GitHub Environment named "stage" or "production" in the repo
+    # settings. That is where the owner can require a manual approval before
+    # production deploys, and where deployment history shows up.
+    environment: ${{ github.ref_name }}
+
+    env:
+      # One image repository shared by every environment; environments are
+      # told apart by image tag, not by repository.
+      ECR_REPOSITORY: fairsums-admin
+      IMAGE_TAG: ${{ github.sha }}
+      STACK_NAME: fairsums-admin-${{ github.ref_name }}
+      # aws-cli's default pager pipes output to `less`, which blocks forever
+      # with no TTY. Every `aws` call in this workflow is non-interactive.
+      AWS_PAGER: ""
+
+    steps:
+      # `workflow_dispatch` can be run against any branch from the Actions UI,
+      # not only `stage` and `production`. Everything below assumes the ref
+      # being deployed is one of those two (image tags, stack names, the
+      # OIDC trust policy's `sub` condition), so refuse anything else up front
+      # with a clear message instead of failing confusingly deeper in.
+      - name: Refuse to run outside stage or production
+        run: |
+          if [ "${{ github.ref_name }}" != "stage" ] && [ "${{ github.ref_name }}" != "production" ]; then
+            echo "::error::This workflow only deploys the 'stage' and 'production' branches. It was triggered on '${{ github.ref_name }}' (likely a manual 'Run workflow' with the wrong branch selected). Re-run it with 'stage' or 'production' chosen." >&2
+            exit 1
+          fi
+
+      - name: Check out ${{ github.ref_name }}
+        uses: actions/checkout@v4
+
+      # Exchanges this workflow run's identity for short-lived AWS
+      # credentials, scoped to whatever `AWS_DEPLOY_ROLE_ARN` allows. Both
+      # values are repository or organization *variables* (Settings ->
+      # Secrets and variables -> Actions -> Variables), not secrets — an IAM
+      # role ARN and an AWS region are not sensitive by themselves.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # Logs the local Docker daemon in to this account's private container
+      # registry so the build/push and the retag step below can talk to it.
+      # Assumes the `fairsums-admin` repository already exists in ECR.
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Fails fast, before spending any build minutes, if the required
+      # Server Functions encryption key secret is missing or empty for this
+      # environment — rather than letting the build below fall back to
+      # `next build` generating a random per-build key, which breaks Server
+      # Actions during an ECS canary deployment (see the top-of-file comment
+      # and the Dockerfile). Never echoes the secret's value.
+      - name: Verify the Server Functions encryption key secret is set
+        env:
+          NEXT_ACTIONS_KEY: ${{ secrets.NEXT_SERVER_ACTIONS_ENCRYPTION_KEY }}
+        run: |
+          if [ -z "$NEXT_ACTIONS_KEY" ]; then
+            echo "::error::Repository secret NEXT_SERVER_ACTIONS_ENCRYPTION_KEY is not set (or is empty) for the '${{ github.ref_name }}' environment. Generate one with 'openssl rand -base64 32' and add it under Settings -> Secrets and variables -> Actions -> Secrets, then re-run this workflow." >&2
+            exit 1
+          fi
+
+      # --- stage: always build and push -----------------------------------
+      # Every push to `stage` gets a freshly built image, tagged with both
+      # the exact commit SHA (what the deploy step below actually runs) and
+      # a floating `:stage` tag (a convenience pointer to "whatever is on
+      # stage right now", handy for `docker pull` when debugging by hand).
+      - name: Build and push image (stage)
+        if: github.ref_name == 'stage'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:stage
+          build-args: |
+            BUILD_ID=${{ env.IMAGE_TAG }}
+          # Passed as a BuildKit secret, not a build-arg, so it never lands
+          # in the image history. Consumed by the Dockerfile's `npm run
+          # build` step — see the top-of-file comment for why every build
+          # needs the same key.
+          secrets: |
+            next_actions_key=${{ secrets.NEXT_SERVER_ACTIONS_ENCRYPTION_KEY }}
+          # GitHub Actions' own cache backend for Docker layers: much faster
+          # rebuilds than starting from nothing each time, no extra AWS
+          # resource to manage.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # --- production: reuse the image that already passed on stage -------
+      # A commit almost always reaches `production` by promoting the exact
+      # commit that was already built and pushed to `stage`. Rebuilding it
+      # would waste time and — worse — could produce a slightly different
+      # image (a base image that moved under a floating tag, for instance)
+      # than the one that was actually tested on stage. So: if this commit's
+      # image is already in ECR, just add a `:production` tag to it. Only if
+      # it is genuinely new (e.g. `workflow_dispatch` run directly against a
+      # commit that skipped stage) does this build from scratch.
+      - name: Check whether this commit's image already exists in ECR
+        id: check-image
+        if: github.ref_name == 'production'
+        run: |
+          set -euo pipefail
+          MANIFEST=$(aws ecr batch-get-image \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids imageTag="$IMAGE_TAG" \
+            --accepted-media-types application/vnd.docker.distribution.manifest.v2+json application/vnd.oci.image.manifest.v1+json application/vnd.oci.image.index.v1+json application/vnd.docker.distribution.manifest.list.v2+json \
+            --query 'images[0].imageManifest' \
+            --output text)
+
+          if [ -n "$MANIFEST" ] && [ "$MANIFEST" != "None" ]; then
+            echo "Found $ECR_REPOSITORY:$IMAGE_TAG already in ECR (built when this commit went to stage) — re-tagging it as production instead of rebuilding."
+            # `ecr put-image` fails with ImageAlreadyExistsException (HTTP
+            # 400) when the `production` tag already points at this exact
+            # manifest (e.g. a re-run of this workflow after a previous run
+            # already promoted it). That is success, not a failure: capture
+            # the command's output and exit code instead of letting `set -e`
+            # kill the job, and only treat a *different* failure as fatal.
+            set +e
+            PUT_OUTPUT=$(aws ecr put-image \
+              --repository-name "$ECR_REPOSITORY" \
+              --image-tag production \
+              --image-manifest "$MANIFEST" 2>&1)
+            PUT_STATUS=$?
+            set -e
+            echo "$PUT_OUTPUT"
+            if [ "$PUT_STATUS" -ne 0 ]; then
+              if echo "$PUT_OUTPUT" | grep -q "ImageAlreadyExistsException"; then
+                echo "The 'production' tag already points at this image; tag already present, nothing to do."
+              else
+                echo "::error::aws ecr put-image failed for a reason other than the tag already existing." >&2
+                exit "$PUT_STATUS"
+              fi
+            fi
+            echo "needs_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$ECR_REPOSITORY:$IMAGE_TAG was not found in ECR — building it fresh for production."
+            echo "needs_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push image (production, only if not already built)
+        if: github.ref_name == 'production' && steps.check-image.outputs.needs_build == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:production
+          build-args: |
+            BUILD_ID=${{ env.IMAGE_TAG }}
+          # Same BuildKit secret as the stage build above — this path only
+          # runs when a commit reaches production without first passing
+          # through stage, but it still needs the identical key.
+          secrets: |
+            next_actions_key=${{ secrets.NEXT_SERVER_ACTIONS_ENCRYPTION_KEY }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Updates (or, the first time, creates) the CloudFormation stack that
+      # defines this environment's ECS service, load balancer, etc. Every
+      # parameter besides `Environment` and `ImageTag` has a default in the
+      # template and keeps whatever value it was last deployed with —
+      # nothing here resets other settings back to a default.
+      # `--no-fail-on-empty-changeset` means "if nothing actually changed,
+      # that is success, not an error" (otherwise a deploy that only rebuilds
+      # the same image tag as before would fail the workflow for no reason).
+      - name: Deploy CloudFormation stack
+        run: |
+          aws cloudformation deploy \
+            --template-file infra/service-admin.yaml \
+            --stack-name "$STACK_NAME" \
+            --parameter-overrides Environment=${{ github.ref_name }} ImageTag=$IMAGE_TAG \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset
+
+      # The template is expected to publish the load balancer's public
+      # hostname as a stack output named `ServiceEndpoint`.
+      - name: Read the service endpoint from the stack
+        id: endpoint
+        run: |
+          set -euo pipefail
+          ENDPOINT=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='ServiceEndpoint'].OutputValue" \
+            --output text)
+          echo "Service endpoint: $ENDPOINT"
+          echo "endpoint=$ENDPOINT" >> "$GITHUB_OUTPUT"
+
+      # ECS rolls new tasks in and old ones out gradually, so the deploy
+      # command above returning does not mean the new version is actually
+      # serving traffic yet. Poll the public health endpoint until it
+      # answers, rather than assuming a fixed wait is long enough.
+      - name: Wait for the new deployment to pass its health check
+        run: |
+          URL="https://${{ steps.endpoint.outputs.endpoint }}/api/health"
+          for attempt in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$URL" || true)
+            if [ "$code" = "200" ]; then
+              echo "Health check passed ($code) on attempt $attempt/20."
+              exit 0
+            fi
+            echo "Attempt $attempt/20: $URL responded with '$code' — retrying in 6s."
+            sleep 6
+          done
+          echo "::error::$URL did not return 200 after 20 attempts (~2 minutes). Check the ECS service events and task logs for $STACK_NAME."
+          exit 1

@@ -1,0 +1,14 @@
+# Keep the build context small and make sure no local secret ever reaches a
+# build layer. Real DATABASE_URL/ADMIN_DATABASE_URL values live only in the
+# running container's environment (ECS task definition), never in the image.
+node_modules
+.next
+.git
+.env*
+docs
+.cursor
+.claude
+.github
+infra
+*.tsbuildinfo
+README.md
