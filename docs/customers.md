@@ -148,8 +148,13 @@ rate-limited; a real deployment configures SES).
 | `admin_customer_invites` | admin | yes | yes |
 | `admin_permission_audit_events` | admin | — | one row per invitation change |
 
-The main database role has `BYPASSRLS`, which is why the tenant-scoped tables
-can be aggregated from here at all. Every query in `src/lib/customers/repository.ts`
+The main database role sees every tenant, which is why the tenant-scoped
+tables can be aggregated from here at all. Locally that is the `postgres`
+superuser; on Amazon RDS, where no role can carry `BYPASSRLS`, it is the
+master user, which owns the restored tables and is therefore exempt from
+row-level security on every table that does not say FORCE ROW LEVEL SECURITY
+(`categories` had FORCE dropped for this reason; see the consumer repo's
+`docs/postgres/2026-09-10_categories_owner_access.sql`). Every query in `src/lib/customers/repository.ts`
 is a `findMany`, `findFirst`, `count` or `groupBy`; there is no write path to
 the consumer app's data in this feature, by construction.
 
