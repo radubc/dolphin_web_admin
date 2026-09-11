@@ -99,6 +99,13 @@ COPY --from=build --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=build --chown=nextjs:nodejs /app/public ./public
 
+# Amazon's RDS certificate authorities. RDS certificates are not signed by a
+# CA that Node trusts by default, and node-postgres 8 treats sslmode=require
+# as full verification, so DATABASE_URL must say
+# sslmode=verify-full&sslrootcert=/app/certs/rds-global-bundle.pem and the
+# bundle must be in the image. The global bundle covers every region.
+ADD --chown=nextjs:nodejs --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /app/certs/rds-global-bundle.pem
+
 USER nextjs
 
 ENV NODE_ENV=production
