@@ -39,7 +39,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     # Matches a GitHub Environment named "stage" or "production" in the repo
     # settings. That is where the owner can require a manual approval before
     # production deploys, and where deployment history shows up.
