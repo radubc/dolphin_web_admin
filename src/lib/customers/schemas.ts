@@ -15,6 +15,10 @@ import { z } from "zod";
 import {
   CUSTOMER_PAGE_SIZE_DEFAULT,
   CUSTOMER_PAGE_SIZE_MAX,
+  STATISTICS_DAYS_DEFAULT,
+  STATISTICS_DAYS_MAX,
+  STATISTICS_MONTHS_DEFAULT,
+  STATISTICS_MONTHS_MAX,
   type CreateInviteInput,
 } from "./types";
 
@@ -50,7 +54,7 @@ export const customerListQuerySchema = z.object({
     .default(CUSTOMER_PAGE_SIZE_DEFAULT),
   q: z.string().trim().max(120).optional(),
   status: z
-    .enum(["all", "active", "invited", "disabled", "no_account", "unknown"])
+    .enum(["all", "active", "invited", "disabled", "deleted", "no_account", "unknown"])
     .default("all"),
   /** `?includeDeleted=true`; anything false-ish keeps soft-deleted rows out. */
   includeDeleted: z.stringbool().default(false),
@@ -115,3 +119,27 @@ export const createInviteSchema: z.ZodType<CreateInviteInput> = z.object({
       return normaliseLocale(value);
     }),
 });
+
+/* -------------------------------------------------------------------------- */
+/*                                 Statistics                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `GET /api/v1/admin/customers/statistics?months=6&days=35`.
+ *
+ * Both are capped for the same reason the cost series is: `months` decides
+ * how many churn denominators are counted (one query each) and `days` how
+ * wide a date range the two daily aggregates scan. A caller asking for ten
+ * years would be asking for rows nothing ever wrote.
+ */
+export const customerStatisticsQuerySchema = z.object({
+  months: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(STATISTICS_MONTHS_MAX)
+    .default(STATISTICS_MONTHS_DEFAULT),
+  days: z.coerce.number().int().min(1).max(STATISTICS_DAYS_MAX).default(STATISTICS_DAYS_DEFAULT),
+});
+
+export type ResolvedCustomerStatisticsQuery = z.infer<typeof customerStatisticsQuerySchema>;

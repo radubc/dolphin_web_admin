@@ -98,6 +98,7 @@ Metadata:
           - LogStreamPrefix
           - DatabasePoolMax
           - IntegrationsScheduler
+          - OpsAlbArnSuffix
 
 Parameters:
   Environment:
@@ -264,6 +265,20 @@ Parameters:
       `on`. Set it `off` in stage if you do not want stage burning your
       TwelveData quota.
 
+  OpsAlbArnSuffix:
+    Type: String
+    Default: ""
+    Description: >-
+      The Overview page's Operations card reads the shared Application Load
+      Balancer's request count, 5xx count and response time from CloudWatch,
+      keyed by the ARN suffix `app/<name>/<id>`. ECS Express creates that
+      balancer, so its name cannot be predicted by this template — read it
+      from the `LoadBalancerArn` output of either service stack (this one or
+      `fairsums-web-<env>`), or `aws elbv2 describe-load-balancers`, and paste
+      the tail here, for example
+      app/ecs-express-gateway-alb-42b56505/a3d5983afe488302. Leave empty and
+      the card's load balancer rows read "not set" instead of failing.
+
 Conditions:
   # An empty parameter arrives as a single empty entry, so joining it back
   # together and comparing with "" is the reliable emptiness test.
@@ -280,6 +295,12 @@ Resources:
   # customers' pool ARN that the environment stack exports, so the console can
   # never touch the operators' own pool — the pool that decides who is allowed
   # to use the console at all.
+  #
+  # Two more policies, both read-only, both for the console's own reporting
+  # pages: `cost-and-usage-read` for the Cost center (src/lib/costs,
+  # src/lib/integrations/jobs/aws-costs.ts) and `operations-metrics-read` for
+  # the operations and customer-statistics figures that follow it. Neither can
+  # change anything in the account.
   # ---------------------------------------------------------------------------
   TaskRole:
     Type: AWS::IAM::Role
@@ -287,7 +308,8 @@ Resources:
       RoleName: !Sub fairsums-admin-${Environment}-task
       Description: >-
         What the FairSums admin console itself may do in AWS: manage users in
-        the customers' Cognito pool.
+        the customers' Cognito pool, and read billing, free-tier and
+        operational metrics for its own reporting pages.
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -310,6 +332,108 @@ Resources:
                   - cognito-idp:AdminDeleteUser
                   - cognito-idp:AdminGetUser
                   - cognito-idp:ListUsers
+                Resource: !ImportValue
+                  Fn::Sub: fairsums-${Environment}-CustomerUserPoolArn
+
+        # -------------------------------------------------------------------
+        # Billing, budget and free-tier reads for the Cost center page
+        #
+        # Resource is `*`. Cost Explorer and Free Tier have no resource-level
+        # permissions at all — they are account-wide services with a single
+        # global (us-east-1) endpoint each. Budgets *does* support a budget
+        # ARN, and the two actions here are granted account-wide on purpose:
+        # the console reads whichever budget the operator names in
+        # `settings.budgetName`, or the first one the account has, and a
+        # per-budget ARN would have to be redeployed every time somebody
+        # created or renamed a budget. Both are reads; nothing here can
+        # create a budget or change a billing preference.
+        #
+        # Cost Explorer charges $0.01 per request, so the daily `aws_costs`
+        # integration is the only caller — three charged requests a run, plus
+        # one more on the first three days of a month, so about $0.03 a day
+        # and roughly $1 a month — and the page itself reads the cached rows
+        # from the admin database instead.
+        # -------------------------------------------------------------------
+        - PolicyName: cost-and-usage-read
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: CostAndUsageRead
+                Effect: Allow
+                Action:
+                  # Cost by day or month, grouped by service or by a cost
+                  # allocation tag. The page's daily bars and service table.
+                  - ce:GetCostAndUsage
+                  # Forecast for the rest of the current month.
+                  - ce:GetCostForecast
+                  # Valid service names and tag values, for filters.
+                  - ce:GetDimensionValues
+                  - ce:GetTags
+                  # Cost Anomaly Detection findings. Free — that service has
+                  # no per-request charge. The monitors themselves are not
+                  # read: `ce:GetAnomalyMonitors` was granted and never
+                  # called, so it is not here. Add it back with the code that
+                  # needs it, not before.
+                  - ce:GetAnomalies
+                  # The budget's limit, actual spend and forecast. Budgets is
+                  # us-east-1 only. ViewBudget is the read this needs;
+                  # DescribeBudgets is the API the SDK calls.
+                  - budgets:ViewBudget
+                  - budgets:DescribeBudgets
+                  # Remaining free-tier credit and which plan the account is
+                  # on. Only meaningful while the account is inside a free
+                  # plan; both are tolerated failing.
+                  - freetier:GetFreeTierUsage
+                  - freetier:GetAccountPlanState
+                Resource: "*"
+
+        # -------------------------------------------------------------------
+        # Operational and pool metrics
+        #
+        # Not used by the Cost center itself — added here so one deployment
+        # covers the Overview operations card (RDS, ECS and ALB metrics), the
+        # customer-statistics page (pool sign-in and sign-up counts from the
+        # AWS/Cognito namespace, and the pool's estimated user count) and the
+        # "what is running" card. All reads.
+        #
+        # CloudWatch and ECS take `*`: GetMetricData has no resource-level
+        # permissions at all, and DescribeServices is scoped by cluster ARN,
+        # which this stack would have to import for both services to name it
+        # usefully. DescribeUserPool is scoped to the customers' pool, the
+        # same ARN the Cognito policy above uses, so this role still cannot
+        # read the operators' own pool.
+        #
+        # GetMetricData is the only CloudWatch action granted.
+        # cloudwatch:ListMetrics was granted here until 2026-09-12 and was
+        # never called: it omits metrics that have been quiet for a fortnight
+        # — exactly the ones a young deployment has — while GetMetricData
+        # answers for a metric that has never been published with an empty
+        # series, which is the right answer and needs no discovery step. An
+        # unused permission is one an audit has to ask about, so it is gone.
+        # -------------------------------------------------------------------
+        - PolicyName: operations-metrics-read
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: OperationsMetricsRead
+                Effect: Allow
+                Action:
+                  # Daily metric series: RDS free storage and connections,
+                  # ECS CPU and memory, ALB 5xx and latency, Cognito
+                  # sign-ins and sign-ups. One call per read; no ListMetrics.
+                  - cloudwatch:GetMetricData
+                Resource: "*"
+              - Sid: OperationsMetricsEcsRead
+                Effect: Allow
+                Action:
+                  # Last deployment time and running image per service.
+                  - ecs:DescribeServices
+                Resource: "*"
+              - Sid: OperationsMetricsCustomerPoolRead
+                Effect: Allow
+                Action:
+                  # EstimatedNumberOfUsers and the pool's tier.
+                  - cognito-idp:DescribeUserPool
                 Resource: !ImportValue
                   Fn::Sub: fairsums-${Environment}-CustomerUserPoolArn
       Tags:
@@ -450,6 +574,21 @@ Resources:
             Value: !Sub "{{resolve:ssm:/fairsums/${Environment}/admin/CUSTOMER_COGNITO_USER_POOL_ID}}"
           - Name: ADMIN_SUB
             Value: !Sub "{{resolve:ssm:/fairsums/${Environment}/admin/ADMIN_SUB}}"
+          # Overview page: Operations and Deployments cards
+          # (src/lib/ops/config.ts, docs/overview.md). All optional there, but
+          # this stack knows every one of these names except the load
+          # balancer's, which ECS Express only reveals once the service
+          # exists (see OpsAlbArnSuffix above).
+          - Name: OPS_RDS_INSTANCE_ID
+            Value: !Sub fairsums-${Environment}
+          - Name: OPS_ECS_CLUSTER
+            Value: !ImportValue fairsums-foundation-ClusterName
+          - Name: OPS_ECS_SERVICES
+            Value: !Sub fairsums-web-${Environment},fairsums-admin-${Environment}
+          - Name: OPS_ALB_ARN_SUFFIX
+            Value: !Ref OpsAlbArnSuffix
+          - Name: OPS_WAF_WEBACL_NAME
+            Value: !Sub fairsums-admin-${Environment}
         Secrets:
           - Name: DATABASE_URL
             ValueFrom: !ImportValue

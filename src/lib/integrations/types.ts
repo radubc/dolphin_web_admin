@@ -3,8 +3,8 @@
  *
  * An *integration* is one outbound call the admin app makes to an external
  * provider on a schedule, or on demand when the consumer app asks for
- * something the cache does not have yet. Three exist, seeded by
- * `docs/sql/008_integrations.sql` and never created from the UI:
+ * something the cache does not have yet. Eight exist, seeded by the numbered
+ * SQL under `docs/sql/` and never created from the UI:
  *
  * - `twelvedata_catalogs` — downloads the stock, ETF and cryptocurrency
  *   reference lists from TwelveData (no key needed) and inserts the rows the
@@ -34,6 +34,44 @@
  *   owns. Which provider last served a symbol is remembered on
  *   `admin_quote_symbols.provider`, so neither provider is asked twice for
  *   a listing the other owns.
+ * - `aws_costs` — the odd one out: the provider is **AWS itself** and the
+ *   credential is the ECS task role, not an API key. Once a day it asks Cost
+ *   Explorer what the account spent per day and service, Budgets how that
+ *   compares with the limit, and Free Tier how much credit is left, and
+ *   caches the answers in `admin_cost_daily` and `admin_cost_snapshots` for
+ *   the Cost center page. It is here rather than in its own feature because
+ *   runs, "Run now", history and the schedule editor all come free from
+ *   being an integration. Cost Explorer charges $0.01 per request and this
+ *   spends about four a run, which is why nothing else in the app is allowed
+ *   to call it — see `src/lib/costs/` and `docs/costs.md`. Seeded by
+ *   `docs/sql/013_aws_costs.sql`.
+ * - `cognito_directory` — the other AWS-credential one, and the only
+ *   integration whose *reason* is that the provider forgets. Once a night it
+ *   pages the customer Cognito pool, writes what it saw to
+ *   `admin_customer_snapshots`, and records the difference from the previous
+ *   snapshot as lifecycle events in `admin_customer_events`: a sub that has
+ *   stopped appearing is a deletion, `enabled` going false is a
+ *   disablement, `FORCE_CHANGE_PASSWORD` becoming `CONFIRMED` is a
+ *   confirmation. Cognito publishes no event and offers no trigger for any of
+ *   those, so the diff is the only way to know. The same run reads the pool's
+ *   daily CloudWatch counters into `admin_pool_metrics_daily` and records the
+ *   consumer app's own account deletions (`users.deleted_at`) as
+ *   `deleted_in_app`. Every call it makes is free. Seeded by
+ *   `docs/sql/014_customer_statistics.sql`; see `src/lib/customers/` and
+ *   `docs/customers.md`.
+ * - `allocate_costs` — the only one that calls **nothing**. Once a night it
+ *   divides each recent month's cached AWS bill (`admin_cost_daily`) over the
+ *   tenants, by drivers measured in the consumer app's own tables — requests
+ *   and sync rows from `usage_daily`, attachment bytes, active users — and
+ *   writes the result to `admin_tenant_cost_monthly` for the Cost center's
+ *   "Cost per client" card and the Customers page's cost column. It is an
+ *   integration because a schedule, a run history and "Run now" come free
+ *   from being one, not because it talks to anyone: no AWS request, no API
+ *   key, no charge. Its provider is recorded as `aws` only because that is
+ *   whose bill it divides — the provider vocabulary has no `internal`. It
+ *   needs `aws_costs` to have cached the month first, and says so when it has
+ *   not. Seeded by `docs/sql/015_cost_allocation.sql`; see
+ *   `src/lib/costs/allocation.ts` and `docs/cost-allocation.md`.
  *
  * The provider's address is editable per integration, so is the schedule and
  * a small settings object; nothing else about an integration is.
@@ -56,6 +94,9 @@ export const INTEGRATION_KEYS = [
   "twelvedata_quotes",
   "alpha_vantage_quotes",
   "bank_of_canada_rates",
+  "aws_costs",
+  "cognito_directory",
+  "allocate_costs",
 ] as const;
 
 export type IntegrationKey = (typeof INTEGRATION_KEYS)[number];
@@ -69,6 +110,14 @@ export const INTEGRATION_PROVIDERS = [
   "bank_of_canada",
   "iso20022",
   "alpha_vantage",
+  /**
+   * AWS itself, reached with the task role rather than an API key: Cost
+   * Explorer, Budgets and Free Tier for `aws_costs`, and Cognito plus
+   * CloudWatch for `cognito_directory`. The only provider here whose
+   * credential is not an environment variable, which is why both have
+   * `requires_api_key = false` and no `api_key_env`.
+   */
+  "aws",
 ] as const;
 
 export type IntegrationProvider = (typeof INTEGRATION_PROVIDERS)[number];
@@ -115,6 +164,16 @@ export type CatalogTarget = (typeof CATALOG_TARGETS)[number];
  * - `alpha_vantage_quotes`: `maxRequestsPerRun` and `requestsPerMinute` — the
  *   free tier allows 25 requests a day and 5 a minute, and `GLOBAL_QUOTE` has
  *   no batch form, so one symbol is one request.
+ * - `aws_costs`: `days` — how far back the daily fetch reaches;
+ *   `componentTag` — the cost allocation tag the month-to-date split is
+ *   grouped by; `budgetName` — which budget to read when the account has
+ *   more than one.
+ * - `cognito_directory`: `metricsDays` — how many days of the pool's
+ *   CloudWatch counters each run re-fetches.
+ * - `allocate_costs`: `months` — how many months each run recomputes, ending
+ *   with the current one; `fixedFloorShare` — the share of the shared-capacity
+ *   pool every tenant still live at the end of the month is given before the
+ *   rest is split by activity.
  */
 export interface IntegrationSettings {
   catalogs?: CatalogTarget[];
@@ -133,6 +192,56 @@ export interface IntegrationSettings {
   maxRequestsPerRun?: number;
   /** `alpha_vantage_quotes`: the tier's per-minute allowance (5 on free). */
   requestsPerMinute?: number;
+  /**
+   * `aws_costs`: how many days back the daily Cost Explorer fetch reaches,
+   * ending yesterday. 35 by default, capped at `COST_FETCH_DAYS_MAX` (120);
+   * every day in the window is re-fetched and replaced each run, so a figure
+   * AWS revised late is corrected. Raising it costs nothing extra until the
+   * answer needs a second page — and then it costs $0.01 more *every day*,
+   * which is why the cap is well below what Cost Explorer would answer.
+   */
+  days?: number;
+  /**
+   * `aws_costs`: the cost allocation tag the month-to-date split is grouped
+   * by, `Component` by default (`web` / `admin` in the three stacks). The tag
+   * must be activated once in the Billing console before AWS will group by
+   * it, and activation is not retroactive — until then the run simply writes
+   * no component rows.
+   */
+  componentTag?: string;
+  /**
+   * `aws_costs`: which AWS budget to read when the account has more than one.
+   * Unset means the first one `DescribeBudgets` returns, which is right while
+   * there is exactly one.
+   */
+  budgetName?: string;
+  /**
+   * `cognito_directory`: how many days of the customer pool's CloudWatch
+   * counters each run re-fetches, ending yesterday. 35 by default; every day
+   * in the window is replaced, so a figure CloudWatch filled in late is
+   * corrected. `GetMetricData` is free, so a wider window costs only a
+   * bigger response — the cap is what CloudWatch still keeps at a daily
+   * period (15 months).
+   */
+  metricsDays?: number;
+  /**
+   * `allocate_costs`: how many months each run recomputes, ending with the
+   * current (partial) one. 2 by default — this month, whose figures move
+   * every day, and last month, which Cost Explorer may still revise. Every
+   * month in the window is recomputed from scratch, so a wider window costs
+   * only time; it is capped at what Cost Explorer keeps (about 14 months),
+   * beyond which there is nothing to divide.
+   */
+  months?: number;
+  /**
+   * `allocate_costs`: the share of the shared-capacity pool every tenant
+   * still live at the end of the month is given before the remainder is split
+   * by activity. 0.005 (half a percent) by default, so a dormant tenant does
+   * not read as free while the measured split still decides the bulk. Capped
+   * at 0.25, and additionally at `0.5 / eligible tenants` by the allocator —
+   * the floors together never take more than half the pool.
+   */
+  fixedFloorShare?: number;
 }
 
 export const QUOTE_BATCH_SIZE_DEFAULT = 8;

@@ -15,6 +15,12 @@
  */
 import { z } from "zod";
 import {
+  ALLOCATION_MONTHS_MAX,
+  COST_FETCH_DAYS_MAX,
+  FIXED_FLOOR_SHARE_MAX,
+} from "@/lib/costs/types";
+import { POOL_METRICS_DAYS_MAX } from "@/lib/customers/types";
+import {
   ALPHA_VANTAGE_REQUESTS_PER_MINUTE_MAX,
   ALPHA_VANTAGE_REQUESTS_PER_RUN_MAX,
   CATALOG_TARGETS,
@@ -106,6 +112,12 @@ export const PROVIDER_BASE_URL_DOMAINS: Record<IntegrationProvider, string> = {
   // one integration whose address really can carry the credential off-site.
   // The domain check is the thing that stops it.
   alpha_vantage: "alphavantage.co",
+  // `aws_costs` carries no key at all — the AWS SDK signs each request with
+  // the task role and builds its own endpoint, so nothing reads this row's
+  // base_url. The domain is here because every provider needs one, and it is
+  // the AWS service domain so that an edit cannot make the row *look* as
+  // though it points somewhere else.
+  aws: "amazonaws.com",
 };
 
 /**
@@ -160,6 +172,13 @@ const scheduleSchema = z
   })
   .partial();
 
+/**
+ * The provider-specific knobs, one flat object for every integration (see
+ * `IntegrationSettings` in `./types.ts`). Each bound here matches the clamp
+ * `settingsOf` applies when the row is read back, so a value that survives
+ * validation is a value the run will actually use — a request that asked for
+ * more would otherwise be silently reduced and look accepted.
+ */
 const settingsSchema = z
   .object({
     catalogs: z.array(z.enum(CATALOG_TARGETS)).min(1).max(CATALOG_TARGETS.length),
@@ -175,6 +194,52 @@ const settingsSchema = z
     maxRequestsPerRun: z.number().int().min(1).max(ALPHA_VANTAGE_REQUESTS_PER_RUN_MAX),
     /** Alpha Vantage: the free tier allows 5 requests a minute. */
     requestsPerMinute: z.number().int().min(1).max(ALPHA_VANTAGE_REQUESTS_PER_MINUTE_MAX),
+    /**
+     * `aws_costs`: days the daily Cost Explorer fetch reaches back over,
+     * ending yesterday. Capped at {@link COST_FETCH_DAYS_MAX} because every
+     * page of the answer is a charged request, every day — not because the
+     * database would mind.
+     */
+    days: z.number().int().min(1).max(COST_FETCH_DAYS_MAX),
+    /**
+     * `aws_costs`: the cost allocation tag the month's split is grouped by.
+     * 128 characters is AWS's own limit on a tag key; the value is trimmed so
+     * a stray space cannot group by a tag nobody has.
+     */
+    componentTag: z.string().trim().min(1).max(128),
+    /**
+     * `aws_costs`: which budget to read when the account has several.
+     *
+     * An empty string is allowed and means "the first one AWS returns": a
+     * patch merges into the stored settings, so sending `""` is how the
+     * drawer *clears* the pin. `settingsOf` drops the key when it writes, so
+     * no budget called "" is ever pinned.
+     */
+    budgetName: z.string().trim().max(100),
+    /**
+     * `cognito_directory`: days of the customer pool's CloudWatch counters
+     * each run re-fetches. `GetMetricData` is free, so the cap is only what
+     * CloudWatch still keeps at a one-day period.
+     */
+    metricsDays: z.number().int().min(1).max(POOL_METRICS_DAYS_MAX),
+    /**
+     * `allocate_costs`: how many months each run recomputes, ending with the
+     * current (partial) one. Capped at {@link ALLOCATION_MONTHS_MAX} because
+     * Cost Explorer keeps about fourteen months and a month further back has
+     * no cached bill to divide — the same clamp `settingsOf` applies, so a
+     * value that validates is a value the run will use.
+     */
+    months: z.number().int().min(1).max(ALLOCATION_MONTHS_MAX),
+    /**
+     * `allocate_costs`: the share of the shared-capacity pool every live
+     * tenant is given before the remainder is split by activity. A fraction,
+     * not a percentage, and not an integer: 0 turns the floor off entirely
+     * and {@link FIXED_FLOOR_SHARE_MAX} (a quarter) is where an allocation
+     * would stop being one and become a headcount. The allocator additionally
+     * caps the effective floor at `1 / tenants`, which no validation here
+     * could know.
+     */
+    fixedFloorShare: z.number().min(0).max(FIXED_FLOOR_SHARE_MAX),
   })
   .partial();
 

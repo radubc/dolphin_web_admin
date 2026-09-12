@@ -471,3 +471,108 @@ export async function deleteUnconfirmedUser(username: string): Promise<void> {
     throw translateCognitoError(error, "deleting a customer account");
   }
 }
+
+/* -------------------------------------------------------------------------- */
+/*                          The nightly directory read                        */
+/* -------------------------------------------------------------------------- */
+
+/** One pool account as the nightly snapshot records it. */
+export interface PoolAccountSnapshot {
+  /** The `sub` attribute. An account without one is skipped: it is unusable. */
+  sub: string;
+  /**
+   * Cognito's `UserStatus`, **lower-cased and otherwise untouched** — not
+   * narrowed to the five states the list column models.
+   *
+   * The snapshot is a history table: a status this console has nothing to say
+   * about (`EXTERNAL_PROVIDER`, `ARCHIVED`, or whatever AWS adds next) has to
+   * be *recorded* rather than flattened to `unknown`, or the history would
+   * lose the difference between "we do not know" and "Cognito said something
+   * new". The census groups by whatever it finds and the page labels the
+   * statuses it knows, so a new value appears with no code change; the diff
+   * only ever compares the two spellings it names
+   * (`force_change_password` -> `confirmed`), which are unaffected.
+   */
+  status: string;
+  enabled: boolean;
+  createdAt: Date | null;
+  updatedAt: Date | null;
+  /** The `email` attribute, when the pool exposes it. */
+  email: string | null;
+}
+
+/** What one full listing of the pool produced. */
+export interface PoolListing {
+  accounts: PoolAccountSnapshot[];
+  /** Accounts the listing saw that carried no `sub` attribute. */
+  withoutSub: number;
+  /** How many `ListUsers` pages were spent. */
+  pages: number;
+  /**
+   * True when the page cap stopped the listing early. The snapshot is then
+   * **partial**, and the caller must not diff it — every account it did not
+   * reach would look deleted.
+   */
+  truncated: boolean;
+}
+
+/**
+ * Pages the whole customer pool for the nightly snapshot.
+ *
+ * Deliberately **not** `getPoolDirectory()`: that one is a 60-second cache
+ * shaped for a page load — it keeps only what the status column needs, throws
+ * away the email, and swallows its own errors so a list can still render.
+ * The snapshot needs the opposite of all three: the raw rows, a fresh read,
+ * and a failure it can report, because a snapshot written from a half-read
+ * pool would make the next diff invent deletions.
+ *
+ * @throws {ApiError} translated from Cognito, so the run's error says what
+ * AWS refused and why.
+ */
+export async function listPoolAccounts(): Promise<PoolListing> {
+  const config = getCustomerCognitoConfig();
+  const client = getClient(config);
+  const accounts: PoolAccountSnapshot[] = [];
+  let withoutSub = 0;
+  let pages = 0;
+  let truncated = true;
+  let paginationToken: string | undefined;
+
+  try {
+    for (let page = 0; page < LIST_PAGE_CAP; page += 1) {
+      const response = await client.send(
+        new ListUsersCommand({
+          UserPoolId: config.userPoolId,
+          Limit: LIST_PAGE_LIMIT,
+          PaginationToken: paginationToken,
+        }),
+      );
+      pages += 1;
+      for (const user of response.Users ?? []) {
+        const sub = attribute(user.Attributes, "sub");
+        if (sub === undefined) {
+          withoutSub += 1;
+          continue;
+        }
+        accounts.push({
+          sub,
+          // The raw status, lower-cased: see `PoolAccountSnapshot.status`.
+          status: user.UserStatus?.toLowerCase() ?? "unknown",
+          enabled: user.Enabled ?? true,
+          createdAt: user.UserCreateDate ?? null,
+          updatedAt: user.UserLastModifiedDate ?? null,
+          email: attribute(user.Attributes, "email") ?? null,
+        });
+      }
+      paginationToken = response.PaginationToken;
+      if (paginationToken === undefined) {
+        truncated = false;
+        break;
+      }
+    }
+  } catch (error) {
+    throw translateCognitoError(error, "listing the customer pool for the nightly snapshot");
+  }
+
+  return { accounts, withoutSub, pages, truncated };
+}

@@ -98,3 +98,62 @@ export function humaniseKey(key: string): string {
   const words = key.replace(/_/g, " ").trim();
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
+
+/* -------------------------------------------------------------------------- */
+/* Calendar days                                                              */
+/* -------------------------------------------------------------------------- */
+
+const DAY_LABEL_FORMATTER = new Intl.DateTimeFormat("en-CA", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+const DAY_SHORT_FORMATTER = new Intl.DateTimeFormat("en-CA", {
+  day: "numeric",
+  month: "short",
+  timeZone: "UTC",
+});
+
+/**
+ * `11 Sep 2026` from a `YYYY-MM-DD` day, in UTC.
+ *
+ * Days in this app are UTC calendar days — a billing day, a usage day and a
+ * CloudWatch day are all the same UTC bucket — so this never looks at a
+ * timezone. Unparseable input comes back unchanged, like the rest of this
+ * module.
+ */
+export function formatIsoDay(day: string): string {
+  const time = Date.parse(`${day}T00:00:00Z`);
+  if (Number.isNaN(time)) return day;
+  return DAY_LABEL_FORMATTER.format(new Date(time));
+}
+
+/** `11 Sep`, for a dense chart axis. */
+export function formatIsoDayShort(day: string): string {
+  const time = Date.parse(`${day}T00:00:00Z`);
+  if (Number.isNaN(time)) return day;
+  return DAY_SHORT_FORMATTER.format(new Date(time));
+}
+
+/** `1.4 MB` / `912 kB` / `0 B`, base 1000, for byte counts in a table. */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "kB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1000 && unit < units.length - 1) {
+    value /= 1000;
+    unit += 1;
+  }
+  // No decimal on bytes — half a byte is not a thing — and one everywhere
+  // else, which is as much precision as a size column can carry usefully.
+  return `${unit === 0 ? value : value.toFixed(1)} ${units[unit]}`;
+}
+
+/** `0.4%` / `12.5%` / `—` for null, which is "there is no rate", not "zero". */
+export function formatPercentOrDash(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  return `${value.toFixed(1)}%`;
+}

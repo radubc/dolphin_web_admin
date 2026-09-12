@@ -16,6 +16,14 @@
  * card is not: it breaks down the page on screen, and says so, because the
  * server sends one page rather than a per-status census.
  *
+ * Two columns say how recently someone was here, and they are not the same
+ * thing. "Last seen" is `users.last_seen_at`, which the consumer app stamps
+ * at sign-in — the only fact in either database that means the person
+ * themselves was present. Under it is the older derived figure, the newest
+ * change anywhere in their tenants, which is all this console could measure
+ * before that column existed and is still the answer for a row that has no
+ * sign-in recorded.
+ *
  * Everything is server-paged, searched and filtered: this is the consumer app's
  * entire user table, and it is only going to get longer.
  */
@@ -30,11 +38,13 @@ import {
   ReloadOutlined,
   UserAddOutlined,
 } from "@ant-design/icons";
+import { NOT_COMPUTED_NOTE, useTenantCosts } from "@/components/cost-center/cost-per-client-data";
 import { ListEmpty, ListNoResults } from "@/components/empty-state";
 import Figures from "@/components/figures";
 import { ListPageFrame, ListPanel, ListTableRegion } from "@/components/list-page-frame";
 import { RibbonBar, RibbonButton, RibbonDivider } from "@/components/ribbon-bar";
 import StatCard from "@/components/stat-card";
+import { formatUsd } from "@/lib/costs/types";
 import type { Customer } from "@/lib/customers/types";
 import { ACTIVE_WINDOW_DAYS } from "@/lib/customers/types";
 import {
@@ -83,6 +93,17 @@ export default function CustomersView({ canInvite, onInvite, switcher, onSendabi
   const store = useCustomersStore();
   /** The row whose detail drawer is open. */
   const [selected, setSelected] = useState<Customer | null>(null);
+  /**
+   * This month's allocated cost per tenant — **one request for the whole
+   * page**, not one per row and not a join into the list's query. A row's
+   * figure is the sum over the tenants it already carries.
+   *
+   * Best-effort: an operator may hold the Customers actions without holding a
+   * cost action, and the allocation table may not exist yet. Either way the
+   * column says "—" with the reason in its tooltip rather than breaking a
+   * list that does not depend on it.
+   */
+  const costs = useTenantCosts();
 
   const { items, counts, canSend, unavailableReason } = store;
 
@@ -148,13 +169,40 @@ export default function CustomersView({ canInvite, onInvite, switcher, onSendabi
       ),
     },
     {
-      title: "Last active",
-      dataIndex: "lastActiveAt",
-      width: 150,
-      render: (value: string | null) => (
-        <Tooltip title={formatDateTimeOrDash(value)}>
-          <span tabIndex={0}>{formatRelativeTimeOrNever(value)}</span>
-        </Tooltip>
+      // The column that really means "this person used the app": the consumer
+      // app stamps `users.last_seen_at` at sign-in and refreshes it hourly.
+      // It is null for a row written before that column existed and for
+      // anyone who has not signed in since, so the derived "last active" is
+      // shown underneath as the fallback — labelled, so the two are never
+      // mistaken for each other.
+      title: "Last seen",
+      dataIndex: "lastSeenAt",
+      width: 170,
+      render: (value: string | null, row) => (
+        <span className="flex flex-col">
+          <Tooltip
+            title={
+              value === null
+                ? "No sign-in recorded. The consumer app stamps users.last_seen_at at sign-in; a row written before that column existed has none."
+                : formatDateTimeOrDash(value)
+            }
+          >
+            <span tabIndex={0} style={{ color: value === null ? surfaceColors.textTertiary : undefined }}>
+              {value === null ? "No sign-in recorded" : formatRelativeTimeOrNever(value)}
+            </span>
+          </Tooltip>
+          <Tooltip
+            title={`Newest change across the tenant\u2019s transactions, accounts, budgets and goals: ${formatDateTimeOrDash(row.lastActiveAt)}`}
+          >
+            <span
+              tabIndex={0}
+              className="text-xs"
+              style={{ color: surfaceColors.textTertiary }}
+            >
+              changed {formatRelativeTimeOrNever(row.lastActiveAt).toLowerCase()}
+            </span>
+          </Tooltip>
+        </span>
       ),
     },
     {
@@ -170,6 +218,46 @@ export default function CustomersView({ canInvite, onInvite, switcher, onSendabi
       width: 120,
       align: "right",
       render: (value: number) => <span className="tabular-nums">{value.toLocaleString()}</span>,
+    },
+    {
+      // An **allocated estimate**, never a bill: AWS charges per resource and
+      // every resource except an S3 object is shared by all tenants, so this
+      // is this month's spend divided over the tenants by measured usage. The
+      // Cost center's "Cost per client" card is the same figures in full.
+      title: "Cost (est.)",
+      key: "costEstimate",
+      width: 120,
+      align: "right",
+      render: (_value, row) => {
+        const total = costs.totalFor(row.tenants.map((tenant) => tenant.id));
+        if (total === null) {
+          return (
+            <Tooltip
+              title={
+                costs.loading
+                  ? "Reading this month's cost allocation…"
+                  : (costs.reason ??
+                    (costs.notComputed
+                      ? NOT_COMPUTED_NOTE
+                      : "The cost allocation is not available on this deployment yet."))
+              }
+            >
+              <span tabIndex={0} style={{ color: surfaceColors.textTertiary }}>
+                —
+              </span>
+            </Tooltip>
+          );
+        }
+        return (
+          <Tooltip
+            title={`An allocated estimate of what this customer's ${pluralise(row.tenants.length, "tenant")} cost this month: the month's AWS spend split into shared capacity, storage, data transfer and Cognito, and divided by measured usage. Open the row for the breakdown.`}
+          >
+            <span tabIndex={0} className="tabular-nums" style={{ color: surfaceColors.text }}>
+              {formatUsd(total)}
+            </span>
+          </Tooltip>
+        );
+      },
     },
   ];
 
@@ -202,6 +290,13 @@ export default function CustomersView({ canInvite, onInvite, switcher, onSendabi
           value: counts.disabled.toLocaleString(),
           color: counts.disabled > 0 ? featureColors.rule : undefined,
           tooltip: "Pool accounts that are switched off and cannot sign in.",
+        },
+        {
+          label: "Deleted",
+          value: counts.deleted.toLocaleString(),
+          color: counts.deleted > 0 ? featureColors.rule : undefined,
+          tooltip:
+            "Customers who deleted their account in the consumer app (users.deleted_at). Hidden from the list unless \u201cInclude deleted\u201d is on, so this is the only place they are counted.",
         },
       ]}
     />
@@ -299,6 +394,10 @@ export default function CustomersView({ canInvite, onInvite, switcher, onSendabi
             { value: "all", label: "All" },
             { value: "active", label: "Active" },
             { value: "disabled", label: "Disabled" },
+            // A column rather than a pool answer, and it implies "include
+            // deleted": the server resolves the filter that way, so the
+            // toggle below is left as the operator set it.
+            { value: "deleted", label: "Deleted" },
           ]}
         />
       </span>
@@ -382,7 +481,7 @@ export default function CustomersView({ canInvite, onInvite, switcher, onSendabi
                     columns={columns}
                     size="middle"
                     loading={store.refreshing}
-                    scroll={{ x: 1220, y }}
+                    scroll={{ x: 1390, y }}
                     onRow={(row) => ({
                       onClick: () => setSelected(row),
                       style: { cursor: "pointer" },

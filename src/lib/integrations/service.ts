@@ -1,7 +1,7 @@
 import "server-only";
 /**
  * The glue the Integrations routes call: the admin database
- * (`./repository.ts`), the run runner (`./runs.ts`) and the three run bodies
+ * (`./repository.ts`), the run runner (`./runs.ts`) and the run bodies
  * (`./jobs/*`), shaped into the responses declared in `./types.ts`.
  *
  * Routes stay thin — they validate the path segment, the query string and the
@@ -23,14 +23,21 @@ import "server-only";
 import { Prisma } from "@/generated/prisma-admin/client";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/api/errors";
 import type { ValidationDetails } from "@/lib/api/validate";
+import { DIRECTORY_INTEGRATION_KEY } from "@/lib/customers/types";
+import { allocateCostsWork } from "./jobs/allocate-costs";
 import { alphaVantageQuotesWork } from "./jobs/alpha-vantage";
+import { awsCostsWork } from "./jobs/aws-costs";
+import { cognitoDirectoryWork } from "./jobs/cognito-directory";
 import { catalogsWork } from "./jobs/catalogs";
 import { marketsWork } from "./jobs/markets";
 import { quotesWork } from "./jobs/quotes";
 import { ratesWork } from "./jobs/rates";
 import {
+  allocateCostsSettings,
   alphaVantageSettings,
   apiKeyOf,
+  awsCostsSettings,
+  cognitoDirectorySettings,
   canonicalOf,
   catalogTargets,
   createCurrencyPair,
@@ -271,6 +278,40 @@ export function workFor(row: IntegrationRow, request: RunRequest): RunWork {
       requestsPerMinute,
       force: request.force === true,
     });
+  }
+
+  if (key === "aws_costs") {
+    // No `baseUrl` and no `apiKey`: the provider is AWS itself, the endpoint
+    // is the SDK's own (us-east-1, pinned in src/lib/costs/aws.ts) and the
+    // credential is the ECS task role from the SDK's default chain. The row's
+    // `base_url` is shown on the Integrations page for orientation and is
+    // read by nothing. `force` has no meaning either — the run always
+    // re-fetches and replaces its whole window.
+    return awsCostsWork(awsCostsSettings(settings));
+  }
+
+  if (key === "allocate_costs") {
+    // The one run that calls nothing at all. Both inputs are already in the
+    // two databases — the cost rows `aws_costs` cached, and the consumer
+    // app's own usage counters — so there is no `baseUrl`, no `apiKey`, and
+    // nothing for `force` to mean: every run recomputes its whole window of
+    // months from scratch.
+    return allocateCostsWork(allocateCostsSettings(settings));
+  }
+
+  if (key === DIRECTORY_INTEGRATION_KEY) {
+    // Same shape as `aws_costs`: no `baseUrl` and no `apiKey`, because the
+    // provider is AWS itself (Cognito and CloudWatch) and the credential is
+    // the task role from the SDK's default chain. `force` has no meaning —
+    // the run always reads the whole pool and always replaces its metrics
+    // window — so it is not passed on.
+    //
+    // The key is the shared constant rather than a literal: the same string
+    // is the `admin_integrations.key` seeded by
+    // docs/sql/014_customer_statistics.sql ('cognito_directory') and what the
+    // Customers page's "Take snapshot" button posts to
+    // /api/v1/admin/integrations/[key]/run, so the three must agree.
+    return cognitoDirectoryWork(cognitoDirectorySettings(settings));
   }
 
   return ratesWork({ baseUrl: row.base_url, force: request.force === true });

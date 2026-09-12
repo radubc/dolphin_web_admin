@@ -45,6 +45,7 @@ export const PROVIDER_LABELS: Readonly<Record<IntegrationProvider, string>> = {
   bank_of_canada: "Bank of Canada",
   iso20022: "ISO 20022",
   alpha_vantage: "Alpha Vantage",
+  aws: "AWS",
 };
 
 /** The provider's name, falling back to the raw key for a value newer than this build. */
@@ -278,10 +279,11 @@ export function SourceTag({ source }: { source: WatchSource }) {
 const QUOTE_PROVIDER_TAG_COLORS: Readonly<Record<IntegrationProvider, string>> = {
   twelvedata: "blue",
   alpha_vantage: "gold",
-  // Neither quotes anything; listed so the record is total and a stray value
-  // still renders as a tag rather than as nothing.
+  // None of these quotes anything; listed so the record is total and a stray
+  // value still renders as a tag rather than as nothing.
   bank_of_canada: "default",
   iso20022: "default",
+  aws: "default",
 };
 
 /**

@@ -25,6 +25,9 @@ database.
 | `bank_of_canada_rates` | Bank of Canada Valet `https://www.bankofcanada.ca/valet` | no | Reads the `FX_RATES_DAILY` group (about 27 currencies, each as CAD per one unit) and writes a rate for every active currency pair into `admin_exchange_rates`, one row per pair and day. | daily 01:30 |
 | `iso_mic_markets` | ISO 20022 `https://www.iso20022.org` | no | Downloads the ISO 10383 MIC register (one CSV) and **inserts the markets `markets` does not have yet**, matched on `mic_code`. Existing rows are never changed or removed. New rows land in the Constants sync ledger as *new*. | weekly, Monday 02:30 |
 | `alpha_vantage_quotes` | Alpha Vantage `https://www.alphavantage.co` | **yes**: `ALPHA_VANTAGE_API_KEY` | The **fallback** for symbols TwelveData does not serve. Runs inside the `twelvedata_quotes` run, one symbol per request. **Run now** refreshes the symbols it already owns. | off (it is a fallback) |
+| `aws_costs` | AWS (Cost Explorer, Budgets, Free Tier) | no — the **ECS task role**, from the SDK's default credential chain | Asks AWS what the account spent per day and service, how that compares with the budget and how much free-tier credit is left, and caches it in `admin_cost_daily` / `admin_cost_snapshots` for the Cost center page. About four Cost Explorer requests a run at $0.01 each. See [costs.md](./costs.md). | daily 09:00 |
+| `cognito_directory` | AWS (Cognito, CloudWatch) | no — the **ECS task role**, from the SDK's default credential chain | Pages the customer Cognito pool into `admin_customer_snapshots`, records the difference from the previous snapshot as lifecycle events in `admin_customer_events` (deletions, disablements, confirmations), reads the pool's daily CloudWatch counters into `admin_pool_metrics_daily`, and records the consumer app's own account deletions as `deleted_in_app`. **Free.** Cognito publishes no deletion event and offers no trigger, so the nightly diff is the only way to know. See [customers.md](./customers.md). | daily 02:30 |
+| `allocate_costs` | none — it calls nothing | no credential of any kind | Divides each recent month's cached AWS bill over the tenants and writes `admin_tenant_cost_monthly`: four pools (shared capacity, storage, data transfer, Cognito) split by drivers measured in the consumer app's own tables (`usage_daily`, `file_blobs`, `transactions`, `users.last_seen_at`). **Free**, and the only integration that makes no outbound call — it is one because a schedule, a run history and Run now come free from being one. Needs `aws_costs` to have cached the month first. See [cost-allocation.md](./cost-allocation.md). | daily 03:30 |
 
 Times are wall-clock in the integration's timezone (default `America/Toronto`).
 Frequency can be daily, weekly (pick the weekday), monthly (pick a day, 1–28)
@@ -32,11 +35,48 @@ or off. Off means the integration only runs when someone presses **Run now**,
 or when the consumer app asks for something the cache does not have.
 
 Only the base URL, the enabled flag, the schedule and a few settings are
-editable. Nothing else about an integration is: they are seeded by the SQL and
+editable; the drawer shows the settings block that belongs to the integration
+being edited and nothing else, and every field there is bounded on the server
+by `integrationPatchSchema`. Nothing else about an integration is: they are seeded by the SQL and
 the code decides what each one does. The base URL must stay on the provider's
 own domain (`twelvedata.com`, `bankofcanada.ca`, `iso20022.org`,
-`alphavantage.co`): the quote integrations send an API key with every call, and
-an address an operator could point anywhere would be a way to read that key.
+`alphavantage.co`, `amazonaws.com`): the quote integrations send an API key
+with every call, and an address an operator could point anywhere would be a
+way to read that key.
+
+`aws_costs` is the exception to most of the above. Its provider is AWS itself,
+so it carries no API key at all — the credential is the ECS task role — and
+its base URL is read by nothing, because the AWS SDK builds its own endpoint
+(pinned to `us-east-1`: Cost Explorer, Budgets and Free Tier are global
+services reached there). Its run counters count **AWS calls** rather than
+items, and each run spends real money. Everything about it is in
+[costs.md](./costs.md).
+
+`cognito_directory` is the same kind of exception and costs nothing. Its
+credential is the task role too, its base URL is likewise read by nothing (the
+SDK resolves the Cognito and CloudWatch endpoints from the **pool's** region,
+not `us-east-1` — CloudWatch metrics live where they were produced), and its
+counters count **parts of the run**: `total` is always 4, `unchanged` is the
+accounts the diff found nothing to say about. It is the one integration whose
+reason for existing is that the provider forgets: Cognito has no deletion
+event and no deletion trigger, so the only way to know an account went away is
+to have written down that it used to be there. Everything about it is in
+[customers.md](./customers.md).
+
+`allocate_costs` is the furthest from the rest: it is an integration that
+**integrates with nothing**. Both its inputs are already in the two databases —
+the cost rows `aws_costs` cached, and the consumer app's own usage counters — so
+there is no provider, no credential, no charge, and its `base_url` is a
+placeholder nothing reads. It is here because a schedule, a run history, a
+settings drawer and a Run now button are exactly what a nightly recomputation
+needs, and building a second mechanism for one job would be worse. Its provider
+is recorded as `aws` only because that is whose bill it divides; the provider
+vocabulary has no `internal` value and widening it for this row was not worth
+the change. Its counters count **months**: `total` is the months planned,
+`failed` the months with no cached bill to divide (the run then says to run
+`aws_costs` first, and still writes the months that do have one), and
+`unchanged` a month with no completed day yet — a run on the 1st. Everything
+about it is in [cost-allocation.md](./cost-allocation.md).
 
 TwelveData's key travels in a request header, never in the URL. Alpha Vantage
 accepts its key **only** as the `apikey` query parameter, so that one provider's
@@ -57,6 +97,30 @@ is what stops the address being aimed somewhere that would keep it.
   are loaded too (default no: only ACTIVE and UPDATED).
 - `alpha_vantage_quotes`: `maxRequestsPerRun` (default 15, never above 25) and
   `requestsPerMinute` (5). One symbol is one request.
+- `aws_costs`: `days` (how far back the daily Cost Explorer fetch reaches,
+  default 35, **cap 120** — every page of the answer is a charged request,
+  every day, and days already fetched stay in the cache), `componentTag` (the
+  cost allocation tag the month's split is grouped by, at most 128 characters)
+  and `budgetName` (which budget to read when the account has more than one;
+  clear it to go back to the first budget AWS returns).
+- `allocate_costs`: `months` (how many months each run recomputes, ending with
+  the current partial one; default 2, cap 14 — what Cost Explorer keeps) and
+  `fixedFloorShare` (the share of the shared-capacity pool every tenant still
+  live at the end of the month carries before the remainder is split by
+  activity; default 0.005, cap 0.25, and capped again by the allocator at
+  `0.5 / eligible tenants` so the floors together never take more than half
+  the pool). Both are in the
+  drawer's **Allocation** block, and `fixedFloorShare` is entered as the
+  fraction it is — 0.005 is half a percent, 0 switches the floor off. Which services belong to
+  which pool, and what drives each pool, are deliberately **not** configurable:
+  a per-client figure whose method could be changed from a drawer would not be
+  comparable with last month's.
+- `cognito_directory`: `metricsDays` — how many days of the pool's CloudWatch
+  counters each run re-fetches, ending yesterday (default 35, cap 450, which
+  is what CloudWatch keeps at a one-day period). The snapshot and the diff are
+  deliberately **not** configurable: "read the whole pool" and "compare with
+  the previous snapshot" are what the run is, and a knob narrowing either
+  would make the event log lie.
 
 ## The watch lists
 

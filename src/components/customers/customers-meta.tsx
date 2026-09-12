@@ -49,6 +49,13 @@ export const CUSTOMER_STATUS_META: Readonly<Record<CustomerStatus, StatusMeta>> 
     color: featureColors.rule,
     tooltip: "The pool account is switched off; the person cannot sign in.",
   },
+  deleted: {
+    label: "Deleted",
+    tagColor: "red",
+    color: featureColors.rule,
+    tooltip:
+      "The person deleted their account in the consumer app (users.deleted_at). Their rows are kept, soft-deleted, and the row is only in this list because \u201cInclude deleted\u201d is on.",
+  },
   no_account: {
     label: "No account",
     tagColor: "default",
@@ -68,6 +75,7 @@ export const CUSTOMER_STATUSES: readonly CustomerStatus[] = [
   "active",
   "invited",
   "disabled",
+  "deleted",
   "no_account",
   "unknown",
 ];

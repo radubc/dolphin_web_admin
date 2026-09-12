@@ -43,8 +43,15 @@ const SEARCH_DEBOUNCE_MS = 300;
  * The statuses the customer segment offers. `no_account` and `unknown` are
  * left out on purpose: they are states of the *lookup*, not of the person, and
  * a filter for them would mostly be a filter for "the pool was unreachable".
+ *
+ * `deleted` is in, and is the one filter that is a column rather than a pool
+ * answer. Choosing it implies "include deleted" — asking for the deleted
+ * customers while hiding deleted rows can only ever answer nothing — so the
+ * server resolves it that way and the toggle is left alone.
  */
-export type CustomerStatusFilter = "all" | Extract<CustomerStatus, "active" | "invited" | "disabled">;
+export type CustomerStatusFilter =
+  | "all"
+  | Extract<CustomerStatus, "active" | "invited" | "disabled" | "deleted">;
 
 export type InviteStatusFilter = InviteStatus | "all";
 
@@ -176,7 +183,13 @@ export interface CustomersStore extends ListStore<Customer, CustomerStatusFilter
 }
 
 /** Zeroes to draw before the first page lands, so the figures never read `NaN`. */
-const EMPTY_COUNTS: CustomerCounts = { total: 0, activeRecently: 0, invited: 0, disabled: 0 };
+const EMPTY_COUNTS: CustomerCounts = {
+  total: 0,
+  activeRecently: 0,
+  invited: 0,
+  disabled: 0,
+  deleted: 0,
+};
 
 export function useCustomersStore(): CustomersStore {
   const state = useListQuery<CustomerStatusFilter>("all");

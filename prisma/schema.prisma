@@ -385,10 +385,12 @@ model categories {
   deleted_at                       DateTime?                          @db.Timestamptz(6)
   parent_id                        String?
   is_discretionary                 Boolean?
+  tenant_id                        String?
   bills                            bills[]
   budgeted_items                   budgeted_items[]
   categories                       categories?                        @relation("categoriesTocategories", fields: [parent_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   other_categories                 categories[]                       @relation("categoriesTocategories")
+  tenants                          tenants?                           @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   loan_additional_costs            loan_additional_costs[]
   recurring_transaction_categories recurring_transaction_categories[]
   rule_category_splits             rule_category_splits[]
@@ -398,6 +400,7 @@ model categories {
   @@index([name], map: "idx_categories_name")
   @@index([parent_id], map: "idx_categories_parent_id")
   @@index([type], map: "idx_categories_type")
+  @@index([tenant_id], map: "idx_categories_tenant_id")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -531,13 +534,19 @@ model financial_institutions {
   name               String
   institution_number String
   type               String
+  created_at         DateTime?        @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime?        @default(now()) @db.Timestamptz(6)
+  deleted_at         DateTime?        @db.Timestamptz(6)
+  tenant_id          String?
   accounts           accounts[]
+  tenants            tenants?         @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   loan_schedules     loan_schedules[]
   loans              loans[]
 
   @@index([institution_number], map: "idx_financial_institutions_institution_number")
   @@index([name], map: "idx_financial_institutions_name")
   @@index([type], map: "idx_financial_institutions_type")
+  @@index([tenant_id], map: "idx_financial_institutions_tenant_id")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -1275,11 +1284,14 @@ model tenants {
   budgeted_items                     budgeted_items[]
   budgeted_periods                   budgeted_periods[]
   budgets                            budgets[]
+  categories                         categories[]
   chart_color_assignments            chart_color_assignments[]
   crypto_trades                      crypto_trades[]
   cryptocurrencies                   cryptocurrencies[]
   documents                          documents[]
   exchange_rates                     exchange_rates[]
+  file_blobs                         file_blobs[]
+  financial_institutions             financial_institutions[]
   goal_transactions                  goal_transactions[]
   goals                              goals[]
   loan_additional_costs              loan_additional_costs[]
@@ -1316,6 +1328,7 @@ model tenants {
   transaction_subscriptions          transaction_subscriptions[]
   transactions                       transactions[]
   transfers                          transfers[]
+  usage_daily                        usage_daily[]
   user_tenants                       user_tenants[]
   value_tags                         value_tags[]
   vehicle_maintenance_items          vehicle_maintenance_items[]
@@ -1522,6 +1535,8 @@ model users {
   created_at   DateTime?     @default(now()) @db.Timestamptz(6)
   updated_at   DateTime?     @default(now()) @db.Timestamptz(6)
   deleted_at   DateTime?     @db.Timestamptz(6)
+  last_seen_at DateTime?     @db.Timestamptz(6)
+  usage_daily  usage_daily[]
   user_tenants user_tenants?
 }
 
@@ -1718,4 +1733,41 @@ model watchlists {
   @@index([deleted_at], map: "idx_watchlists_deleted_at")
   @@index([name], map: "idx_watchlists_name")
   @@index([tenant_id], map: "idx_watchlists_tenant_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model file_blobs {
+  id          String    @id
+  tenant_id   String
+  file_name   String
+  mime_type   String
+  byte_size   Int
+  sha256      String
+  content     Bytes?
+  created_at  DateTime? @default(now()) @db.Timestamptz(6)
+  deleted_at  DateTime? @db.Timestamptz(6)
+  storage_key String?
+  tenants     tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_file_blobs_tenant_id")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model usage_daily {
+  id             String    @id
+  tenant_id      String
+  user_id        String?
+  day            DateTime  @db.Date
+  requests       Int       @default(0)
+  errors         Int       @default(0)
+  sync_rows      Int       @default(0)
+  bytes_uploaded BigInt    @default(0)
+  created_at     DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime? @default(now()) @db.Timestamptz(6)
+  tenants        tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users          users?    @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([tenant_id, user_id, day], map: "usage_daily_tenant_user_day_key")
+  @@index([tenant_id, day], map: "idx_usage_daily_tenant_day")
 }

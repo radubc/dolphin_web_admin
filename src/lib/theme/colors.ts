@@ -45,6 +45,12 @@ export const featureColors = {
   services: "#30B0C7",
   /** Amber — external providers and scheduled runs. */
   integrations: "#FF9F0A",
+  /** Yellow — AWS spend and cost per client. */
+  costCenter: "#FFCC00",
+  /** Pink — subscriptions, invoices and revenue. */
+  salesBilling: "#FF2D55",
+  /** Brown — campaigns and acquisition. */
+  marketing: "#A2845E",
 } as const;
 
 export type FeatureColor = keyof typeof featureColors;

@@ -4,12 +4,14 @@
  * Customers: the people using the consumer app, and the invitations that let
  * them in.
  *
- * Two views, one screen. A segmented control in the ribbon switches between
+ * Three views, one screen. A segmented control in the ribbon switches between
  * them and the choice is written into `?view=` with `history.replaceState`, so
  * a reload or a shared link lands on the same one without a server round trip.
  * Each view owns its own frame — its figures, its rail card and its ribbon all
  * describe what is actually on screen — and is mounted alone, so the
- * invitation log is not fetched while the customer table is being read.
+ * invitation log is not fetched while the customer table is being read, and
+ * the Activity view's aggregates (which are the expensive read of the three)
+ * are not run at all unless somebody asks for them.
  *
  * The invite drawer is owned here rather than by either view: it is reachable
  * from both ribbons and from the shell's "New" menu, and it must survive the
@@ -18,8 +20,9 @@
 
 import { useCallback, useState } from "react";
 import { Segmented } from "antd";
-import { ContactsOutlined, MailOutlined } from "@ant-design/icons";
+import { AreaChartOutlined, ContactsOutlined, MailOutlined } from "@ant-design/icons";
 import { canDo, type AdminCapabilities } from "@/lib/admin-access/types";
+import ActivityView from "./activity-view";
 import CustomersView from "./customers-view";
 import InviteCustomerDrawer from "./invite-customer-drawer";
 import InvitesView from "./invites-view";
@@ -28,6 +31,7 @@ import type { CustomersViewKey } from "./views";
 const VIEW_OPTIONS: ReadonlyArray<{ value: CustomersViewKey; label: string; icon: React.ReactNode }> = [
   { value: "customers", label: "Customers", icon: <ContactsOutlined /> },
   { value: "invites", label: "Invitations", icon: <MailOutlined /> },
+  { value: "activity", label: "Activity", icon: <AreaChartOutlined /> },
 ];
 
 interface CustomersPageProps {
@@ -49,6 +53,11 @@ export default function CustomersPage({ capabilities, initialView }: CustomersPa
 
   // Presentation only: the server re-checks the action on every invite call.
   const canInvite = canDo(capabilities, "can_invite_users");
+  // "Take snapshot" on the Activity view starts a `cognito_directory` run
+  // through the integrations endpoint, so the action that governs it is that
+  // endpoint's — not one of the customer actions. Presentation only, as
+  // above: the server checks it again.
+  const canSnapshot = canDo(capabilities, "can_write_integrations");
 
   const changeView = useCallback((next: CustomersViewKey) => {
     setView(next);
@@ -76,7 +85,9 @@ export default function CustomersPage({ capabilities, initialView }: CustomersPa
 
   return (
     <>
-      {view === "invites" ? (
+      {view === "activity" ? (
+        <ActivityView switcher={switcher} canSnapshot={canSnapshot} />
+      ) : view === "invites" ? (
         <InvitesView
           canInvite={canInvite}
           onInvite={openInvite}

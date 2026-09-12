@@ -16,19 +16,29 @@
 import { apiFetch } from "@/lib/api/client";
 import type {
   Customer,
+  CustomerActivity,
   CustomerInvite,
   CustomerListQuery,
   CustomerListResponse,
+  CustomerStatistics,
   CreateInviteInput,
   InviteListQuery,
   InviteListResponse,
 } from "./types";
+import { STATISTICS_DAYS_DEFAULT, STATISTICS_MONTHS_DEFAULT } from "./types";
 
 const BASE = "/api/v1/admin/customers";
 const INVITES = `${BASE}/invites`;
 
-/** Which of the page's two lists a change touched. */
-export type CustomersScope = "customers" | "invites";
+/**
+ * Which part of the page a change touched.
+ *
+ * `statistics` is here for completeness: nothing writes those figures from the
+ * browser — they are filled by the nightly `cognito_directory` run — but a
+ * "Refresh now" that starts that run announces the scope so the Activity view
+ * reloads when it lands, exactly as the Cost center does.
+ */
+export type CustomersScope = "customers" | "invites" | "statistics";
 
 /** Fired on `window` after any customers write succeeds. */
 export const CUSTOMERS_CHANGED_EVENT = "penny-squeeze:customers-changed";
@@ -80,6 +90,30 @@ export const customersApi = {
 
   /** One customer, freshly read, for the detail drawer. */
   get: (id: string) => apiFetch<Customer>(`${BASE}/${encodeURIComponent(id)}`),
+
+  /**
+   * The Activity view's figures. `months` sizes the monthly series (churn,
+   * retention, new and deleted); `days` sizes the two daily ones (the pool's
+   * sign-in counters and `usage_daily`). Both are capped by the server.
+   *
+   * 503 `admin_schema_missing` until `docs/sql/014_customer_statistics.sql`
+   * has been run. Afterwards the pool-derived sections stay empty until the
+   * nightly job has succeeded once, while the app-side figures answer
+   * straight away.
+   */
+  statistics: (
+    query: { months?: number; days?: number } = {},
+  ) => {
+    const params = new URLSearchParams({
+      months: String(query.months ?? STATISTICS_MONTHS_DEFAULT),
+      days: String(query.days ?? STATISTICS_DAYS_DEFAULT),
+    });
+    return apiFetch<CustomerStatistics>(`${BASE}/statistics?${params.toString()}`);
+  },
+
+  /** One customer's own usage, tenant sizes and lifecycle events. */
+  activity: (id: string) =>
+    apiFetch<CustomerActivity>(`${BASE}/${encodeURIComponent(id)}/activity`),
 
   invites: {
     list: (query: InviteListQuery = {}) =>

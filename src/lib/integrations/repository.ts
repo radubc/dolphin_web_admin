@@ -19,6 +19,18 @@ import "server-only";
  * endpoints and the scheduler catch it themselves.
  */
 import type { Prisma } from "@/generated/prisma-admin/client";
+import {
+  ALLOCATION_MONTHS_DEFAULT,
+  ALLOCATION_MONTHS_MAX,
+  FIXED_FLOOR_SHARE_DEFAULT,
+  FIXED_FLOOR_SHARE_MAX,
+} from "@/lib/costs/allocation";
+import {
+  COST_COMPONENT_TAG_DEFAULT,
+  COST_DAYS_DEFAULT,
+  COST_FETCH_DAYS_MAX,
+} from "@/lib/costs/types";
+import { POOL_METRICS_DAYS_DEFAULT, POOL_METRICS_DAYS_MAX } from "@/lib/customers/types";
 import { prismaAdmin } from "@/lib/prisma-admin";
 import { toIsoDate, fromIsoDate, shiftDays, todayIn, type IsoDate } from "./dates";
 import { nextRunFor } from "./schedule";
@@ -113,6 +125,43 @@ export function settingsOf(value: Prisma.JsonValue): IntegrationSettings {
       Math.max(1, Math.trunc(raw.requestsPerMinute)),
     );
   }
+  if (typeof raw.days === "number" && Number.isFinite(raw.days)) {
+    // Clamped to the job's fetch limit, not to what Cost Explorer keeps: a
+    // wider window buys little — the days already fetched stay cached — and
+    // every page of the answer is a charged request, every day.
+    settings.days = Math.min(COST_FETCH_DAYS_MAX, Math.max(1, Math.trunc(raw.days)));
+  }
+  if (typeof raw.componentTag === "string" && raw.componentTag.trim() !== "") {
+    // A tag key, which AWS restricts to 128 characters. Trimmed because a
+    // stray space would silently group by a tag nobody has.
+    settings.componentTag = raw.componentTag.trim().slice(0, 128);
+  }
+  if (typeof raw.budgetName === "string" && raw.budgetName.trim() !== "") {
+    settings.budgetName = raw.budgetName.trim().slice(0, 100);
+  }
+  if (typeof raw.metricsDays === "number" && Number.isFinite(raw.metricsDays)) {
+    // Clamped to what CloudWatch still keeps at a one-day period: a longer
+    // window could only ask for datapoints that have been aged out.
+    settings.metricsDays = Math.min(
+      POOL_METRICS_DAYS_MAX,
+      Math.max(1, Math.trunc(raw.metricsDays)),
+    );
+  }
+  if (typeof raw.months === "number" && Number.isFinite(raw.months)) {
+    // Clamped to what Cost Explorer keeps: a month further back than that has
+    // no cached bill and never will, so allocating it could only fail.
+    settings.months = Math.min(ALLOCATION_MONTHS_MAX, Math.max(1, Math.trunc(raw.months)));
+  }
+  if (typeof raw.fixedFloorShare === "number" && Number.isFinite(raw.fixedFloorShare)) {
+    // Not an integer, and not clamped to `1 / tenants` here: that second cap
+    // depends on how many tenants the month has and belongs in the allocator.
+    // Above a quarter of the pool the figure stops being an allocation and
+    // becomes a headcount, which is what the maximum is about.
+    settings.fixedFloorShare = Math.min(
+      FIXED_FLOOR_SHARE_MAX,
+      Math.max(0, raw.fixedFloorShare),
+    );
+  }
   return settings;
 }
 
@@ -140,6 +189,68 @@ export function alphaVantageSettings(settings: IntegrationSettings): {
     requestsPerMinute: Math.min(
       ALPHA_VANTAGE_REQUESTS_PER_MINUTE_MAX,
       Math.max(1, settings.requestsPerMinute ?? ALPHA_VANTAGE_REQUESTS_PER_MINUTE_DEFAULT),
+    ),
+  };
+}
+
+/**
+ * The effective settings for an AWS cost run, defaults filled in.
+ *
+ * `budgetName` stays `null` rather than becoming a default: "the first budget
+ * the account has" is the job's own fallback and is not a name.
+ */
+export function awsCostsSettings(settings: IntegrationSettings): {
+  days: number;
+  componentTag: string;
+  budgetName: string | null;
+} {
+  return {
+    days: Math.min(COST_FETCH_DAYS_MAX, Math.max(1, settings.days ?? COST_DAYS_DEFAULT)),
+    componentTag: settings.componentTag ?? COST_COMPONENT_TAG_DEFAULT,
+    budgetName: settings.budgetName ?? null,
+  };
+}
+
+/**
+ * The effective settings for a Cognito directory run, defaults filled in.
+ *
+ * Only the metrics window is configurable. The snapshot and the diff are not:
+ * "read the whole pool" and "compare with the previous snapshot" are what the
+ * run *is*, and a knob that narrowed either would make the event log lie.
+ */
+export function cognitoDirectorySettings(settings: IntegrationSettings): {
+  metricsDays: number;
+} {
+  return {
+    metricsDays: Math.min(
+      POOL_METRICS_DAYS_MAX,
+      Math.max(1, settings.metricsDays ?? POOL_METRICS_DAYS_DEFAULT),
+    ),
+  };
+}
+
+/**
+ * The effective settings for a cost allocation run, defaults filled in.
+ *
+ * Two knobs, and they are the two judgement calls in the model: how far back
+ * to recompute, and how much of the shared capacity a tenant carries simply
+ * for existing. Everything else — which services belong to which pool, what
+ * drives each pool — is a decision in `src/lib/costs/allocation.ts` and is
+ * deliberately not configurable: a per-client figure whose method an operator
+ * could change from a drawer would not be comparable with last month's.
+ */
+export function allocateCostsSettings(settings: IntegrationSettings): {
+  months: number;
+  fixedFloorShare: number;
+} {
+  return {
+    months: Math.min(
+      ALLOCATION_MONTHS_MAX,
+      Math.max(1, settings.months ?? ALLOCATION_MONTHS_DEFAULT),
+    ),
+    fixedFloorShare: Math.min(
+      FIXED_FLOOR_SHARE_MAX,
+      Math.max(0, settings.fixedFloorShare ?? FIXED_FLOOR_SHARE_DEFAULT),
     ),
   };
 }
@@ -310,8 +421,13 @@ export async function updateIntegrationRow(
   const current = scheduleOf(row);
   const schedule = mergeSchedule(current, patch.schedule);
   const isEnabled = patch.isEnabled ?? row.is_enabled;
+  // Merged, then put back through `settingsOf`: every clamp that guards a
+  // value read from the column guards a value just patched into it, and a
+  // setting whose new value is empty — `budgetName: ""`, meaning "no budget
+  // pinned" — is dropped rather than stored as an empty string, which is the
+  // only way the drawer can *clear* a setting through a merging patch.
   const settings: IntegrationSettings = patch.settings
-    ? { ...settingsOf(row.settings), ...patch.settings }
+    ? settingsOf({ ...settingsOf(row.settings), ...patch.settings } as Prisma.JsonValue)
     : settingsOf(row.settings);
   const timingChanged = !sameSchedule(current, schedule) || isEnabled !== row.is_enabled;
   return prismaAdmin.admin_integrations.update({

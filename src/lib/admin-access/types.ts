@@ -42,6 +42,12 @@ export const ACTION_KEYS = [
   "can_read_services",
   "can_read_integrations",
   "can_write_integrations",
+  "can_read_costs",
+  // Reserved: the Cost center's only write is "Refresh now", which starts the
+  // aws_costs integration and is therefore governed by
+  // can_write_integrations. Seeded so the pair reads as a pair on the Access
+  // Map and so a later cost-only write has a key waiting for it.
+  "can_write_costs",
 ] as const;
 
 export type ActionKey = (typeof ACTION_KEYS)[number];

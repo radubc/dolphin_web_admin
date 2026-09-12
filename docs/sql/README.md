@@ -21,6 +21,10 @@ result afterwards.
 | 9 | [`009_markets_and_alpha_vantage.sql`](./009_markets_and_alpha_vantage.sql) | Two more integrations: `iso_mic_markets` (the ISO 10383 MIC register, which fills the empty `markets` catalog) and `alpha_vantage_quotes` (the quote fallback for TSX and other listings TwelveData's free plan refuses). Widens `admin_integrations.provider` to allow `'iso20022'` and `'alpha_vantage'`, and adds the nullable `admin_quote_symbols.provider` that routes each symbol to the provider which last served it. Creates no tables and registers no new endpoints — the integration routes are keyed by `[key]`. | Once, after step 8. Re-running is safe. |
 | 10 | [`010_customers.sql`](./010_customers.sql) | The Customers feature: `admin_customer_invites` (the record of every invitation to the consumer app, with a partial unique index allowing only one open invitation per address), the `can_invite_users` action, the `customers` page and the `invite_customer` quick action, and the six Customers endpoints. Also widens the audit trail's `target_type` check so an invitation can be audited (`'customer_invite'`). | Once, after step 9. Re-running is safe. |
 | 11 | [`011_service_defaults_endpoints.sql`](./011_service_defaults_endpoints.sql) | Registers the two machine endpoints the consumer app pulls its defaults from (`service.defaults.categories`, `service.defaults.financial_institutions`). Creates no tables and grants no actions — an API-key endpoint consults no rule; this only puts the two on the Services page with usage counters, and both work before it has run. Both catalogs (categories and financial institutions) must already be seeded in the admin database before this: an empty one answers 503 `defaults_unavailable` and the consumer app refuses to create a tenant. | Once, after step 10. Re-running is safe. |
+| 12 | [`012_cost_center_sales_marketing_pages.sql`](./012_cost_center_sales_marketing_pages.sql) | Registers three new rail pages, keyed `cost_center`, `sales_billing` and `marketing` (underscores: `admin_pages.key` refuses a hyphen, so the keys differ from the `/cost-center`, `/sales-billing` and `/marketing` paths). Creates no tables, no endpoints and **no actions**; all three ship `require_super_admin = TRUE` with no linked actions until the owner grants a role on the Access Map. | Once, after step 11. Re-running is safe. |
+| 13 | [`013_aws_costs.sql`](./013_aws_costs.sql) | The Cost center's data: `admin_cost_daily` (AWS cost per day and service in `NUMERIC(14,6)`, and the split by the `Component` cost allocation tag) and `admin_cost_snapshots` (one row per job run: month to date, forecast, budget, free tier, anomalies). Seeds the `aws_costs` integration (daily, 09:00 Toronto, about $1 a month in Cost Explorer requests), widens `admin_integrations.provider` to allow `'aws'`, seeds the `can_read_costs` / `can_write_costs` actions (step 12 creates none) and links them to 012's `cost_center` page, and registers the two Cost center endpoints against those same two actions, named explicitly so neither endpoint can end up with no actions at all. **Needs PostgreSQL 15+** for `UNIQUE NULLS NOT DISTINCT`. | Once, after step 12. Re-running is safe. |
+| 14 | [`014_customer_statistics.sql`](./014_customer_statistics.sql) | The Customers page's Activity view: `admin_customer_snapshots` (one row per Cognito pool account per day the nightly job saw it, `partial` marking a day whose pool listing was cut short), `admin_customer_events` (the lifecycle log — invited, confirmed, disabled, enabled, deleted, reappeared, deleted_in_app) and `admin_pool_metrics_daily` (the pool's daily CloudWatch sign-in and sign-up counters). Seeds the `cognito_directory` integration (daily, 02:30 Toronto) and registers the two statistics endpoints with the same three actions 010 gave the Customers reads (`can_read_user_list`, `can_read_user_detail`, `can_invite_users`), named explicitly so neither endpoint can end up with no actions at all. Creates no actions of its own. Must run **after** 013, which is what first allowed `admin_integrations.provider = 'aws'`. | Once, after step 13. Re-running is safe. |
+| 15 | [`015_cost_allocation.sql`](./015_cost_allocation.sql) | Cost per client: `admin_tenant_cost_monthly` (one row per tenant and month — the four pool components of the allocated estimate, the total, the tenant's share of the bill, and the drivers the split was made from). Seeds the `allocate_costs` integration (daily, 03:30 Toronto — it calls nothing, so it is free) and registers the `admin.costs.per_client` endpoint with the two cost actions 013 seeded (`can_read_costs`, `can_write_costs`), named explicitly so the endpoint cannot end up with no actions at all. Creates no actions of its own. Must run **after** 013, whose cost rows it divides up. | Once, after step 14. Re-running is safe. |
 
 Until step 7 has run, the Constants list, compare, push and job endpoints
 answer 503 `admin_schema_missing`: the app does not fake a ledger it does not
@@ -39,6 +43,47 @@ pretends to be empty would be worse than a clear "run the SQL". `GET
 answers 200 regardless. Sending an invitation additionally needs
 `CUSTOMER_COGNITO_USER_POOL_ID` and AWS credentials — see
 [customers.md](../customers.md).
+
+Until step 13 has run, the two Cost center endpoints answer 503
+`admin_schema_missing` and the `aws_costs` integration does not exist (a run
+request for it is a 404). Afterwards the endpoints answer 200 with an empty
+snapshot until the job has succeeded once. The job also needs **two AWS
+account settings that are not SQL**: Cost Explorer has to have been opened
+once in the Billing console, and the `Application` / `Environment` /
+`Component` cost allocation tags have to be activated there. Both take up to
+24 hours and neither is retroactive — see [costs.md](../costs.md).
+
+Until step 14 has run, the **statistics** endpoint answers 503
+`admin_schema_missing` and the `cognito_directory` integration does not exist
+(a run request for it is a 404). The rest of the Customers page is unaffected:
+the customer list, the invitations and the per-customer drawer all work, and
+the drawer simply shows no lifecycle events — its endpoint
+(`admin.customers.activity`) reads everything but the events from the main app
+database, so `eventsForSub` treats the missing `admin_customer_events` table as
+an empty log (one warning line per process, naming this file) instead of
+failing the drawer. The statistics endpoint does **not** get that treatment:
+every pool-derived figure on it lives in these tables, and answering with
+zeros would be inventing measurements. Afterwards both endpoints answer
+200 immediately — the active-user, churn, retention, usage and largest-tenant
+figures need no job at all — while the account census, the funnel's first two
+steps and the sign-ins chart stay empty until the nightly job has succeeded
+once. That job needs **two IAM permissions beyond what the Customers page
+already uses**: `cognito-idp:DescribeUserPool` on the customer pool and
+`cloudwatch:GetMetricData` on `*`. Without the CloudWatch one the snapshot and
+the diff still work and only the pool metrics are skipped, with the reason in
+the run record. See [customers.md](../customers.md).
+
+Until step 15 has run, the cost-per-client endpoint answers 503
+`admin_schema_missing` and the `allocate_costs` integration does not exist (a
+run request for it is a 404). The rest of the Cost center is unaffected: the
+"Cost per client" card says the figures have not been computed yet, and the
+Customers page's "Cost (est.)" column shows a dash with the reason in its
+tooltip. Afterwards the endpoint answers 200 immediately, with the month's pool
+totals and an empty tenant list, until the nightly run has written the
+allocation once. That run needs **no IAM permission and no account setting** —
+both its inputs are already in the two databases — but it does need step 13's
+`aws_costs` job to have cached the month, and it says so when it has not. The
+model is [cost-allocation.md](../cost-allocation.md).
 
 The four market-data catalogs (`cryptocurrencies`, `etfs`, `stocks`,
 `markets`) needed **no file of their own**: their tables already exist in the
@@ -84,8 +129,9 @@ before the SQL has run).
 
 ## Adding a table or column later
 
-1. Write the change as a new numbered file here (`012_….sql`), transactional,
-   with comments saying what and why.
+1. Write the change as a new numbered file here (`016_….sql`), transactional,
+   with comments saying what and why. (The next free number, always: 015 is
+   taken.)
 2. Run it in pgAdmin.
 3. `npx prisma db pull --config prisma-admin.config.ts`, then
    `npm run prisma:generate`.

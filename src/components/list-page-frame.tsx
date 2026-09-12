@@ -86,11 +86,13 @@ export function ListPageFrame({
 
   return (
     <div
-      // `min-h-full` fills the shell's content area even when the screen has
-      // little on it; `shrink-0` keeps a screen with *more* than fits at its
-      // full height rather than letting the shell's flex column squeeze it,
-      // which is what keeps the band sticky over a long stack of cards.
-      className="flex min-h-full shrink-0 flex-col"
+      // `h-full` pins the frame to the shell's content area: the band stays
+      // put and the body below it (`min-h-0 flex-1 overflow-y-auto`) is the
+      // scroller. It must not be `min-h-full`: that let the frame grow to its
+      // content, the shell's <main> scrolled the whole page, and the table
+      // body measured its full content height, so nothing was pinned (owner
+      // saw the column labels scroll away on Constants, 2026-09-12).
+      className="flex h-full min-h-0 flex-col"
       style={{ backgroundColor: surfaceColors.page }}
     >
       {/* Header and ribbon glued into one sticky block, so they move as a unit

@@ -35,6 +35,7 @@ import {
   resendInvitation,
   translateCognitoError,
 } from "./cognito";
+import { recordEventQuietly } from "./lifecycle";
 import { findLiveUserByEmail, findUsersByCognitoSub } from "./repository";
 import type { ResolvedInviteListQuery } from "./schemas";
 import type { CreateInviteInput, CustomerInvite, InviteStatus } from "./types";
@@ -295,6 +296,20 @@ export async function createInvite(
       include: inviteInclude,
     });
     await recordInviteAudit(actorUserId, "customer_invite_created", sent, { name: input.name ?? null });
+    // The lifecycle log's first step. Written here rather than left to the
+    // nightly diff because this is the one moment the console *knows* an
+    // invitation was sent, to the second and with the operator attached; the
+    // diff would only ever see "a new sub appeared" the following night, and
+    // could not tell it from an account created in the AWS console.
+    if (account.sub !== null) {
+      await recordEventQuietly({
+        sub: account.sub,
+        event: "invited",
+        at: new Date(),
+        source: "console",
+        details: { email, inviteId: sent.id, invitedBy: actorUserId },
+      });
+    }
     return toInvite(sent);
   } catch (error) {
     const apiError = error instanceof ApiError ? error : translateCognitoError(error, "creating a customer account");
@@ -396,5 +411,27 @@ export async function revokeInvite(id: string, actorUserId: string | null): Prom
     include: inviteInclude,
   });
   await recordInviteAudit(actorUserId, "customer_invite_revoked", revoked);
+  // A revoke deletes the pool account, so to the lifecycle log this *is* a
+  // deletion — the same event the nightly diff would infer tomorrow from the
+  // sub no longer being in the directory, recorded now with the reason and
+  // the operator. The unique key means the diff's later attempt is a no-op
+  // only if it lands on the same instant, which it will not; the diff dates
+  // its events at midnight of the snapshot day, so a revoke can produce two
+  // `deleted` rows a day apart. Churn dedupes per sub per month, so it is
+  // still one departure.
+  if (row.cognito_sub !== null) {
+    await recordEventQuietly({
+      sub: row.cognito_sub,
+      event: "deleted",
+      at: new Date(),
+      source: "console",
+      details: {
+        email: row.email,
+        inviteId: row.id,
+        reason: "invitation revoked",
+        revokedBy: actorUserId,
+      },
+    });
+  }
   return toInvite(revoked);
 }

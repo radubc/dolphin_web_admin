@@ -106,6 +106,10 @@ function measure(
   // Zero while the element is detached or display:none — and, importantly, if
   // the height chain above it is not definite. Either way, do not constrain.
   if (available <= 0) return undefined;
+  // A container taller than the viewport means the height chain is content-
+  // sized, not pinned (a `min-h-full` ancestor, say): pinning `scroll.y` to
+  // that number would constrain nothing and hide the bug. Fall back instead.
+  if (typeof window !== "undefined" && available > window.innerHeight) return undefined;
 
   let reserved = panelBorder ? PANEL_BORDERS : 0;
   for (const selector of RESERVED_SELECTORS) {

@@ -58,6 +58,16 @@ import {
   SCHEDULE_FREQUENCIES,
 } from "@/lib/integrations/types";
 import { PROVIDER_BASE_URL_DOMAINS } from "@/lib/integrations/schemas";
+import {
+  ALLOCATION_MONTHS_DEFAULT,
+  ALLOCATION_MONTHS_MAX,
+  COST_COMPONENT_TAG_DEFAULT,
+  COST_DAYS_DEFAULT,
+  COST_FETCH_DAYS_MAX,
+  FIXED_FLOOR_SHARE_DEFAULT,
+  FIXED_FLOOR_SHARE_MAX,
+} from "@/lib/costs/types";
+import { POOL_METRICS_DAYS_DEFAULT, POOL_METRICS_DAYS_MAX } from "@/lib/customers/types";
 import { errorMessage } from "@/lib/format";
 import { surfaceColors } from "@/lib/theme/colors";
 import {
@@ -100,6 +110,18 @@ interface IntegrationFormValues {
   includeExpired: boolean;
   maxRequestsPerRun: number;
   requestsPerMinute: number;
+  /** `aws_costs`: days the daily Cost Explorer fetch reaches back over. */
+  days: number;
+  /** `aws_costs`: the cost allocation tag the month's split is grouped by. */
+  componentTag: string;
+  /** `aws_costs`: which budget to read; empty means the first AWS returns. */
+  budgetName: string;
+  /** `cognito_directory`: days of CloudWatch counters each run re-fetches. */
+  metricsDays: number;
+  /** `allocate_costs`: months each run recomputes, ending with this one. */
+  months: number;
+  /** `allocate_costs`: the fixed pool's per-tenant floor, as a fraction. */
+  fixedFloorShare: number;
 }
 
 export interface IntegrationDrawerProps {
@@ -162,6 +184,14 @@ function FormBody({
         includeExpired: settings.includeExpired ?? false,
         maxRequestsPerRun: settings.maxRequestsPerRun ?? ALPHA_VANTAGE_REQUESTS_PER_RUN_DEFAULT,
         requestsPerMinute: settings.requestsPerMinute ?? ALPHA_VANTAGE_REQUESTS_PER_MINUTE_DEFAULT,
+        days: settings.days ?? COST_DAYS_DEFAULT,
+        componentTag: settings.componentTag ?? COST_COMPONENT_TAG_DEFAULT,
+        // Empty, not a placeholder name: unset means "the first budget the
+        // account has", which is right while there is exactly one.
+        budgetName: settings.budgetName ?? "",
+        metricsDays: settings.metricsDays ?? POOL_METRICS_DAYS_DEFAULT,
+        months: settings.months ?? ALLOCATION_MONTHS_DEFAULT,
+        fixedFloorShare: settings.fixedFloorShare ?? FIXED_FLOOR_SHARE_DEFAULT,
       }}
       onFinish={onSubmit}
       onFinishFailed={onInvalid}
@@ -386,6 +416,107 @@ function FormBody({
         </FormSection>
       )}
 
+      {integration.key === "aws_costs" && (
+        <FormSection title="Cost Explorer" icon={<SettingOutlined />} color={INTEGRATIONS_COLOR}>
+          <Form.Item
+            name="days"
+            label="Days of history per run"
+            tooltip={`How far back the daily fetch reaches, ending yesterday. The whole window is re-fetched and replaced every run, so a figure AWS revised late is corrected. At most ${COST_FETCH_DAYS_MAX} days: every page of the answer is a charged request.`}
+            rules={[{ required: true, message: "A window is required" }]}
+          >
+            <InputNumber min={1} max={COST_FETCH_DAYS_MAX} style={{ width: 120 }} />
+          </Form.Item>
+
+          <Form.Item
+            name="componentTag"
+            label="Component tag"
+            tooltip="The cost allocation tag the month's spend is split by. It must be activated once in the AWS Billing console before AWS will group by it, and activation is not retroactive."
+            rules={[
+              { required: true, whitespace: true, message: "A tag key is required" },
+              { max: 128, message: "A tag key is at most 128 characters" },
+            ]}
+          >
+            <Input placeholder={COST_COMPONENT_TAG_DEFAULT} maxLength={128} autoComplete="off" />
+          </Form.Item>
+
+          <Form.Item
+            name="budgetName"
+            label="Budget name"
+            tooltip="Which AWS budget the header meter reads, when the account has more than one. Leave it empty to use the first budget DescribeBudgets returns."
+            rules={[{ max: 100, message: "A budget name is at most 100 characters" }]}
+          >
+            <Input placeholder="the first budget on the account" maxLength={100} autoComplete="off" />
+          </Form.Item>
+
+          <Typography.Text type="secondary" className="text-xs">
+            Cost Explorer charges <strong>$0.01 per request</strong> and this job is the only thing
+            in the console that calls it: three charged requests a run, plus one more on the first
+            three days of a month, so about $1 a month at one run a day. The Cost center page itself
+            reads the cached rows and costs nothing.
+          </Typography.Text>
+        </FormSection>
+      )}
+
+      {integration.key === "cognito_directory" && (
+        <FormSection title="Pool metrics" icon={<SettingOutlined />} color={INTEGRATIONS_COLOR}>
+          <Form.Item
+            name="metricsDays"
+            label="Days of CloudWatch counters"
+            tooltip={`How many days of the customer pool's sign-in and sign-up counters each run re-fetches, ending yesterday. At most ${POOL_METRICS_DAYS_MAX}, which is how long CloudWatch keeps a one-day period.`}
+            rules={[{ required: true, message: "A window is required" }]}
+          >
+            <InputNumber min={1} max={POOL_METRICS_DAYS_MAX} style={{ width: 120 }} />
+          </Form.Item>
+          <Typography.Text type="secondary" className="text-xs">
+            The pool snapshot and the lifecycle diff are not configurable: reading the whole pool
+            and comparing it with the previous snapshot is what the run <em>is</em>, and Cognito has
+            no deletion event, so a narrowed window would make the event log lie.
+            <code>GetMetricData</code> is free, so a wider window only costs a bigger response.
+          </Typography.Text>
+        </FormSection>
+      )}
+
+      {integration.key === "allocate_costs" && (
+        <FormSection title="Allocation" icon={<SettingOutlined />} color={INTEGRATIONS_COLOR}>
+          <Form.Item
+            name="months"
+            label="Months recomputed per run"
+            tooltip={`How many months each run divides up, ending with the current one. Every month in the window is recomputed from scratch, so a wider window only costs time — nothing here calls AWS. At most ${ALLOCATION_MONTHS_MAX}: Cost Explorer keeps about fourteen months, and a month further back has no cached bill to divide.`}
+            rules={[{ required: true, message: "A window is required" }]}
+          >
+            <InputNumber min={1} max={ALLOCATION_MONTHS_MAX} style={{ width: 120 }} />
+          </Form.Item>
+
+          <Form.Item
+            name="fixedFloorShare"
+            label="Per-tenant floor of the shared pool"
+            tooltip="The share of the shared-capacity pool every tenant still live at the end of the month is given before the remainder is split by measured activity. A fraction, not a percentage: 0.005 is half a percent. 0 switches the floor off, so a dormant tenant is allocated nothing at all."
+            extra={
+              <span className="text-xs">
+                A fraction between 0 and {FIXED_FLOOR_SHARE_MAX}. The allocator also caps the
+                effective floor at <code>0.5 / tenants</code>, so the floors together never take
+                more than half the pool and measured activity always decides the rest.
+              </span>
+            }
+            rules={[{ required: true, message: "A share is required" }]}
+          >
+            <InputNumber
+              min={0}
+              max={FIXED_FLOOR_SHARE_MAX}
+              step={0.005}
+              style={{ width: 140 }}
+            />
+          </Form.Item>
+
+          <Typography.Text type="secondary" className="text-xs">
+            This run makes <strong>no AWS call</strong> and costs nothing: it reads the cost rows
+            the <code>aws_costs</code> job cached and the consumer app&apos;s own usage counters,
+            and writes the split to <code>admin_tenant_cost_monthly</code>. It needs
+            <code>aws_costs</code> to have cached the month first, and says so when it has not.
+          </Typography.Text>
+        </FormSection>
+      )}
+
       {integration.key === "bank_of_canada_rates" && (
         <FormSection title="Settings" icon={<SettingOutlined />} color={INTEGRATIONS_COLOR}>
           <Typography.Text type="secondary" className="text-xs">
@@ -469,6 +600,51 @@ export default function IntegrationDrawer({ integration, onClose, onSaved }: Int
         if (
           settings.maxRequestsPerRun !== current.settings.maxRequestsPerRun ||
           settings.requestsPerMinute !== current.settings.requestsPerMinute
+        ) {
+          patch.settings = settings;
+        }
+        break;
+      }
+      case "aws_costs": {
+        // Trimmed here as well as on the server, so "Component " and
+        // "Component" are not seen as a change worth a request.
+        const componentTag = values.componentTag.trim();
+        const budgetName = values.budgetName.trim();
+        const settings: IntegrationSettings = {
+          days: values.days,
+          componentTag,
+          // Sent even when empty: a patch merges into the stored settings, so
+          // `""` is the only way to *clear* a pinned budget. The server drops
+          // the key rather than storing an empty name.
+          budgetName,
+        };
+        if (
+          settings.days !== current.settings.days ||
+          componentTag !== (current.settings.componentTag ?? COST_COMPONENT_TAG_DEFAULT) ||
+          budgetName !== (current.settings.budgetName ?? "")
+        ) {
+          patch.settings = settings;
+        }
+        break;
+      }
+      case "cognito_directory": {
+        if (values.metricsDays !== current.settings.metricsDays) {
+          patch.settings = { metricsDays: values.metricsDays };
+        }
+        break;
+      }
+      case "allocate_costs": {
+        const settings: IntegrationSettings = {
+          months: values.months,
+          fixedFloorShare: values.fixedFloorShare,
+        };
+        // Compared against the defaults the form was filled from, so opening
+        // the drawer on an integration whose settings row is empty and
+        // pressing Save is not a change.
+        if (
+          settings.months !== (current.settings.months ?? ALLOCATION_MONTHS_DEFAULT) ||
+          settings.fixedFloorShare !==
+            (current.settings.fixedFloorShare ?? FIXED_FLOOR_SHARE_DEFAULT)
         ) {
           patch.settings = settings;
         }

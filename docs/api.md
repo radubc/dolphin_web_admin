@@ -110,12 +110,17 @@ Default rules as seeded; all editable on the Access Map.
 | `admin.integrations.currency_pairs.create` | `POST /api/v1/admin/integrations/currency-pairs` | `{ fromCurrency, toCurrency }`, three letters each, must differ. 201; 409 on a duplicate. | `can_write_integrations` |
 | `admin.integrations.currency_pairs.update` | `PATCH /api/v1/admin/integrations/currency-pairs/[id]` | `{ isActive }`. | `can_write_integrations` |
 | `admin.integrations.currency_pairs.delete` | `DELETE /api/v1/admin/integrations/currency-pairs/[id]` | Removes the watch row; cached rates stay. 204. | `can_write_integrations` |
-| `admin.customers.list` | `GET /api/v1/admin/customers?page=&pageSize=&q=&status=&includeDeleted=` | One page of the consumer app's users, each with tenants, `lastActiveAt`, `accountCount`, `transactionCount`, the pool account and a derived `status`, plus header `counts` and `cognitoAvailable`. `q` matches email and tenant name. | `can_read_user_list`, `can_read_user_detail` or `can_invite_users` |
+| `admin.customers.list` | `GET /api/v1/admin/customers?page=&pageSize=&q=&status=&includeDeleted=` | One page of the consumer app's users, each with tenants, `lastSeenAt` (the consumer app's sign-in stamp), `lastActiveAt` (the derived fallback), `accountCount`, `transactionCount`, the pool account and a derived `status`, plus header `counts` (now including `deleted`) and `cognitoAvailable`. `q` matches email and tenant name. `status=deleted` selects the soft-deleted rows and implies `includeDeleted`; **every other `status` value excludes them**, whatever `includeDeleted` says — see the note below. | `can_read_user_list`, `can_read_user_detail` or `can_invite_users` |
 | `admin.customers.get` | `GET /api/v1/admin/customers/[id]` | One customer by `users.id`. 404 when there is no such row. | `can_read_user_list`, `can_read_user_detail` or `can_invite_users` |
 | `admin.customers.invites.list` | `GET /api/v1/admin/customers/invites?page=&pageSize=&q=&status=` | Invitations, newest first, with `counts` per status, `canSend` and `unavailableReason`. | `can_read_user_list`, `can_read_user_detail` or `can_invite_users` |
 | `admin.customers.invites.create` | `POST /api/v1/admin/customers/invites` | `{ email, note?, name?, locale? }`. `name` and `locale` are sent to the pool as the `name` / `locale` attributes (`locale` a BCP 47 tag, e.g. `en-CA`); the pool requires both, and whichever is left blank the person supplies at first sign-in. Creates the customer-pool account and sends the email. 201. 409 when the address has an account or an open invitation; 422 when Cognito refuses the address; 503 `cognito_unavailable` when the pool or the AWS credentials are missing. | `can_invite_users` |
 | `admin.customers.invites.resend` | `POST /api/v1/admin/customers/invites/[id]/resend` | No body. Re-issues the temporary password and bumps `sendCount`. 409 unless the invitation is still open. | `can_invite_users` |
 | `admin.customers.invites.revoke` | `DELETE /api/v1/admin/customers/invites/[id]` | Deletes the unused pool account and marks the invitation `revoked`. Answers the updated invitation, not 204. 409 once the person has signed in. | `can_invite_users` |
+| `admin.customers.statistics` | `GET /api/v1/admin/customers/statistics?months=6&days=35` | `{ accounts: { total, byStatus, disabled, snapshotDay }, mau, wau, dau, newPerMonth[], deletedPerMonth[], churnPerMonth[], retentionBySignupMonth[], funnel, poolMetrics[], usage: { requestsPerDay[], errorsPerDay[] }, largestTenants: { byBytes[], byTransactions[] }, months, days, generatedAt }`. `months` 1..24 (default 6) sizes the monthly series, `days` 1..400 (default 35) the two daily ones. Never calls AWS: the pool figures come from the history tables the nightly `cognito_directory` run fills. Its two expensive parts — the monthly churn denominators and the largest-tenant tables — are cached in process for ten minutes; `generatedAt` is still when the whole payload was assembled. | `can_read_user_list`, `can_read_user_detail` or `can_invite_users` |
+| `admin.customers.activity` | `GET /api/v1/admin/customers/[id]/activity` | `{ userId, cognitoSub, email, lastSeenAt, lastActiveAt, createdAt, deletedAt, usage[], tenants[], events[], days }` for one customer: 35 days of their own `usage_daily` counters, the size of each tenant they belong to, and every lifecycle event recorded for their Cognito sub. No query string. 404 when there is no such `users` row. Unlike the statistics endpoint this one answers **before** `docs/sql/014_customer_statistics.sql` has run: everything but `events` comes from the main app database, so a missing `admin_customer_events` gives `events: []` rather than a 503. | `can_read_user_list`, `can_read_user_detail` or `can_invite_users` |
+| `admin.costs.summary` | `GET /api/v1/admin/costs` | `{ snapshot, byService, byComponent, lastRun }` from the cached AWS cost tables. No query string. | `can_read_costs` or `can_write_costs` |
+| `admin.costs.daily` | `GET /api/v1/admin/costs/daily?days=35` | `[{ day, totalUsd, estimated, services }]`, oldest first, ending yesterday. `days` 1..400, default 35. | `can_read_costs` or `can_write_costs` |
+| `admin.costs.per_client` | `GET /api/v1/admin/costs/per-client?month=YYYY-MM` | `{ month, monthTotalUsd, pools: { fixedUsd, storageUsd, requestUsd, userUsd, unallocatedUsd }, tenants: [{ tenantId, tenantName, ownerEmail, totalUsd, fixedUsd, storageUsd, requestUsd, userUsd, sharePct, requests, storageBytes, activeUsers, deleted }], computedAt }`, most expensive first. `month` defaults to the current UTC month and must be between `2020-01` and the month after this one (422 otherwise). An **allocated estimate**, never a bill; reads `admin_tenant_cost_monthly` and never recomputes. **`ownerEmail` is `null` unless the caller also holds `can_read_user_list` or `can_read_user_detail`** — see below. | `can_read_costs` or `can_write_costs` |
 
 `[kind]` is one of `countries`, `currencies`, `financial_institutions`,
 `categories`, `account_base_types`, `account_types`, `cryptocurrencies`,
@@ -233,19 +238,70 @@ never fetched for and never reactivated by a lookup.
 ## Integrations semantics
 
 `[key]` is one of `twelvedata_catalogs`, `iso_mic_markets`,
-`twelvedata_quotes`, `alpha_vantage_quotes`, `bank_of_canada_rates`; any other
-value is a 404 `not_found`. The rows are seeded by
-[`docs/sql/008_integrations.sql`](./sql/008_integrations.sql) and
-[`009_markets_and_alpha_vantage.sql`](./sql/009_markets_and_alpha_vantage.sql)
+`twelvedata_quotes`, `alpha_vantage_quotes`, `bank_of_canada_rates`,
+`aws_costs`, `cognito_directory`; any other value is a 404 `not_found`. The
+rows are seeded by
+[`docs/sql/008_integrations.sql`](./sql/008_integrations.sql),
+[`009_markets_and_alpha_vantage.sql`](./sql/009_markets_and_alpha_vantage.sql),
+[`013_aws_costs.sql`](./sql/013_aws_costs.sql)
+and [`014_customer_statistics.sql`](./sql/014_customer_statistics.sql)
 and cannot be created or deleted through the API — only their base URL, enabled
 flag, schedule and settings can change. The base URL has to stay on the
-provider's own domain (`twelvedata.com`, `bankofcanada.ca`, `iso20022.org` or
-`alphavantage.co`, subdomains included); anything else is a 422
+provider's own domain (`twelvedata.com`, `bankofcanada.ca`, `iso20022.org`,
+`alphavantage.co` or `amazonaws.com`, subdomains included); anything else is a 422
 `validation_failed` naming the domain, because the quote calls carry an API
 key — and Alpha Vantage's travels in the query string, so its address is the
 one an operator could most directly turn into a leak. Saving recomputes `nextRunAt` only when the
 schedule or the enabled flag changed, so editing a base URL cannot postpone a
 run that is already due.
+
+**`aws_costs` is the odd one out.** Its provider is AWS itself, so it carries
+no API key (`requiresApiKey` false, `apiKeyEnv` null — the credential is the
+ECS task role) and its `baseUrl` is read by nothing: the AWS SDK builds its
+own endpoint, pinned to `us-east-1` because Cost Explorer, Budgets and Free
+Tier are global services reached there. Its `settings` are `days`,
+`componentTag` and `budgetName`, and `force` in a run body means nothing to it
+— every run re-fetches and replaces its whole window. Its run counters count
+**AWS calls**, not items: `total` is the calls planned, `processed` the calls
+that came back, `failed` the calls that refused for a reason worth attention,
+and `created` / `updated` are cached rows. Each run spends about $0.03 in Cost
+Explorer requests; see [costs.md](./costs.md).
+
+**`cognito_directory` is the other AWS-credential one**, and free. Its
+provider is AWS (Cognito and CloudWatch), so it carries no API key either and
+its `baseUrl` is likewise read by nothing; its only setting is `metricsDays`
+(1..450, default 35), and `force` means nothing to it — every run reads the
+whole pool and replaces its whole metrics window. Its counters count **parts
+of the run**, not items: `total` is always 4 (snapshot, diff, pool metrics,
+the consumer-app deletion sweep), `processed` the parts that finished,
+`failed` the parts that refused for a reason worth attention, `created` the
+rows written (snapshot rows plus event rows plus new metric days), `updated`
+the metric days that replaced an earlier reading, and `unchanged` the accounts
+the diff found nothing to say about. A run whose pool listing was cut short by
+the page cap **writes the snapshot but refuses the diff** and fails: every
+account the listing did not reach would otherwise be recorded as deleted (the
+day is marked `partial`, so it is never diffed *against* either). Two more
+shapes refuse the diff the same way — an empty listing where the previous
+snapshot was not, and a drop of more than half the pool *and* more than 20
+accounts — because a `deleted` event is permanent and a wrong
+`CUSTOMER_COGNITO_USER_POOL_ID` looks exactly like a mass deletion. The
+metrics part fails the run when CloudWatch answers with a `StatusCode` other
+than `Complete`, with `Messages`, or with nothing at all for every query while
+the pool holds at least one confirmed account. See
+[customers.md](./customers.md).
+
+**Customer status precedence.** A customer's `status` is derived on the server
+and `deleted` outranks everything the Cognito pool says: a soft-deleted
+`users` row (`users.deleted_at`, written by the consumer app's own
+delete-my-account flow) is `deleted` whether or not the pool account is still
+there, because the clean-up order is an implementation detail and the person
+has left either way. The filter follows from that. `?status=deleted` selects
+the soft-deleted rows and only those; **any other `?status=` value excludes
+them, even with `?includeDeleted=true`** — otherwise `status=active` could
+answer with a row whose own `status` field reads `deleted`. `includeDeleted`
+is therefore only meaningful on an unfiltered list (`status=all`, the
+default). The header `counts.deleted` is unaffected: it counts every
+soft-deleted row whatever the filters show.
 
 **Runs.** `admin.integrations.run` answers a `running` run, which the page
 follows through the two run endpoints; nothing runs inline, because a catalog
@@ -272,6 +328,70 @@ catalog row does: through a Constants push.
 Until [`docs/sql/008_integrations.sql`](./sql/008_integrations.sql) has run,
 the operator endpoints answer 503 `admin_schema_missing`. Full details in
 [integrations.md](./integrations.md).
+
+## Cost center semantics
+
+The first two cost endpoints read `admin_cost_daily` and `admin_cost_snapshots`
+and **neither calls AWS**. Cost Explorer charges $0.01 per request and its data
+lags about a day, so the `aws_costs` integration asks once a day (09:00
+Toronto) and these two serve the cache. Refreshing is therefore not a cost
+endpoint at all: it is `POST /api/v1/admin/integrations/aws_costs/run`, gated
+by `can_write_integrations`, and it costs about $0.05.
+
+Until [`docs/sql/013_aws_costs.sql`](./sql/013_aws_costs.sql) has run both
+answer 503 `admin_schema_missing`. Afterwards, and before the job has ever
+succeeded, both answer 200 — `{ snapshot: null, byService: [], byComponent:
+[], lastRun: null }` and `[]` — because "we have not asked yet" and "the
+account spent nothing" are different facts and the page says which.
+
+Three conventions apply to every amount in both payloads:
+
+- **USD**, always; nothing converts currency.
+- **Credits and refunds are excluded** (`UnblendedCost` with `Not RECORD_TYPE
+  in (Credit, Refund)`), so these are usage figures and the invoice can be
+  lower. The forecast is the one exception — `GetCostForecast` does not accept
+  that filter.
+- **Nothing is counted for today.** Every window ends yesterday, the last day
+  AWS has totalled, so on the 1st of a month `monthToDateUsd` and every
+  `mtdUsd` are genuinely 0. `prev30Usd` is a *rolling* 30 days ending
+  yesterday, not last calendar month. `estimated` on a day means AWS has not
+  finalised it and it will change.
+
+`byComponent` is empty until the `Component` cost allocation tag is activated
+in the Billing console, and activation is not retroactive. A component of `""`
+is spend the tag does not cover. Full detail in [costs.md](./costs.md).
+
+### Cost per client
+
+`admin.costs.per_client` is the third, and it is an **allocated estimate** — the
+word is on every surface that shows it. AWS bills per resource and every
+resource except an S3 object is shared by all tenants, so no API can answer
+"what did this tenant cost". Instead the nightly `allocate_costs` run splits the
+month's cached bill into four pools (shared capacity, storage, data transfer,
+Cognito) and divides each by a measured driver (requests and sync rows,
+attachment bytes plus an estimated row footprint, active users), writing
+`admin_tenant_cost_monthly`. The endpoint only reads that table, sums the pool
+totals from `admin_cost_daily`, and looks up tenant names and owners in the main
+app database; it never recomputes and never calls AWS.
+
+**`ownerEmail` is gated separately from the rest of the row.** The cost actions
+buy the figures; the address of the person behind a tenant is personal data
+belonging to the Customers feature, so the endpoint fills it in only for a
+caller who holds `can_read_user_list` or `can_read_user_detail` as well. For
+everybody else the field is `null` and the membership read that would have
+produced it is never made — omitted, not blanked after the fact. `tenantName`
+is not gated: it is what the rows are labelled with, and without it the table
+is a list of UUIDs.
+
+Each pool is divided in micro-dollars with a largest-remainder pass, so the
+tenants' components sum to the pool exactly, and `pools.unallocatedUsd` is
+whatever no tenant was given — a pool whose driver was zero everywhere, or a
+bill revised since the last recomputation. Shares therefore need not sum to
+100 %. Until [`docs/sql/015_cost_allocation.sql`](./sql/015_cost_allocation.sql)
+has run it answers 503 `admin_schema_missing`; afterwards, and before the job
+has ever run, it answers 200 with the pools, `tenants: []` and
+`computedAt: null`. The model, its two invented constants and its caveats are
+in [cost-allocation.md](./cost-allocation.md).
 
 ## Calling from the browser
 
