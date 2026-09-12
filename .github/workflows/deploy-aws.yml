@@ -6,6 +6,12 @@ name: Deploy to AWS
 # failed health check) without an empty commit.
 #
 # Required GitHub configuration for this workflow:
+#   - Environment variable `CUSTOM_HOSTNAME` (optional, per environment) — the
+#     custom domain fronting this service (e.g. admin.fairsums.app). When
+#     set, the "Keep the custom domain on the Express listener rule" step
+#     below re-adds it to the service's Express-managed listener rule after
+#     every deploy. Leave unset (or empty) for an environment with no custom
+#     domain; the step is skipped entirely.
 #   - Repository secret `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` — a base64-encoded
 #     32-byte AES key generated with `openssl rand -base64 32`. Use the same
 #     value for both the `stage` and `production` environments so an image
@@ -236,6 +242,63 @@ jobs:
             --output text)
           echo "Service endpoint: $ENDPOINT"
           echo "endpoint=$ENDPOINT" >> "$GITHUB_OUTPUT"
+
+      # ECS Express regenerates this service's listener rule on every
+      # deployment with only its own generated host name as the host-header
+      # condition, dropping any custom host added here by a previous run of
+      # this step. Re-assert it after each deploy so the custom domain
+      # (its ACM certificate, listener certificate and Route 53 alias are
+      # all managed by a separate stack, not this workflow) keeps routing to
+      # this service.
+      - name: Keep the custom domain on the Express listener rule
+        if: vars.CUSTOM_HOSTNAME != ''
+        env:
+          CUSTOM_HOSTNAME: ${{ vars.CUSTOM_HOSTNAME }}
+        run: |
+          set -euo pipefail
+
+          LB_ARN=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerArn'].OutputValue" \
+            --output text)
+          echo "Load balancer: $LB_ARN"
+
+          LISTENER_ARN=$(aws elbv2 describe-listeners \
+            --load-balancer-arn "$LB_ARN" \
+            --output json | jq -r '.Listeners[] | select(.Port == 443) | .ListenerArn')
+          echo "HTTPS listener: $LISTENER_ARN"
+
+          ENDPOINT_HOST="${{ steps.endpoint.outputs.endpoint }}"
+          RULES_JSON=$(aws elbv2 describe-rules --listener-arn "$LISTENER_ARN" --output json)
+
+          RULE_JSON=$(echo "$RULES_JSON" | jq -c --arg host "$ENDPOINT_HOST" \
+            '[.Rules[] | select((.Conditions // []) | any(.Field == "host-header" and ((.HostHeaderConfig.Values // []) | index($host) != null)))] | first')
+
+          if [ -z "$RULE_JSON" ] || [ "$RULE_JSON" = "null" ]; then
+            echo "::error::No listener rule on $LISTENER_ARN has a host-header condition matching $ENDPOINT_HOST." >&2
+            exit 1
+          fi
+
+          RULE_ARN=$(echo "$RULE_JSON" | jq -r '.RuleArn')
+          echo "Rule: $RULE_ARN"
+
+          ALREADY_PRESENT=$(echo "$RULE_JSON" | jq -r --arg host "$CUSTOM_HOSTNAME" \
+            '[.Conditions[] | select(.Field == "host-header") | .HostHeaderConfig.Values[]] | index($host) // empty')
+
+          if [ -n "$ALREADY_PRESENT" ]; then
+            echo "custom host already present"
+            exit 0
+          fi
+
+          # Only the host-header condition's value list changes; every other
+          # condition on the rule (Express currently sets none besides
+          # host-header, but do not assume that stays true) and every action
+          # is passed through untouched.
+          NEW_CONDITIONS=$(echo "$RULE_JSON" | jq -c --arg host "$CUSTOM_HOSTNAME" \
+            '.Conditions | map(if .Field == "host-header" then (.HostHeaderConfig.Values += [$host]) else . end)')
+
+          aws elbv2 modify-rule --rule-arn "$RULE_ARN" --conditions "$NEW_CONDITIONS"
+          echo "Added $CUSTOM_HOSTNAME to the host-header condition of $RULE_ARN"
 
       # ECS rolls new tasks in and old ones out gradually, so the deploy
       # command above returning does not mean the new version is actually

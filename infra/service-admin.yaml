@@ -76,6 +76,7 @@ Metadata:
         Parameters:
           - AdminAllowedCidrs
           - AdminHostMatch
+          - AdminCustomHost
           - AuthPathRateLimit
       - Label:
           default: Size and scaling
@@ -126,6 +127,20 @@ Parameters:
       default for a first deployment, not a good permanent setting. Fill it in
       as soon as you know your address. If your home address changes, the
       console stops answering until you update this and redeploy.
+
+  AdminCustomHost:
+    Type: String
+    Default: ""
+    Description: >-
+      The custom domain of the admin console, e.g. admin.fairsums.app. Leave
+      empty if none. When set, the firewall rule that restricts the admin
+      host name to known addresses (BlockAdminHostFromUnknownAddresses)
+      matches this host in addition to the ECS Express-assigned one, so the
+      console stays protected regardless of which host name a request arrives
+      on. This template does not create the certificate, the load balancer
+      listener rule's extra host condition, or the DNS record for this
+      domain — those are handled outside this stack; see the deploy
+      workflow's "Keep the custom domain on the Express listener rule" step.
 
   AdminHostMatch:
     Type: String
@@ -244,6 +259,7 @@ Conditions:
   # together and comparing with "" is the reliable emptiness test.
   HasAdminAllowedCidrs: !Not [!Equals [!Join ["", !Ref AdminAllowedCidrs], ""]]
   HasCustomAdminHostMatch: !Not [!Equals [!Ref AdminHostMatch, ""]]
+  HasAdminCustomHost: !Not [!Equals [!Ref AdminCustomHost, ""]]
 
 Resources:
   # ---------------------------------------------------------------------------
@@ -495,20 +511,52 @@ Resources:
             Statement:
               AndStatement:
                 Statements:
-                  - ByteMatchStatement:
-                      FieldToMatch:
-                        SingleHeader:
-                          Name: host
-                      PositionalConstraint: CONTAINS
-                      SearchString: !If
-                        - HasCustomAdminHostMatch
-                        - !Ref AdminHostMatch
-                        # The trailing dot keeps this from matching a host name
-                        # that merely starts with the same text.
-                        - !Sub fairsums-admin-${Environment}.
-                      TextTransformations:
-                        - Priority: 0
-                          Type: LOWERCASE
+                  # When AdminCustomHost is set (e.g. admin.fairsums.app), the
+                  # console answers on both that host and the ECS
+                  # Express-assigned one, so this must match either. When it
+                  # is empty, keep the single match exactly as before.
+                  - !If
+                    - HasAdminCustomHost
+                    - OrStatement:
+                        Statements:
+                          - ByteMatchStatement:
+                              FieldToMatch:
+                                SingleHeader:
+                                  Name: host
+                              PositionalConstraint: CONTAINS
+                              SearchString: !If
+                                - HasCustomAdminHostMatch
+                                - !Ref AdminHostMatch
+                                # The trailing dot keeps this from matching a
+                                # host name that merely starts with the same
+                                # text.
+                                - !Sub fairsums-admin-${Environment}.
+                              TextTransformations:
+                                - Priority: 0
+                                  Type: LOWERCASE
+                          - ByteMatchStatement:
+                              FieldToMatch:
+                                SingleHeader:
+                                  Name: host
+                              PositionalConstraint: CONTAINS
+                              SearchString: !Ref AdminCustomHost
+                              TextTransformations:
+                                - Priority: 0
+                                  Type: LOWERCASE
+                    - ByteMatchStatement:
+                        FieldToMatch:
+                          SingleHeader:
+                            Name: host
+                        PositionalConstraint: CONTAINS
+                        SearchString: !If
+                          - HasCustomAdminHostMatch
+                          - !Ref AdminHostMatch
+                          # The trailing dot keeps this from matching a host
+                          # name that merely starts with the same text.
+                          - !Sub fairsums-admin-${Environment}.
+                        TextTransformations:
+                          - Priority: 0
+                            Type: LOWERCASE
                   - NotStatement:
                       Statement:
                         IPSetReferenceStatement:
