@@ -16,14 +16,14 @@
  * A `Bearer` token is never accepted as a substitute: a caller holding its own
  * token manages its own refresh.
  */
-import { NextResponse, type NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
 import {
   ApiError,
   isTooManyRequestsError,
   ServiceUnavailableError,
 } from "@/lib/api/errors";
 import { apiHandler } from "@/lib/api/handler";
-import { ok } from "@/lib/api/response";
+import { ok, redirectRelative } from "@/lib/api/response";
 import { NEXT_PARAM, REFRESH_PATH } from "@/lib/auth/cookies";
 import { refreshSession } from "@/lib/auth/refresh";
 import { clearPageSession } from "@/lib/auth/session";
@@ -139,10 +139,7 @@ export const POST = apiHandler(async () => {
  * here is a browser that was navigating to a page. It gets a redirect instead.
  */
 export const GET = apiHandler(async (request: NextRequest) => {
-  const toLogin = NextResponse.redirect(
-    new URL(LOGIN_PATH, request.nextUrl.origin),
-    303,
-  );
+  const toLogin = redirectRelative(LOGIN_PATH, 303);
 
   const rateLimitKey = ipRateLimitKey("ip:", clientIp(request));
   if (rateLimitKey) {
@@ -159,13 +156,15 @@ export const GET = apiHandler(async (request: NextRequest) => {
     }
   }
 
-  // Validated before use: the origin comes from `nextUrl`, never from a Host
-  // header the caller controls.
+  // Validated before use: `safeNextPath` only ever returns a same-site path,
+  // and `redirectRelative` below sends it as a relative `Location` the browser
+  // resolves against whatever origin it is already on — there is no host to
+  // spoof because none is ever read.
   const next = safeNextPath(request.nextUrl.searchParams.get(NEXT_PARAM));
   const outcome = await refreshSession();
 
   if (outcome.status === "refreshed") {
-    return NextResponse.redirect(new URL(next, request.nextUrl.origin), 303);
+    return redirectRelative(next, 303);
   }
 
   if (outcome.status === "unavailable") {

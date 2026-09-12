@@ -12,7 +12,10 @@
  * retirement and shows nothing else. The Retired segment only exists for the
  * kinds that retire rather than delete (categories, account types, markets),
  * which are the ones that keep their retired rows, and Unknown only means
- * "no compare has reached this row yet".
+ * "no compare has reached this row yet". For the two pulled kinds
+ * (`isPulledKind`: categories, financial institutions) the push-state options
+ * beyond "All" and "Retired" drop out entirely — they carry no push state to
+ * filter on.
  *
  * The Market Select only exists for ETFs and stocks, the two catalogs that
  * carry a listing country. It defaults to "All markets", which is not a
@@ -27,7 +30,7 @@
 import { useMemo } from "react";
 import { Input, Segmented, Select } from "antd";
 import type { ConstantKind } from "@/lib/constants/types";
-import { MARKET_FILTER_COUNTRIES, isMarketKind } from "@/lib/constants/types";
+import { MARKET_FILTER_COUNTRIES, isMarketKind, isPulledKind } from "@/lib/constants/types";
 import { KIND_META, PUSH_STATE_META } from "./constants-meta";
 import { ALL_MARKETS, type MarketFilter, type StateFilter } from "./use-constants-store";
 
@@ -66,24 +69,33 @@ export default function ConstantsToolbar({
   const options = useMemo(() => {
     const base: Array<{ value: StateFilter; label: string; title: string }> = [
       { value: "all", label: "All", title: "Every live row. State filters also carry retired rows; Retired shows only those" },
-      { value: "new", label: PUSH_STATE_META.new.label, title: PUSH_STATE_META.new.tooltip },
-      {
-        value: "changed",
-        label: PUSH_STATE_META.changed.label,
-        title: PUSH_STATE_META.changed.tooltip,
-      },
-      {
-        value: "synced",
-        label: PUSH_STATE_META.synced.label,
-        title: PUSH_STATE_META.synced.tooltip,
-      },
-      {
-        value: "unknown",
-        label: PUSH_STATE_META.unknown.label,
-        title: PUSH_STATE_META.unknown.tooltip,
-      },
-      { value: "pending", label: "Pending", title: "Everything new or changed: what a push would write" },
     ];
+    // Categories and financial institutions are pulled by the consumer app
+    // rather than pushed, so they carry no push state worth filtering on
+    // (`isPulledKind`, `service.ts`'s `updateWithState` / `removeConstant`
+    // never compare them against the main database). Only "All" and, for
+    // categories, "Retired" still mean anything.
+    if (!isPulledKind(kind)) {
+      base.push(
+        { value: "new", label: PUSH_STATE_META.new.label, title: PUSH_STATE_META.new.tooltip },
+        {
+          value: "changed",
+          label: PUSH_STATE_META.changed.label,
+          title: PUSH_STATE_META.changed.tooltip,
+        },
+        {
+          value: "synced",
+          label: PUSH_STATE_META.synced.label,
+          title: PUSH_STATE_META.synced.tooltip,
+        },
+        {
+          value: "unknown",
+          label: PUSH_STATE_META.unknown.label,
+          title: PUSH_STATE_META.unknown.tooltip,
+        },
+        { value: "pending", label: "Pending", title: "Everything new or changed: what a push would write" },
+      );
+    }
     return KIND_META[kind].retires
       ? [
           ...base,

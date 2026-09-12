@@ -101,8 +101,12 @@ export default function AppShell({
 
       <div className="flex min-h-0 flex-1">
         <SideRail tabs={tabs} />
-        {/* Only the content area scrolls; the bar and the rail stay put. */}
-        <main className="min-w-0 flex-1 overflow-y-auto">{children}</main>
+        {/* Only the content area scrolls; the bar and the rail stay put. A
+            column, so a page can be a fixed-height one — a list page hands the
+            leftover height to its table and scrolls the rows instead of the
+            page — while `overflow-y-auto` still catches every page that is
+            taller than the window: Overview, the stubs, a stack of cards. */}
+        <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">{children}</main>
       </div>
 
       {/* Learning Centre. Placeholder content, as in the consumer app. */}

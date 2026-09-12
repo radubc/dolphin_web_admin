@@ -32,7 +32,7 @@ import {
 } from "@ant-design/icons";
 import { ListEmpty, ListNoResults } from "@/components/empty-state";
 import Figures from "@/components/figures";
-import { ListPageFrame, ListPanel } from "@/components/list-page-frame";
+import { ListPageFrame, ListPanel, ListTableRegion } from "@/components/list-page-frame";
 import { RibbonBar, RibbonButton, RibbonDivider } from "@/components/ribbon-bar";
 import StatCard from "@/components/stat-card";
 import type { Customer } from "@/lib/customers/types";
@@ -373,31 +373,35 @@ export default function CustomersView({ canInvite, onInvite, switcher, onSendabi
                 title="The customer pool has more accounts than the page can read at once; statuses and the Invited / Disabled figures cover only part of it."
               />
             )}
-            <ListPanel>
-              <Table<Customer>
-                dataSource={items}
-                rowKey="id"
-                columns={columns}
-                size="middle"
-                loading={store.refreshing}
-                scroll={{ x: 1220 }}
-                onRow={(row) => ({
-                  onClick: () => setSelected(row),
-                  style: { cursor: "pointer" },
-                })}
-                pagination={{
-                  current: store.page,
-                  pageSize: store.pageSize,
-                  total: store.total,
-                  showSizeChanger: true,
-                  pageSizeOptions: [...CUSTOMER_PAGE_SIZE_OPTIONS],
-                  showTotal: (total, range) =>
-                    `${range[0].toLocaleString()}–${range[1].toLocaleString()} of ${total.toLocaleString()}`,
-                  onChange: store.setPaging,
-                  onShowSizeChange: store.setPaging,
-                }}
-              />
-            </ListPanel>
+            <ListTableRegion>
+              {(y) => (
+                <ListPanel>
+                  <Table<Customer>
+                    dataSource={items}
+                    rowKey="id"
+                    columns={columns}
+                    size="middle"
+                    loading={store.refreshing}
+                    scroll={{ x: 1220, y }}
+                    onRow={(row) => ({
+                      onClick: () => setSelected(row),
+                      style: { cursor: "pointer" },
+                    })}
+                    pagination={{
+                      current: store.page,
+                      pageSize: store.pageSize,
+                      total: store.total,
+                      showSizeChanger: true,
+                      pageSizeOptions: [...CUSTOMER_PAGE_SIZE_OPTIONS],
+                      showTotal: (total, range) =>
+                        `${range[0].toLocaleString()}–${range[1].toLocaleString()} of ${total.toLocaleString()}`,
+                      onChange: store.setPaging,
+                      onShowSizeChange: store.setPaging,
+                    }}
+                  />
+                </ListPanel>
+              )}
+            </ListTableRegion>
           </>
         )}
       </>

@@ -10,6 +10,7 @@ import type { ColumnsType } from "antd/es/table";
 import { EditOutlined, LockOutlined } from "@ant-design/icons";
 import type { AdminAction, AdminRole } from "@/lib/admin-access/types";
 import { humaniseKey, pluralise } from "@/lib/format";
+import { useListTableBodyHeight } from "@/lib/hooks/use-table-body-height";
 import { surfaceColors } from "@/lib/theme/colors";
 import { categoryLabel } from "./access-meta";
 
@@ -44,6 +45,9 @@ export default function RolesTable({
   onEdit,
   onShowMembers,
 }: RolesTableProps) {
+  // Set inside a `ListTableRegion`: the rows scroll, the header stays.
+  const bodyHeight = useListTableBodyHeight();
+
   const columns: ColumnsType<AdminRole> = [
     {
       title: "Role",
@@ -164,7 +168,7 @@ export default function RolesTable({
       rowKey={(role) => role.id}
       columns={columns}
       size="middle"
-      scroll={{ x: TABLE_MIN_WIDTH }}
+      scroll={{ x: TABLE_MIN_WIDTH, y: bodyHeight }}
       pagination={false}
       rowSelection={{
         selectedRowKeys: [...selectedIds],

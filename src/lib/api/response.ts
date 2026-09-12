@@ -1,3 +1,4 @@
+import "server-only";
 /**
  * The response envelope every Route Handler returns.
  *
@@ -8,6 +9,7 @@
  * Every response carries `Cache-Control: no-store`: this API is per-user, and
  * an intermediary caching one caller's payload for another would be a data leak.
  */
+import { NextResponse } from "next/server";
 import { isTooManyRequestsError, type ApiError } from "./errors";
 
 export const NO_STORE = "no-store";
@@ -55,6 +57,41 @@ export function noContent(init?: ResponseInit): Response {
     status: 204,
     headers: jsonHeaders(init),
   });
+}
+
+/**
+ * Redirects to a same-site path by hand, without ever building an absolute URL.
+ *
+ * Never use `NextResponse.redirect(new URL(path, request.nextUrl.origin))` (or
+ * `request.nextUrl` as the base) for a same-site redirect: in the production
+ * container the standalone server runs with `HOSTNAME=0.0.0.0`, so that origin
+ * resolves to `http://0.0.0.0:<port>` and the browser is sent nowhere useful.
+ * HTTP allows a relative `Location`, and every browser resolves it against the
+ * origin the response actually came from, so writing the header directly
+ * sidesteps the bug entirely. `NextResponse.redirect()` itself would reject a
+ * relative URL (`validateURL` requires an absolute one), which is why this
+ * builds the `NextResponse` by hand instead of going through it.
+ *
+ * Safe by construction rather than by convention: `path` is accepted only when
+ * it starts with a single `/` (never `//`, a protocol-relative URL) and holds
+ * no backslash (several browsers normalise `/\host` to `//host`) or CR/LF (a
+ * header-injection vector). Anything else — an absolute URL, a bare host, a
+ * malformed value — falls back to `"/"` rather than being repaired, so a call
+ * site with its own open-redirect guard (`safeNextPath` in the refresh route,
+ * say) only ever narrows what already lands here safely.
+ */
+export function redirectRelative(
+  path: string,
+  status: 302 | 303 | 307 = 303,
+): NextResponse {
+  return new NextResponse(null, { status, headers: { Location: safeRedirectPath(path) } });
+}
+
+/** The guard behind {@link redirectRelative}'s contract. */
+function safeRedirectPath(path: string): string {
+  if (!path.startsWith("/") || path.startsWith("//")) return "/";
+  if (path.includes("\\") || path.includes("\r") || path.includes("\n")) return "/";
+  return path;
 }
 
 /**

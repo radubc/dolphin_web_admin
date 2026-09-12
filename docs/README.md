@@ -10,7 +10,7 @@ the architecture, then the topic you need.
 | [access-control.md](./access-control.md) | who may open which page and call which endpoint: the allowlist, roles, actions, the **access map**, and what happens in the background. |
 | [api.md](./api.md) | the API contract: envelope, error codes, rate limits, every endpoint. |
 | [database.md](./database.md) | the two databases, the Prisma clients, and the workflow for changing the admin schema (SQL in pgAdmin, then `db pull`). |
-| [constants.md](./constants.md) | the four shared reference catalogs, and what "push to the main database" does and does not do. |
+| [constants.md](./constants.md) | the ten shared reference catalogs, what "push to the main database" does and does not do, and the two kinds (categories, financial institutions) the consumer app pulls instead. |
 | [customers.md](./customers.md) | the consumer app's users as the admin console sees them, and how an invitation to the customer Cognito pool works end to end. |
 | [integrations.md](./integrations.md) | the external providers (TwelveData catalogs and quotes, Bank of Canada rates), the two watch lists, the scheduler, and how the consumer app asks for a quote or a rate. |
 | [sql/README.md](./sql/README.md) | the SQL scripts to run and in what order. |

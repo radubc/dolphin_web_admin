@@ -23,7 +23,7 @@ import {
 } from "@ant-design/icons";
 import { ListEmpty, ListNoResults } from "@/components/empty-state";
 import Figures from "@/components/figures";
-import { ListPageFrame, ListPanel } from "@/components/list-page-frame";
+import { ListPageFrame, ListPanel, ListTableRegion } from "@/components/list-page-frame";
 import { RibbonBar, RibbonButton } from "@/components/ribbon-bar";
 import StatCard from "@/components/stat-card";
 import { useAdminAccessStore, type AccessView } from "@/lib/admin-access/store";
@@ -246,46 +246,52 @@ export default function UserManagementPage({ capabilities }: UserManagementPageP
           {store.userRows.length === 0 ? (
             <ListNoResults what="admin users" onClearFilters={store.clearUsersFilters} />
           ) : (
-            <ListPanel>
-              <UsersTable
-                rows={store.userRows}
-                roles={store.roles}
-                selectedIds={store.selectedUserIds}
-                selfId={capabilities.userId}
-                onSelectionChange={store.setSelectedUserIds}
-                onEdit={store.openEditUserForm}
-              />
-            </ListPanel>
+            <ListTableRegion>
+              <ListPanel>
+                <UsersTable
+                  rows={store.userRows}
+                  roles={store.roles}
+                  selectedIds={store.selectedUserIds}
+                  selfId={capabilities.userId}
+                  onSelectionChange={store.setSelectedUserIds}
+                  onEdit={store.openEditUserForm}
+                />
+              </ListPanel>
+            </ListTableRegion>
           )}
         </>
       );
   } else if (view === "roles") {
     body = (
-      <ListPanel>
-        <RolesTable
-          rows={store.roles}
-          actions={store.actions}
-          selectedIds={store.selectedRoleIds}
-          onSelectionChange={store.setSelectedRoleIds}
-          onEdit={store.openEditRoleForm}
-          onShowMembers={(role) => {
-            store.setUsersRole(role.key);
-            store.setUsersStatus("enabled");
-            store.setView("users");
-          }}
-        />
-      </ListPanel>
+      <ListTableRegion>
+        <ListPanel>
+          <RolesTable
+            rows={store.roles}
+            actions={store.actions}
+            selectedIds={store.selectedRoleIds}
+            onSelectionChange={store.setSelectedRoleIds}
+            onEdit={store.openEditRoleForm}
+            onShowMembers={(role) => {
+              store.setUsersRole(role.key);
+              store.setUsersStatus("enabled");
+              store.setView("users");
+            }}
+          />
+        </ListPanel>
+      </ListTableRegion>
     );
   } else {
     body = (
-      <ListPanel>
-        <AuditTable
-          rows={store.audit}
-          hasMore={store.auditHasMore}
-          loadingMore={store.auditLoadingMore}
-          onLoadMore={store.loadMoreAudit}
-        />
-      </ListPanel>
+      <ListTableRegion>
+        <ListPanel>
+          <AuditTable
+            rows={store.audit}
+            hasMore={store.auditHasMore}
+            loadingMore={store.auditLoadingMore}
+            onLoadMore={store.loadMoreAudit}
+          />
+        </ListPanel>
+      </ListTableRegion>
     );
   }
 

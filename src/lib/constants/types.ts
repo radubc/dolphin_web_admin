@@ -10,6 +10,10 @@
  * are referenced by tenant data (accounts, transactions, budgets), so removal
  * stays a manual, deliberate operation on the consumer side.
  *
+ * Two kinds are the exception: `categories` and `financial_institutions` are
+ * **pulled** by the consumer app at tenant creation rather than pushed, so
+ * compare and push are refused for them. See `PULLED_KINDS` below.
+ *
  * Plain data, no React, no Prisma: safe to import from anywhere.
  */
 
@@ -76,6 +80,39 @@ export const INTEGER_ID_KINDS = ["cryptocurrencies", "etfs", "stocks"] as const 
 
 export function hasIntegerId(kind: ConstantKind): boolean {
   return (INTEGER_ID_KINDS as readonly string[]).includes(kind);
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                Pulled kinds                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The kinds the consumer app **pulls** instead of this console pushing them.
+ *
+ * Owner decision (2026-09-11): default categories and default financial
+ * institutions are no longer copied into the main app database. The consumer
+ * app fetches them over HTTP when it creates a tenant — from
+ * `GET /api/v1/service/defaults/categories` and
+ * `GET /api/v1/service/defaults/financial-institutions`, both machine
+ * endpoints (`API_KEYS`) served by `src/lib/constants/defaults.ts` — and copies
+ * them into its own per-tenant rows. The admin catalog is the single source of
+ * these defaults and the Constants page is where they are curated.
+ *
+ * What that changes here: **compare and push are refused** for these two kinds
+ * (409 `conflict`, raised in `./service.ts`), because there is nothing to push
+ * and no main-database copy worth comparing against. Everything else is
+ * unchanged — list, read, create, update and delete work exactly as before, and
+ * the sync ledger keeps whatever rows earlier pushes left behind, which read as
+ * a harmless historical `pushState`. The remaining eight kinds keep compare and
+ * push in full.
+ */
+export const PULLED_KINDS: ReadonlySet<ConstantKind> = new Set<ConstantKind>([
+  "categories",
+  "financial_institutions",
+]);
+
+export function isPulledKind(kind: ConstantKind): boolean {
+  return PULLED_KINDS.has(kind);
 }
 
 /* -------------------------------------------------------------------------- */

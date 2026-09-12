@@ -42,8 +42,13 @@ supplies an id for those kinds — the admin database's sequence assigns it.
 ## Source of truth
 
 The **admin database** masters all ten. Operators create, edit and retire rows
-there and nowhere else. The **main app database** holds the copy the consumer
-app reads, and that copy only ever changes through a push.
+there and nowhere else. For eight of the ten the **main app database** holds the
+copy the consumer app reads, and that copy only ever changes through a push.
+
+The other two — `categories` and `financial_institutions` — are **pulled** by
+the consumer app instead; see [Pulled kinds](#pulled-kinds-categories-and-financial-institutions)
+below. Everything this page says about the sync ledger, compare and push applies
+to the remaining eight.
 
 That means a change is a two-step act on purpose: edit, look at it, then push.
 Until the push, a row is marked
@@ -57,6 +62,54 @@ Only the pushed fields are compared and written, so anything else the consumer
 app owns on those rows keeps its value — the exceptions are
 `categories.updated_at` and `markets.updated_at`, which a push stamps with the
 current time on every category and every market it writes.
+
+## Pulled kinds: categories and financial institutions
+
+Owner decision, 2026-09-11: the **default categories** and the **default
+financial institutions** are no longer copied into the main app database. The
+consumer app asks this console for them when it creates a tenant and copies the
+rows into that tenant's own data:
+
+| Endpoint | Answer |
+| --- | --- |
+| `GET /api/v1/service/defaults/categories` | `{ categories: [{ id, name, type, parentId, isDiscretionary }] }`, every live admin category, `created_at` then `id` |
+| `GET /api/v1/service/defaults/financial-institutions` | `{ financialInstitutions: [{ id, name, institutionNumber, type }] }`, by `name` then `id` |
+
+Both are machine endpoints: an `API_KEYS` credential (`x-api-key`), listed in
+`PUBLIC_API_PATHS` in `src/proxy.ts`, keys `service.defaults.categories` and
+`service.defaults.financial_institutions`, code in
+`src/lib/constants/defaults.ts`. A retired category is left out — a retirement
+means "stop offering this to new tenants", and a pull only ever concerns a new
+tenant. `type` travels verbatim (`Inflow`, `Outflow`, or null).
+
+Unlike the quote and rate lookups, **these two never answer an empty list**: a
+tenant created with no categories is a broken tenant. A missing admin schema is
+a 503 `admin_schema_missing`, and a catalog with no rows a 503
+`defaults_unavailable` naming the Constants page. The consumer is expected to
+fail the tenant creation and retry. Both catalogs — categories **and**
+financial institutions — must be seeded before the consumer app can create a
+tenant at all: either one answering empty fails every tenant creation, not
+just the one that needed it.
+
+What this changes in this console:
+
+- `POST …/categories/push`, `…/categories/compare`,
+  `…/financial_institutions/push` and `…/financial_institutions/compare` answer
+  **409 `conflict`** (`isPulledKind` / `PULLED_KINDS` in
+  `src/lib/constants/types.ts`, enforced in `src/lib/constants/service.ts`).
+- List, get, create, update, delete and the job endpoints otherwise behave as
+  before, the two catalogs are edited on the Constants page as usual, and no
+  row is removed from either database. The one difference: an edit or a
+  retirement of a pulled row no longer re-compares it against the main
+  database (`updateWithState` / `removeConstant` in
+  `src/lib/constants/service.ts` check `isPulledKind` first) — there is
+  nothing over there worth reading for these two kinds any more, so the row
+  reports `unknown` (an edit) or its ledger entry is left untouched (a
+  retirement). The ledger rows earlier pushes left behind are kept and still
+  read as a `pushState`; it is simply a historical fact now, not something to
+  act on.
+- The main app database keeps whatever these two tables already hold. Existing
+  tenants are untouched.
 
 ## The sync ledger
 
@@ -78,7 +131,9 @@ the state is **stored**, in `admin_constant_sync`:
   rows current: a create records `new` (the sequence-keyed kinds compare first,
   because the number may already exist over there), an edit and a retirement
   re-compare that one row, a hard delete forgets it, and a push marks every row
-  it wrote `synced`.
+  it wrote `synced`. The two pulled kinds are the exception — see
+  [Pulled kinds](#pulled-kinds-categories-and-financial-institutions) — their
+  edits and retirements skip the re-compare and leave the ledger as it is.
 - A row with **no ledger entry** reads as `unknown`. That is the honest answer
   before the first compare, and after a bulk load of rows nothing has looked at
   yet.
@@ -314,7 +369,9 @@ what a row points at before the row itself, **per batch**:
   (`account_types.base_type_id` → `account_base_types.id`);
 - **categories** — the ancestors of the batch's categories are pushed first,
   and the batch itself is ordered parents before children
-  (`categories.parent_id` → `categories.id`);
+  (`categories.parent_id` → `categories.id`). Kept for reference and still in
+  the code, but unreachable: categories are pulled, so their push is refused
+  with a 409;
 - **cryptocurrencies, etfs, stocks, markets** — none. These four reference
   nothing, so they never carry dependencies.
 
@@ -343,12 +400,14 @@ have.
 | `stocks` | removes the admin row | any admin `portfolio_stocks`, `stock_trades` or `watchlist_stocks` row references it |
 | `markets` | **soft delete**: sets `deleted_at` (and `updated_at`) | — |
 
-Retiring a category, an account type or a market is a change like any other:
-it is `changed` until pushed, and the push carries the `deleted_at` timestamp
-across so the consumer app stops offering it while existing tenant references
-(accounts and loans, for an account type) stay valid. Retired rows of all three
-kinds stay in the list responses — the page shows and filters them. Deleting an
-already-retired row is a no-op, not an error.
+Retiring an account type or a market is a change like any other: it is
+`changed` until pushed, and the push carries the `deleted_at` timestamp across
+so the consumer app stops offering it while existing tenant references (accounts
+and loans, for an account type) stay valid. A retired **category** is not pushed
+anywhere — the kind is pulled — it simply stops being handed to the next tenant
+that is created; tenants that already copied it keep their own row. Retired rows
+of all three kinds stay in the list responses — the page shows and filters them.
+Deleting an already-retired row is a no-op, not an error.
 
 `stocks` is the one market-data catalog with references **inside the admin
 database**: `portfolio_stocks` and `watchlist_stocks` cascade on delete and

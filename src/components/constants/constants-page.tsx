@@ -39,13 +39,14 @@ import { Alert, App, Button, Empty, Segmented, Spin, Typography } from "antd";
 import { DatabaseOutlined } from "@ant-design/icons";
 import { ListEmpty, ListNoResults } from "@/components/empty-state";
 import Figures from "@/components/figures";
-import { ListPageFrame, ListPanel } from "@/components/list-page-frame";
+import { ListPageFrame, ListPanel, ListTableRegion } from "@/components/list-page-frame";
 import StatCard from "@/components/stat-card";
 import { ApiClientError } from "@/lib/api/client";
 import { canDo, type AdminCapabilities } from "@/lib/admin-access/types";
 import { constantsApi } from "@/lib/constants/client";
 import {
   CONSTANT_KINDS,
+  isPulledKind,
   PUSH_IDS_MAX,
   type ConstantKind,
   type ConstantRow,
@@ -84,6 +85,9 @@ export default function ConstantsPage({ capabilities, initialKind }: ConstantsPa
 
   const canWrite = canDo(capabilities, "can_write_catalogs");
   const meta = KIND_META[store.kind];
+  // Pulled by the consumer app at tenant creation instead of pushed from here:
+  // every compare/push surface on the page drops out for these two kinds.
+  const pulled = isPulledKind(store.kind);
   const { counts } = store;
   const pendingCount = counts.new + counts.changed;
   // One flag for "no write may start now", whether that is a request on its way
@@ -221,37 +225,45 @@ export default function ConstantsPage({ capabilities, initialKind }: ConstantsPa
           value: counts.total.toLocaleString(),
           tooltip: `Rows in the admin catalog of ${meta.plural}. The filters do not narrow this figure.`,
         },
-        {
-          label: "Not pushed",
-          value: counts.new.toLocaleString(),
-          color: counts.new > 0 ? PUSH_STATE_META.new.color : undefined,
-          tooltip: PUSH_STATE_META.new.tooltip,
-          separatorBefore: true,
-        },
-        {
-          label: "Changed",
-          value: counts.changed.toLocaleString(),
-          color: counts.changed > 0 ? PUSH_STATE_META.changed.color : undefined,
-          tooltip: PUSH_STATE_META.changed.tooltip,
-        },
-        {
-          label: "In sync",
-          value: counts.synced.toLocaleString(),
-          color: PUSH_STATE_META.synced.color,
-          tooltip: PUSH_STATE_META.synced.tooltip,
-        },
-        {
-          label: "Not compared",
-          value: counts.unknown.toLocaleString(),
-          color: counts.unknown > 0 ? PUSH_STATE_META.unknown.color : undefined,
-          tooltip: PUSH_STATE_META.unknown.tooltip,
-        },
+        // Pulled by the consumer app rather than pushed from here: these four
+        // figures are all push state, which no longer applies.
+        ...(pulled
+          ? []
+          : [
+              {
+                label: "Not pushed",
+                value: counts.new.toLocaleString(),
+                color: counts.new > 0 ? PUSH_STATE_META.new.color : undefined,
+                tooltip: PUSH_STATE_META.new.tooltip,
+                separatorBefore: true,
+              },
+              {
+                label: "Changed",
+                value: counts.changed.toLocaleString(),
+                color: counts.changed > 0 ? PUSH_STATE_META.changed.color : undefined,
+                tooltip: PUSH_STATE_META.changed.tooltip,
+              },
+              {
+                label: "In sync",
+                value: counts.synced.toLocaleString(),
+                color: PUSH_STATE_META.synced.color,
+                tooltip: PUSH_STATE_META.synced.tooltip,
+              },
+              {
+                label: "Not compared",
+                value: counts.unknown.toLocaleString(),
+                color: counts.unknown > 0 ? PUSH_STATE_META.unknown.color : undefined,
+                tooltip: PUSH_STATE_META.unknown.tooltip,
+              },
+            ]),
         ...(meta.retires
           ? [
               {
                 label: "Retired",
                 value: counts.retired.toLocaleString(),
-                tooltip: `Retired ${meta.plural}. They stay in the catalog and are still pushed.`,
+                tooltip: pulled
+                  ? `Retired ${meta.plural}. They stay in the catalog.`
+                  : `Retired ${meta.plural}. They stay in the catalog and are still pushed.`,
                 separatorBefore: true,
               },
             ]
@@ -262,50 +274,59 @@ export default function ConstantsPage({ capabilities, initialKind }: ConstantsPa
 
   const rail = (
     <div className="flex flex-col gap-4">
-      <StatCard
-        title={`${meta.label} vs the main app`}
-        icon={<DatabaseOutlined style={{ color: CONSTANTS_COLOR }} />}
-        // The whole catalog is the denominator, so every bar reads as a share
-        // of it even when the states do not add up to it yet.
-        total={Math.max(1, counts.total)}
-        rows={[
-          {
-            label: PUSH_STATE_META.new.label,
-            value: counts.new,
-            color: PUSH_STATE_META.new.color,
-            tooltip: PUSH_STATE_META.new.tooltip,
-          },
-          {
-            label: PUSH_STATE_META.changed.label,
-            value: counts.changed,
-            color: PUSH_STATE_META.changed.color,
-            tooltip: PUSH_STATE_META.changed.tooltip,
-          },
-          {
-            label: PUSH_STATE_META.synced.label,
-            value: counts.synced,
-            color: PUSH_STATE_META.synced.color,
-            tooltip: PUSH_STATE_META.synced.tooltip,
-          },
-          {
-            label: PUSH_STATE_META.unknown.label,
-            value: counts.unknown,
-            color: PUSH_STATE_META.unknown.color,
-            tooltip: PUSH_STATE_META.unknown.tooltip,
-          },
-          ...(meta.retires
-            ? [
-                {
-                  label: "Retired",
-                  value: counts.retired,
-                  color: RETIRED_COLOR,
-                  tooltip: "Retired here; the push carries the retirement over.",
-                },
-              ]
-            : []),
-        ]}
-        footnote="Push upserts rows into the main app database by id and never deletes there."
-      />
+      {pulled ? (
+        <Alert
+          type="info"
+          showIcon
+          title="Pulled by the consumer app, not pushed"
+          description="Pulled by the consumer app when a new account is created; edits here become the defaults for accounts created from now on. Existing accounts keep their own copies."
+        />
+      ) : (
+        <StatCard
+          title={`${meta.label} vs the main app`}
+          icon={<DatabaseOutlined style={{ color: CONSTANTS_COLOR }} />}
+          // The whole catalog is the denominator, so every bar reads as a share
+          // of it even when the states do not add up to it yet.
+          total={Math.max(1, counts.total)}
+          rows={[
+            {
+              label: PUSH_STATE_META.new.label,
+              value: counts.new,
+              color: PUSH_STATE_META.new.color,
+              tooltip: PUSH_STATE_META.new.tooltip,
+            },
+            {
+              label: PUSH_STATE_META.changed.label,
+              value: counts.changed,
+              color: PUSH_STATE_META.changed.color,
+              tooltip: PUSH_STATE_META.changed.tooltip,
+            },
+            {
+              label: PUSH_STATE_META.synced.label,
+              value: counts.synced,
+              color: PUSH_STATE_META.synced.color,
+              tooltip: PUSH_STATE_META.synced.tooltip,
+            },
+            {
+              label: PUSH_STATE_META.unknown.label,
+              value: counts.unknown,
+              color: PUSH_STATE_META.unknown.color,
+              tooltip: PUSH_STATE_META.unknown.tooltip,
+            },
+            ...(meta.retires
+              ? [
+                  {
+                    label: "Retired",
+                    value: counts.retired,
+                    color: RETIRED_COLOR,
+                    tooltip: "Retired here; the push carries the retirement over.",
+                  },
+                ]
+              : []),
+          ]}
+          footnote="Push upserts rows into the main app database by id and never deletes there."
+        />
+      )}
 
       {store.kind === "countries" && store.currenciesError !== null && (
         <Alert
@@ -325,7 +346,7 @@ export default function ConstantsPage({ capabilities, initialKind }: ConstantsPa
         />
       )}
 
-      {counts.mainOnly > 0 && (
+      {!pulled && counts.mainOnly > 0 && (
         <Alert
           type="info"
           showIcon
@@ -430,32 +451,34 @@ export default function ConstantsPage({ capabilities, initialKind }: ConstantsPa
         {store.total === 0 ? (
           <ListNoResults what={meta.plural} onClearFilters={store.clearFilters} />
         ) : (
-          <ListPanel>
-            <ConstantsTable
-              list={store.list}
-              currencies={store.currencies}
-              baseTypes={store.baseTypes}
-              categories={store.categories}
-              canWrite={canWrite}
-              busy={busy}
-              loading={store.refreshing}
-              page={store.page}
-              pageSize={store.pageSize}
-              total={store.total}
-              onPagingChange={store.setPaging}
-              selectedIds={store.selectedIds}
-              onSelectionChange={store.setSelectedIds}
-              onEdit={setFormTarget}
-              onPush={(row) => {
-                // One row is always inline: the notification comes from the
-                // poller and the store reloads on the change announcement.
-                void runPush({ ids: [row.id] });
-              }}
-              onDelete={(row, label) => {
-                void handleDelete(row, label);
-              }}
-            />
-          </ListPanel>
+          <ListTableRegion>
+            <ListPanel>
+              <ConstantsTable
+                list={store.list}
+                currencies={store.currencies}
+                baseTypes={store.baseTypes}
+                categories={store.categories}
+                canWrite={canWrite}
+                busy={busy}
+                loading={store.refreshing}
+                page={store.page}
+                pageSize={store.pageSize}
+                total={store.total}
+                onPagingChange={store.setPaging}
+                selectedIds={store.selectedIds}
+                onSelectionChange={store.setSelectedIds}
+                onEdit={setFormTarget}
+                onPush={(row) => {
+                  // One row is always inline: the notification comes from the
+                  // poller and the store reloads on the change announcement.
+                  void runPush({ ids: [row.id] });
+                }}
+                onDelete={(row, label) => {
+                  void handleDelete(row, label);
+                }}
+              />
+            </ListPanel>
+          </ListTableRegion>
         )}
       </>
     );
@@ -498,7 +521,7 @@ export default function ConstantsPage({ capabilities, initialKind }: ConstantsPa
         ribbon={ribbon}
         rail={store.loading || store.list === null ? undefined : rail}
       >
-        {jobs.running && jobs.job !== null && <ConstantsJobStrip job={jobs.job} />}
+        {!pulled && jobs.running && jobs.job !== null && <ConstantsJobStrip job={jobs.job} />}
         {switcher}
         {body}
       </ListPageFrame>

@@ -48,7 +48,7 @@ import {
 } from "@ant-design/icons";
 import { ListEmpty, ListNoResults } from "@/components/empty-state";
 import Figures from "@/components/figures";
-import { ListPageFrame, ListPanel } from "@/components/list-page-frame";
+import { ListPageFrame, ListPanel, ListTableRegion } from "@/components/list-page-frame";
 import { RibbonBar, RibbonButton, RibbonDivider } from "@/components/ribbon-bar";
 import StatCard from "@/components/stat-card";
 import { customersApi } from "@/lib/customers/client";
@@ -451,27 +451,31 @@ export default function InvitesView({ canInvite, onInvite, switcher, onSendabili
         {store.total === 0 ? (
           <ListNoResults what="invitations" onClearFilters={store.clearFilters} />
         ) : (
-          <ListPanel>
-            <Table<CustomerInvite>
-              dataSource={items}
-              rowKey="id"
-              columns={columns}
-              size="middle"
-              loading={store.refreshing}
-              scroll={{ x: 1330 }}
-              pagination={{
-                current: store.page,
-                pageSize: store.pageSize,
-                total: store.total,
-                showSizeChanger: true,
-                pageSizeOptions: [...CUSTOMER_PAGE_SIZE_OPTIONS],
-                showTotal: (total, range) =>
-                  `${range[0].toLocaleString()}–${range[1].toLocaleString()} of ${total.toLocaleString()}`,
-                onChange: store.setPaging,
-                onShowSizeChange: store.setPaging,
-              }}
-            />
-          </ListPanel>
+          <ListTableRegion>
+            {(y) => (
+              <ListPanel>
+                <Table<CustomerInvite>
+                  dataSource={items}
+                  rowKey="id"
+                  columns={columns}
+                  size="middle"
+                  loading={store.refreshing}
+                  scroll={{ x: 1330, y }}
+                  pagination={{
+                    current: store.page,
+                    pageSize: store.pageSize,
+                    total: store.total,
+                    showSizeChanger: true,
+                    pageSizeOptions: [...CUSTOMER_PAGE_SIZE_OPTIONS],
+                    showTotal: (total, range) =>
+                      `${range[0].toLocaleString()}–${range[1].toLocaleString()} of ${total.toLocaleString()}`,
+                    onChange: store.setPaging,
+                    onShowSizeChange: store.setPaging,
+                  }}
+                />
+              </ListPanel>
+            )}
+          </ListTableRegion>
         )}
       </>
     );

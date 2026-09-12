@@ -13,7 +13,7 @@ import { CloudServerOutlined, ReloadOutlined } from "@ant-design/icons";
 import Link from "next/link";
 import { RuleSummary, AUTH_KIND_LABELS, MethodTag, SERVICES_COLOR } from "@/components/access-map/rule-meta";
 import Figures from "@/components/figures";
-import { ListPageFrame, ListPanel } from "@/components/list-page-frame";
+import { ListPageFrame, ListPanel, ListTableRegion } from "@/components/list-page-frame";
 import { RibbonBar, RibbonButton } from "@/components/ribbon-bar";
 import StatCard from "@/components/stat-card";
 import { categoryLabel } from "@/components/user-management/access-meta";
@@ -261,27 +261,31 @@ export default function ServicesPage({ capabilities }: { capabilities: AdminCapa
             </Typography.Text>
           )}
         </div>
-        <ListPanel>
-          <Table<ServiceRow>
-            dataSource={rows}
-            rowKey="key"
-            columns={columns}
-            size="middle"
-            pagination={false}
-            scroll={{ x: 1240 }}
-            expandable={{
-              expandedRowRender: (row) => (
-                <div className="flex flex-col gap-1 py-1 text-sm" style={{ color: surfaceColors.textSecondary }}>
-                  <span>{row.description ?? "No description."}</span>
-                  {row.notes && <span><strong>Notes:</strong> {row.notes}</span>}
-                  <span className="text-xs" style={{ color: surfaceColors.textTertiary }}>
-                    Key <code>{row.key}</code> · every response carries <code>x-request-id</code> and <code>Cache-Control: no-store</code>; errors use the <code>{"{ error: { code, message } }"}</code> envelope.
-                  </span>
-                </div>
-              ),
-            }}
-          />
-        </ListPanel>
+        <ListTableRegion>
+          {(y) => (
+            <ListPanel>
+              <Table<ServiceRow>
+                dataSource={rows}
+                rowKey="key"
+                columns={columns}
+                size="middle"
+                pagination={false}
+                scroll={{ x: 1240, y }}
+                expandable={{
+                  expandedRowRender: (row) => (
+                    <div className="flex flex-col gap-1 py-1 text-sm" style={{ color: surfaceColors.textSecondary }}>
+                      <span>{row.description ?? "No description."}</span>
+                      {row.notes && <span><strong>Notes:</strong> {row.notes}</span>}
+                      <span className="text-xs" style={{ color: surfaceColors.textTertiary }}>
+                        Key <code>{row.key}</code> · every response carries <code>x-request-id</code> and <code>Cache-Control: no-store</code>; errors use the <code>{"{ error: { code, message } }"}</code> envelope.
+                      </span>
+                    </div>
+                  ),
+                }}
+              />
+            </ListPanel>
+          )}
+        </ListTableRegion>
       </>
     );
   }

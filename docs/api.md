@@ -14,7 +14,8 @@ server. Every endpoint is also listed, with live usage counters, on the
   401 (sign in again), `invalid_api_key` 401, `forbidden` 403, `csrf_rejected`
   403, `not_found` 404, `conflict` 409, `validation_failed` 422 (`details` =
   flattened zod issues), `rate_limited` 429, `auth_unavailable` 503,
-  `endpoint_disabled` 503, `admin_schema_missing` 503, `database_unavailable`
+  `endpoint_disabled` 503, `admin_schema_missing` 503, `defaults_unavailable`
+  503 (the defaults a consumer pulls are not seeded), `database_unavailable`
   503, `internal_error` 500.
 - **Headers.** Every response: `Cache-Control: no-store` and `x-request-id`
   (echoed from the request when present; quote it when reporting a problem).
@@ -92,8 +93,8 @@ Default rules as seeded; all editable on the Access Map.
 | `admin.constants.get` | `GET /api/v1/admin/constants/[kind]/[id]` | One catalog row with its push state. | `can_read_catalogs` or `can_write_catalogs` |
 | `admin.constants.update` | `PATCH /api/v1/admin/constants/[kind]/[id]` | Partial edit; at least one field. | `can_write_catalogs` |
 | `admin.constants.delete` | `DELETE /api/v1/admin/constants/[kind]/[id]` | Retires a category, account type or market, removes the other kinds. 204. | `can_write_catalogs` |
-| `admin.constants.push` | `POST /api/v1/admin/constants/[kind]/push` | Upserts into the main app database. Body: exactly one of `{ ids }` or `{ scope }`. Answers `{ job }`. | `can_write_catalogs` |
-| `admin.constants.compare` | `POST /api/v1/admin/constants/[kind]/compare` | Rebuilds the catalog's sync ledger against the main app database. No body. Answers `{ job }`. | `can_write_catalogs` |
+| `admin.constants.push` | `POST /api/v1/admin/constants/[kind]/push` | Upserts into the main app database. Body: exactly one of `{ ids }` or `{ scope }`. Answers `{ job }`. 409 for `categories` and `financial_institutions`, which the consumer app pulls. | `can_write_catalogs` |
+| `admin.constants.compare` | `POST /api/v1/admin/constants/[kind]/compare` | Rebuilds the catalog's sync ledger against the main app database. No body. Answers `{ job }`. 409 for `categories` and `financial_institutions`. | `can_write_catalogs` |
 | `admin.constants.jobs.list` | `GET /api/v1/admin/constants/[kind]/jobs?limit=` | Recent compare and push jobs, newest first. `limit` 1..50, default 10. | `can_read_catalogs` or `can_write_catalogs` |
 | `admin.constants.jobs.get` | `GET /api/v1/admin/constants/[kind]/jobs/[jobId]` | One job, for polling. Non-uuid or another catalog's job is a 404. | `can_read_catalogs` or `can_write_catalogs` |
 | `admin.integrations.list` | `GET /api/v1/admin/integrations` | Every integration with schedule, settings, `apiKeyConfigured` (presence only) and `latestRun`, plus `schedulerActive`. | `can_read_integrations` or `can_write_integrations` |
@@ -136,6 +137,15 @@ whole catalog (`total`, `new`, `changed`, `synced`, `unknown`, `retired`,
 `mainOnly`). Each row's `pushState` comes from the sync ledger; a row nothing
 has compared is `unknown`.
 
+**Two kinds are pulled, not pushed.** `categories` and `financial_institutions`
+answer `admin.constants.push` and `admin.constants.compare` with 409 `conflict`
+("… are pulled by the consumer app at tenant creation; there is nothing to
+push"). The consumer app fetches those defaults itself, from the two
+`service.defaults.*` endpoints below, when it creates a tenant. Everything else
+about the two kinds is unchanged: list, get, create, update, delete and the job
+endpoints work exactly as for any other catalog, and the Constants page is now
+their only home. The other eight kinds keep compare and push in full.
+
 **Push and compare semantics.** `admin.constants.push` is the only endpoint
 that writes to the main app database. Its body is exactly one of
 `{ "ids": [...] }` (1..5000 rows), `{ "scope": "pending" }` (everything the
@@ -164,14 +174,41 @@ has run, all of these answer 503 `admin_schema_missing`. Full details in
 Machine-to-machine only, for the consumer app. The caller sends
 `x-api-key: <key>` or `Authorization: ApiKey <key>` (`API_KEYS`,
 comma-separated, 32 characters minimum); no key configured is a 503
-`api_keys_not_configured`. Both paths are listed in `PUBLIC_API_PATHS` in
+`api_keys_not_configured`. Every path is listed in `PUBLIC_API_PATHS` in
 `src/proxy.ts` so the proxy does not refuse them for having no Cognito cookie,
-and neither consults the access map: the key is the credential.
+and none consults the access map: the key is the credential.
 
 | Key | Route | Purpose |
 | --- | --- | --- |
 | `service.quotes.lookup` | `GET /api/v1/service/quotes?symbols=AAPL,SHOP:TSX,BTC/USD` | `{ quotes, missing }`. Newest cached quote per symbol; symbols with nothing from today are fetched from TwelveData, **at most one batch inline** (see below). Up to 100 symbols. |
 | `service.exchange_rates.lookup` | `GET /api/v1/service/exchange-rates?pairs=USD/CAD,EUR/USD` | `{ rates, missing }`. Newest cached rate per pair; fetches the Bank of Canada only when today's series are not cached, in one call for every pair. Up to 100 pairs. |
+| `service.defaults.categories` | `GET /api/v1/service/defaults/categories` | `{ categories: [{ id, name, type, parentId, isDiscretionary }] }`. Every live admin category (`deleted_at IS NULL`), ordered by `created_at` then `id`. No query string. |
+| `service.defaults.financial_institutions` | `GET /api/v1/service/defaults/financial-institutions` | `{ financialInstitutions: [{ id, name, institutionNumber, type }] }`. The whole admin catalog, ordered by `name` then `id`. No query string. |
+
+**The defaults are pulled, not pushed.** The consumer app calls the two
+`defaults` endpoints when it creates a tenant and copies the rows into that
+tenant's own categories and institutions; the admin catalog on the Constants
+page is the single source of them, and neither is written to the main app
+database any more (`admin.constants.push` refuses both kinds with a 409).
+`type` on a category is passed through exactly as stored — `Inflow`, `Outflow`
+or `null` — for the consumer to copy into its own column unchanged, and
+`parentId` refers to another id in the same payload. `created_at` order is not
+a parent-before-child order, so a consumer inserting the tree needs two passes
+or a deferred foreign key.
+
+**Unlike the quote and rate lookups these two fail loudly.** A tenant created
+with no categories is broken, so an empty answer is never sent: an admin schema
+that is not installed is a 503 `admin_schema_missing` and a catalog with zero
+rows a 503 `defaults_unavailable` ("The admin catalog has no categories; seed it
+on the Constants page"). The caller should abandon the tenant creation and
+retry, not carry on.
+
+**The consumer app bounds what it accepts.** It validates the payload before
+copying a single row: at most 5,000 rows per catalog and, on every row, a
+`name` of at most 255 characters (`src/lib/admin-service/client.ts` in the
+consumer app). A catalog past either limit fails tenant creation the same way
+an unreachable admin console would, so keep both catalogs under 5,000 live
+rows and every name to 255 characters or fewer.
 
 **One batch inline, the rest in the background.** A quote lookup spends at
 most `settings.batchSize` credits (one TwelveData call) while the caller waits.

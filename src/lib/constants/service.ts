@@ -14,7 +14,7 @@ import "server-only";
  * A row nobody has compared reads as `unknown`, which is honest and cheap;
  * comparing 300 000 rows to render a page of 50 is neither.
  */
-import { NotFoundError } from "@/lib/api/errors";
+import { ConflictError, NotFoundError } from "@/lib/api/errors";
 import { COMPARE_INLINE_MAX, compareWork } from "./compare";
 import { beginJob, getJob, lastComparedAt, latestJob, listJobs } from "./jobs";
 import { countStates, removeState, setState, stateOfRows } from "./ledger";
@@ -36,6 +36,7 @@ import {
   PUSH_INLINE_MAX,
   hasIntegerId,
   isConstantKind,
+  isPulledKind,
   type ConstantInputOf,
   type ConstantJob,
   type ConstantKind,
@@ -55,6 +56,24 @@ import {
 export function parseKind(value: string): ConstantKind {
   if (!isConstantKind(value)) throw new NotFoundError("That catalog does not exist.");
   return value;
+}
+
+/**
+ * Refuses compare and push for a kind the consumer app pulls instead
+ * (`PULLED_KINDS` in `./types.ts`: categories and financial institutions).
+ *
+ * A 409 rather than a 404: the catalog exists and is still fully editable here,
+ * it is only this one operation that no longer applies to it. Nothing else is
+ * affected — list, read, create, update, delete and the job/ledger reads all
+ * behave exactly as before.
+ */
+function refuseWhenPulled(kind: ConstantKind, operation: "push" | "compare"): void {
+  if (!isPulledKind(kind)) return;
+  const plural = CONSTANT_KIND_LABELS[kind].plural;
+  throw new ConflictError(
+    `${plural} are pulled by the consumer app at tenant creation; there is nothing to ${operation}. ` +
+      "Edit them on the Constants page — that is where they now live.",
+  );
 }
 
 /**
@@ -183,13 +202,21 @@ export async function createWithState<K extends ConstantKind>(
   return withState(row, state);
 }
 
-/** Applies a patch and re-reads the one row's state, which the edit may have changed. */
+/**
+ * Applies a patch and re-reads the one row's state, which the edit may have
+ * changed.
+ *
+ * A pulled kind (categories, financial institutions) skips the comparison
+ * outright: the main database has no copy of these worth comparing against,
+ * so the row reads as `unknown` and the ledger is left untouched.
+ */
 export async function updateWithState<K extends ConstantKind>(
   kind: K,
   id: string,
   patch: ConstantPatchOf<K>,
 ): Promise<ConstantRowOf<K>> {
   const row = await updateConstant(kind, id, patch);
+  if (isPulledKind(kind)) return withState(row, "unknown");
   const state = await compareState(kind, row);
   await setState(kind, row.id, state);
   return withState(row, state);
@@ -204,6 +231,10 @@ export async function updateWithState<K extends ConstantKind>(
  * in the ledger — `changed` until it is pushed. A hard delete leaves nothing
  * to describe, so its ledger entry goes; the copy in the main database will
  * turn up as `main_only` at the next compare.
+ *
+ * Categories is both retirable and pulled: retiring one skips the re-compare
+ * and leaves the ledger exactly as it was, a harmless historical `pushState`,
+ * rather than reading the main database for a kind nothing pushes any more.
  */
 export async function removeConstant(kind: ConstantKind, id: string): Promise<void> {
   await deleteConstant(kind, id);
@@ -216,6 +247,7 @@ export async function removeConstant(kind: ConstantKind, id: string): Promise<vo
     await removeState(kind, id);
     return;
   }
+  if (isPulledKind(kind)) return;
   await setState(kind, row.id, await compareState(kind, row));
 }
 
@@ -230,12 +262,16 @@ export async function removeConstant(kind: ConstantKind, id: string): Promise<vo
  * job left behind. Requests of at most `PUSH_INLINE_MAX` rows are then run
  * inline and answered with the finished job; bigger ones answer `running` at
  * once and are followed through the jobs endpoints.
+ *
+ * A pulled kind (categories, financial institutions) is refused with a 409
+ * before anything is resolved; the consumer app fetches those itself.
  */
 export async function startPush(
   kind: ConstantKind,
   input: PushInput,
   actorUserId: string | null,
 ): Promise<ConstantJob> {
+  refuseWhenPulled(kind, "push");
   const target = await preparePush(kind, input);
   return beginJob({
     kind,
@@ -268,12 +304,15 @@ const PUSH_REQUEST_IDS_KEPT = 100;
 
 /**
  * Starts a compare that rebuilds the kind's ledger. Catalogs of at most
- * `COMPARE_INLINE_MAX` rows finish before the response is sent.
+ * `COMPARE_INLINE_MAX` rows finish before the response is sent. A pulled kind
+ * (categories, financial institutions) is refused with a 409: there is no
+ * main-database copy of those to compare against any more.
  */
 export async function startCompare(
   kind: ConstantKind,
   actorUserId: string | null,
 ): Promise<ConstantJob> {
+  refuseWhenPulled(kind, "compare");
   const total = await countRows(kind);
   return beginJob({
     kind,

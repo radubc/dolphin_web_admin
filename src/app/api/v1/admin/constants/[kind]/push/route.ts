@@ -17,6 +17,12 @@
  *
  * `push` is a static segment, so it is matched before the sibling `[id]`
  * route and no id may be called "push".
+ *
+ * **Not every kind can be pushed.** `categories` and `financial_institutions`
+ * are pulled by the consumer app at tenant creation instead (`PULLED_KINDS` in
+ * `src/lib/constants/types.ts`, served by `/api/v1/service/defaults/*`), so
+ * they answer 409 `conflict`. They are still fully editable through the other
+ * constants endpoints.
  */
 import { adminHandler } from "@/lib/admin-access/authorize";
 import { ok } from "@/lib/api/response";

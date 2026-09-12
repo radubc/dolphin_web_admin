@@ -15,7 +15,11 @@
 #     `fairsums/<env>/admin/...` secrets.
 #   * A regional AWS WAF web ACL attached to that shared load balancer:
 #       rule 0  block every request for the admin host name unless it comes
-#               from an address you listed in `AdminAllowedCidrs`;
+#               from an address you listed in `AdminAllowedCidrs`, except
+#               requests under `/api/v1/service/` — those machine endpoints
+#               are already key-protected and rate limited (see below) and
+#               the consumer app's ECS task calls them from an address that
+#               is not, and should not need to be, on that allowlist;
 #       rule 1  rate limit the admin sign-in paths to 100 requests per 5
 #               minutes per source address;
 #       rule 2  the AWS managed Core rule set, in COUNT mode, so you can see
@@ -126,7 +130,11 @@ Parameters:
       blocked (the firewall rule is not created at all); that is the safe
       default for a first deployment, not a good permanent setting. Fill it in
       as soon as you know your address. If your home address changes, the
-      console stops answering until you update this and redeploy.
+      console stops answering until you update this and redeploy. This
+      allowlist gates the console UI only: requests under
+      `/api/v1/service/` (the machine endpoints the consumer app calls at
+      tenant creation) are exempt from it, because they carry their own API
+      key and are already rate limited.
 
   AdminCustomHost:
     Type: String
@@ -136,8 +144,10 @@ Parameters:
       empty if none. When set, the firewall rule that restricts the admin
       host name to known addresses (BlockAdminHostFromUnknownAddresses)
       matches this host in addition to the ECS Express-assigned one, so the
-      console stays protected regardless of which host name a request arrives
-      on. This template does not create the certificate, the load balancer
+      console UI stays protected regardless of which host name a request
+      arrives on (requests under `/api/v1/service/` are exempt from this
+      rule on either host name; see AdminAllowedCidrs). This template does
+      not create the certificate, the load balancer
       listener rule's extra host condition, or the DNS record for this
       domain — those are handled outside this stack; see the deploy
       workflow's "Keep the custom domain on the Express listener rule" step.
@@ -561,6 +571,39 @@ Resources:
                       Statement:
                         IPSetReferenceStatement:
                           Arn: !GetAtt AllowedIpSet.Arn
+                  # Machine endpoints under /api/v1/service/ (defaults for
+                  # tenant creation, quotes, exchange rates) are called by the
+                  # consumer web app's ECS task from its own egress address,
+                  # not from a human browser, so they do not belong behind
+                  # AdminAllowedCidrs -- that allowlist is for people opening
+                  # the console UI. `serviceHandler` already requires an API
+                  # key on these paths and rate limits per key and per IP
+                  # (see src/proxy.ts PUBLIC_API_PATHS), the same protection
+                  # they have on the consumer app's own Express host, which
+                  # sits outside this WAF. This NotStatement is the last
+                  # statement in the AndStatement above: when the path starts
+                  # with the prefix it evaluates to false, so the AND as a
+                  # whole is false and rule 0 never blocks the request, from
+                  # any source address, on the admin host.
+                  # Residual risk: once past the load balancer, this path
+                  # prefix is reachable from anywhere -- defended by the API
+                  # key and the existing rate limits, not by an IP allowlist.
+                  # URL_DECODE then NORMALIZE_PATH so a request cannot escape
+                  # the prefix match with an encoded or dotted-segment path
+                  # (e.g. /api/v1/service/%2e%2e/admin/...) and land on an
+                  # admin-only route with the allowlist skipped.
+                  - NotStatement:
+                      Statement:
+                        ByteMatchStatement:
+                          FieldToMatch:
+                            UriPath: {}
+                          PositionalConstraint: STARTS_WITH
+                          SearchString: /api/v1/service/
+                          TextTransformations:
+                            - Priority: 0
+                              Type: URL_DECODE
+                            - Priority: 1
+                              Type: NORMALIZE_PATH
             VisibilityConfig:
               SampledRequestsEnabled: true
               CloudWatchMetricsEnabled: true

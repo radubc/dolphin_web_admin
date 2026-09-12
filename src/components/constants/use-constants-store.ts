@@ -225,7 +225,10 @@ export function useConstantsStore(initialKind: ConstantKind): ConstantsStore {
     (next: ConstantKind) => {
       if (next === kind) return;
       // A selection, a search, a page and a state segment all mean something
-      // about the catalog that was on screen; none of them carries over.
+      // about the catalog that was on screen; none of them carries over. This
+      // also keeps a pulled kind (categories, financial institutions) from
+      // ever landing on a push-state segment the toolbar no longer offers it:
+      // the filter always comes back to "all" on the way in.
       setKindState(next);
       setList(null);
       setPage(1);

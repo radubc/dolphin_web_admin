@@ -11,6 +11,7 @@ import type { ColumnsType } from "antd/es/table";
 import { EditOutlined } from "@ant-design/icons";
 import type { AdminRole, AdminUser } from "@/lib/admin-access/types";
 import { formatDate, formatDateTimeOrDash, formatRelativeTimeOrNever } from "@/lib/format";
+import { useListTableBodyHeight } from "@/lib/hooks/use-table-body-height";
 import { accentBlue, accentTints, surfaceColors, withAlpha } from "@/lib/theme/colors";
 import { initialsOf, RoleTag, StatusTag, SUPER_ADMIN_COLOR, SuperAdminTag } from "./access-meta";
 
@@ -34,6 +35,9 @@ export default function UsersTable({
   onSelectionChange,
   onEdit,
 }: UsersTableProps) {
+  // Set inside a `ListTableRegion`: the rows scroll, the header and pager stay.
+  const bodyHeight = useListTableBodyHeight();
+
   const columns: ColumnsType<AdminUser> = [
     {
       title: "User",
@@ -170,7 +174,7 @@ export default function UsersTable({
       rowKey={(user) => user.id}
       columns={columns}
       size="middle"
-      scroll={{ x: TABLE_MIN_WIDTH }}
+      scroll={{ x: TABLE_MIN_WIDTH, y: bodyHeight }}
       pagination={
         rows.length > 25
           ? { pageSize: 25, showSizeChanger: true, size: "small", hideOnSinglePage: true }

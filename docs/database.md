@@ -77,22 +77,28 @@ security. Treat it as read-only from this app until a feature explicitly needs
 a write, and never run a migration against it from here.
 
 **The one deliberate write path** is the Constants push: `pushWork` in
-`src/lib/constants/push.ts` upserts ten reference tables **by id**, in batches
+`src/lib/constants/push.ts` upserts eight reference tables **by id**, in batches
 of 1000 with one transaction each —
-`countries`, `currencies`, `financial_institutions`, `categories`,
-`account_base_types`, `account_types`, plus the market-data catalogs
-`preload_cryptocurrencies`, `preload_etfs`, `preload_stocks` and `markets` —
-from the admin catalogs the console edits. It never deletes a row there,
-because tenant data (accounts, transactions, budgets, loans, portfolios)
-references these ids; a category, account type or market that is retired in the
-admin database travels across as a `deleted_at` timestamp, not as a delete.
-The three `preload_*` tables key on an integer sequence and the push keeps the
-admin id, so each group that inserted also advances that table's sequence past
-what it wrote. None of the ten tables has row-level security.
+`countries`, `currencies`, `account_base_types`, `account_types`, plus the
+market-data catalogs `preload_cryptocurrencies`, `preload_etfs`,
+`preload_stocks` and `markets` — from the admin catalogs the console edits.
+`categories` and `financial_institutions` are **no longer written** (owner
+decision, 2026-09-11): the consumer app pulls those defaults over HTTP when it
+creates a tenant, from the two `service.defaults.*` endpoints, so a push or
+compare of either kind is refused with a 409. The push code for them is kept,
+not deleted, and nothing already in those two tables is touched.
+
+A push never deletes a row over there, because tenant data (accounts,
+transactions, budgets, loans, portfolios) references these ids; an account type
+or a market that is retired in the admin database travels across as a
+`deleted_at` timestamp, not as a delete. The three `preload_*` tables key on an
+integer sequence and the push keeps the admin id, so each group that inserted
+also advances that table's sequence past what it wrote. None of the ten
+reference tables has row-level security.
 
 The main database is also **read** in bulk by the Constants compare job, which
-walks each of those ten tables by primary key to rebuild the sync ledger. See
-[constants.md](./constants.md).
+walks each of those eight tables by primary key to rebuild the sync ledger. The
+two pulled kinds are never compared. See [constants.md](./constants.md).
 
 ## Mock or real
 

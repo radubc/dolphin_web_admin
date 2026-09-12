@@ -18,6 +18,11 @@
  * many rows the current query matches out of the catalog, and when the catalog
  * was last compared, since every push state on screen is only as true as that
  * compare.
+ *
+ * `categories` and `financial_institutions` are pulled by the consumer app
+ * rather than pushed from here (`isPulledKind`), so this bar drops the four
+ * push/compare controls and the "Last compared" read-out for them; Add and
+ * Refresh stay exactly as they are for every kind.
  */
 
 import { Popconfirm } from "antd";
@@ -31,7 +36,7 @@ import {
   ThunderboltOutlined,
 } from "@ant-design/icons";
 import { RibbonBar, RibbonButton, RibbonDivider } from "@/components/ribbon-bar";
-import type { ConstantKind } from "@/lib/constants/types";
+import { isPulledKind, type ConstantKind } from "@/lib/constants/types";
 import { formatRelativeTime } from "@/lib/format";
 import { surfaceColors } from "@/lib/theme/colors";
 import { countOfKind, countOfRows, KIND_META } from "./constants-meta";
@@ -80,6 +85,10 @@ export default function ConstantsRibbon({
 }: ConstantsRibbonProps) {
   const meta = KIND_META[kind];
   const filtered = filteredCount !== totalCount;
+  // Pulled by the consumer app instead of pushed from here: compare and push
+  // no longer apply, so neither the buttons nor "Last compared" belong on
+  // this kind's ribbon.
+  const pulled = isPulledKind(kind);
 
   const readout = (
     <span
@@ -94,10 +103,14 @@ export default function ConstantsRibbon({
       {filtered
         ? `${filteredCount.toLocaleString()} of ${countOfKind(totalCount, kind)}`
         : countOfKind(totalCount, kind)}
-      {" · "}
-      {lastComparedAt === null
-        ? "Never compared"
-        : `Last compared ${formatRelativeTime(lastComparedAt).toLowerCase()}`}
+      {!pulled && (
+        <>
+          {" · "}
+          {lastComparedAt === null
+            ? "Never compared"
+            : `Last compared ${formatRelativeTime(lastComparedAt).toLowerCase()}`}
+        </>
+      )}
     </span>
   );
 
@@ -113,77 +126,81 @@ export default function ConstantsRibbon({
             tooltip={`Add a ${meta.singular} to the admin catalog`}
           />
 
-          <Popconfirm
-            title="Push the ticked rows"
-            description={`Upsert ${countOfRows(selectedCount)} into the main app database. Nothing is deleted there.`}
-            okText="Push"
-            cancelText="Cancel"
-            disabled={busy || selectedCount === 0}
-            onConfirm={onPushSelected}
-          >
-            <span className="inline-flex">
-              <RibbonButton
-                label="Push Selected"
-                icon={busy ? <LoadingOutlined /> : <SelectOutlined />}
+          {!pulled && (
+            <>
+              <Popconfirm
+                title="Push the ticked rows"
+                description={`Upsert ${countOfRows(selectedCount)} into the main app database. Nothing is deleted there.`}
+                okText="Push"
+                cancelText="Cancel"
                 disabled={busy || selectedCount === 0}
-                tooltip={
-                  selectedCount === 0
-                    ? "Tick the rows to push"
-                    : `Push ${countOfRows(selectedCount)} to the main app`
-                }
-              />
-            </span>
-          </Popconfirm>
+                onConfirm={onPushSelected}
+              >
+                <span className="inline-flex">
+                  <RibbonButton
+                    label="Push Selected"
+                    icon={busy ? <LoadingOutlined /> : <SelectOutlined />}
+                    disabled={busy || selectedCount === 0}
+                    tooltip={
+                      selectedCount === 0
+                        ? "Tick the rows to push"
+                        : `Push ${countOfRows(selectedCount)} to the main app`
+                    }
+                  />
+                </span>
+              </Popconfirm>
 
-          <Popconfirm
-            title="Push everything pending"
-            description={`Upsert the ${countOfRows(pendingCount)} that are new or changed into the main app database. Nothing is deleted there.`}
-            okText="Push pending"
-            cancelText="Cancel"
-            disabled={busy || pendingCount === 0}
-            onConfirm={onPushPending}
-          >
-            <span className="inline-flex">
-              <RibbonButton
-                label="Push Pending"
-                icon={busy ? <LoadingOutlined /> : <ThunderboltOutlined />}
+              <Popconfirm
+                title="Push everything pending"
+                description={`Upsert the ${countOfRows(pendingCount)} that are new or changed into the main app database. Nothing is deleted there.`}
+                okText="Push pending"
+                cancelText="Cancel"
                 disabled={busy || pendingCount === 0}
-                tooltip={
-                  pendingCount === 0
-                    ? "Nothing is new or changed; compare again if you expected some"
-                    : `Push the ${countOfRows(pendingCount)} that are new or changed`
-                }
-              />
-            </span>
-          </Popconfirm>
+                onConfirm={onPushPending}
+              >
+                <span className="inline-flex">
+                  <RibbonButton
+                    label="Push Pending"
+                    icon={busy ? <LoadingOutlined /> : <ThunderboltOutlined />}
+                    disabled={busy || pendingCount === 0}
+                    tooltip={
+                      pendingCount === 0
+                        ? "Nothing is new or changed; compare again if you expected some"
+                        : `Push the ${countOfRows(pendingCount)} that are new or changed`
+                    }
+                  />
+                </span>
+              </Popconfirm>
 
-          <Popconfirm
-            title={`Push every ${meta.singular}`}
-            description={`Upsert all ${countOfKind(totalCount, kind)} into the main app database, filters ignored. Nothing is deleted there.`}
-            okText="Push all"
-            cancelText="Cancel"
-            disabled={busy || totalCount === 0}
-            onConfirm={onPushAll}
-          >
-            <span className="inline-flex">
-              <RibbonButton
-                label="Push All"
-                icon={busy ? <LoadingOutlined /> : <CloudUploadOutlined />}
+              <Popconfirm
+                title={`Push every ${meta.singular}`}
+                description={`Upsert all ${countOfKind(totalCount, kind)} into the main app database, filters ignored. Nothing is deleted there.`}
+                okText="Push all"
+                cancelText="Cancel"
                 disabled={busy || totalCount === 0}
-                tooltip={`Push the whole ${meta.singular} catalog to the main app`}
+                onConfirm={onPushAll}
+              >
+                <span className="inline-flex">
+                  <RibbonButton
+                    label="Push All"
+                    icon={busy ? <LoadingOutlined /> : <CloudUploadOutlined />}
+                    disabled={busy || totalCount === 0}
+                    tooltip={`Push the whole ${meta.singular} catalog to the main app`}
+                  />
+                </span>
+              </Popconfirm>
+
+              <RibbonDivider />
+
+              <RibbonButton
+                label="Compare"
+                icon={busy ? <LoadingOutlined /> : <DiffOutlined />}
+                onClick={onCompare}
+                disabled={busy || totalCount === 0}
+                tooltip="Walk the catalog against the main app and rebuild every row's push state"
               />
-            </span>
-          </Popconfirm>
-
-          <RibbonDivider />
-
-          <RibbonButton
-            label="Compare"
-            icon={busy ? <LoadingOutlined /> : <DiffOutlined />}
-            onClick={onCompare}
-            disabled={busy || totalCount === 0}
-            tooltip="Walk the catalog against the main app and rebuild every row's push state"
-          />
+            </>
+          )}
         </>
       )}
 

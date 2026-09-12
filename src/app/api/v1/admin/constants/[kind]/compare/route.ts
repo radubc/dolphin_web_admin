@@ -13,6 +13,11 @@
  * ones come back `running` and are followed through `GET …/jobs/[jobId]`.
  * Only one compare or push runs per catalog at a time — a second request
  * while one is in flight is a 409 naming the job that holds it.
+ *
+ * `categories` and `financial_institutions` cannot be compared: the consumer
+ * app pulls them at tenant creation rather than holding a pushed copy
+ * (`PULLED_KINDS` in `src/lib/constants/types.ts`), so those two answer 409
+ * `conflict`. Everything else about them still works.
  */
 import { adminHandler } from "@/lib/admin-access/authorize";
 import { ok } from "@/lib/api/response";

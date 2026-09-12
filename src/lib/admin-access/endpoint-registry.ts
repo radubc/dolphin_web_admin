@@ -661,6 +661,30 @@ export const ENDPOINT_REGISTRY: readonly EndpointRegistryEntry[] = [
     rateLimit: "service",
     defaults: none,
   },
+  {
+    key: "service.defaults.categories",
+    method: "GET",
+    path: "/api/v1/service/defaults/categories",
+    name: "Default categories",
+    description:
+      "Machine clients (API_KEYS): every live default category, for the consumer app to copy into a tenant it is creating. A missing or empty catalog is a 503, never an empty list.",
+    category: "catalogs",
+    authKind: "service",
+    rateLimit: "service",
+    defaults: none,
+  },
+  {
+    key: "service.defaults.financial_institutions",
+    method: "GET",
+    path: "/api/v1/service/defaults/financial-institutions",
+    name: "Default financial institutions",
+    description:
+      "Machine clients (API_KEYS): the default financial institutions, for the consumer app to copy into a tenant it is creating. A missing or empty catalog is a 503, never an empty list.",
+    category: "catalogs",
+    authKind: "service",
+    rateLimit: "service",
+    defaults: none,
+  },
 ] as const;
 
 export type EndpointKey = (typeof ENDPOINT_REGISTRY)[number]["key"];

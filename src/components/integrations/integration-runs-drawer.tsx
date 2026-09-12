@@ -8,12 +8,18 @@
  * polling. The live run, if there is one, is followed by the page itself and
  * drawn as the progress strip; this drawer only reports what the server has on
  * record, so a row here is a settled fact.
+ *
+ * The drawer body is a fixed-height column and the table sits in a
+ * `ListTableRegion`, so the rows scroll under their own header rather than
+ * taking the note above them off the screen — the same rule the list pages
+ * follow.
  */
 
 import { useEffect, useState } from "react";
 import { Alert, Button, Drawer, Empty, Spin, Table, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { HistoryOutlined, ReloadOutlined } from "@ant-design/icons";
+import { ListTableRegion } from "@/components/list-page-frame";
 import { ENTRY_DRAWER_WIDTH } from "@/components/shell/definitions";
 import { integrationsApi } from "@/lib/integrations/client";
 import type { Integration, IntegrationRun } from "@/lib/integrations/types";
@@ -158,15 +164,21 @@ export default function IntegrationRunsDrawer({
     body = (
       <>
         {error !== null && <Alert type="warning" showIcon closable title={error} />}
-        <Table<IntegrationRun>
-          dataSource={runs ?? []}
-          rowKey="id"
-          columns={columns}
-          size="small"
-          loading={loading}
-          pagination={false}
-          scroll={{ x: 710 }}
-        />
+        {/* No `ListPanel` around this table — it sits directly in the drawer
+            body — so there is no panel border for the region to reserve. */}
+        <ListTableRegion panelBorder={false}>
+          {(y) => (
+            <Table<IntegrationRun>
+              dataSource={runs ?? []}
+              rowKey="id"
+              columns={columns}
+              size="small"
+              loading={loading}
+              pagination={false}
+              scroll={{ x: 710, y }}
+            />
+          )}
+        </ListTableRegion>
       </>
     );
   }
@@ -201,9 +213,12 @@ export default function IntegrationRunsDrawer({
           Refresh
         </Button>
       }
-      styles={{ body: { background: surfaceColors.page } }}
+      // A column, so the table region below can be given a definite height;
+      // the body keeps its own `overflow: auto` for the states that are taller
+      // than it — a long error, a narrow window.
+      styles={{ body: { background: surfaceColors.page, display: "flex", flexDirection: "column" } }}
     >
-      <div className="flex flex-col gap-3">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 [&>*]:shrink-0">
         <Typography.Text type="secondary" className="text-xs">
           The {RUNS_LIMIT} most recent runs, newest first. Every batch commits on its own, so an
           interrupted run has lost nothing — it only has to be started again.

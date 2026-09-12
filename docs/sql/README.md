@@ -20,6 +20,7 @@ result afterwards.
 | 8 | [`008_integrations.sql`](./008_integrations.sql) | The Integrations feature: `admin_integrations` (three seeded providers), `admin_integration_runs`, the quote watch list and cache (`admin_quote_symbols`, `admin_quotes`) and the currency pair watch list and cache (`admin_currency_pairs`, `admin_exchange_rates`), plus two actions, the `integrations` page and the fifteen new endpoints. Also widens `admin_endpoints.auth_kind` to allow `'service'` (API-key machine clients). | Once, after step 7. Re-running is safe. |
 | 9 | [`009_markets_and_alpha_vantage.sql`](./009_markets_and_alpha_vantage.sql) | Two more integrations: `iso_mic_markets` (the ISO 10383 MIC register, which fills the empty `markets` catalog) and `alpha_vantage_quotes` (the quote fallback for TSX and other listings TwelveData's free plan refuses). Widens `admin_integrations.provider` to allow `'iso20022'` and `'alpha_vantage'`, and adds the nullable `admin_quote_symbols.provider` that routes each symbol to the provider which last served it. Creates no tables and registers no new endpoints — the integration routes are keyed by `[key]`. | Once, after step 8. Re-running is safe. |
 | 10 | [`010_customers.sql`](./010_customers.sql) | The Customers feature: `admin_customer_invites` (the record of every invitation to the consumer app, with a partial unique index allowing only one open invitation per address), the `can_invite_users` action, the `customers` page and the `invite_customer` quick action, and the six Customers endpoints. Also widens the audit trail's `target_type` check so an invitation can be audited (`'customer_invite'`). | Once, after step 9. Re-running is safe. |
+| 11 | [`011_service_defaults_endpoints.sql`](./011_service_defaults_endpoints.sql) | Registers the two machine endpoints the consumer app pulls its defaults from (`service.defaults.categories`, `service.defaults.financial_institutions`). Creates no tables and grants no actions — an API-key endpoint consults no rule; this only puts the two on the Services page with usage counters, and both work before it has run. Both catalogs (categories and financial institutions) must already be seeded in the admin database before this: an empty one answers 503 `defaults_unavailable` and the consumer app refuses to create a tenant. | Once, after step 10. Re-running is safe. |
 
 Until step 7 has run, the Constants list, compare, push and job endpoints
 answer 503 `admin_schema_missing`: the app does not fake a ledger it does not
@@ -83,7 +84,7 @@ before the SQL has run).
 
 ## Adding a table or column later
 
-1. Write the change as a new numbered file here (`011_….sql`), transactional,
+1. Write the change as a new numbered file here (`012_….sql`), transactional,
    with comments saying what and why.
 2. Run it in pgAdmin.
 3. `npx prisma db pull --config prisma-admin.config.ts`, then

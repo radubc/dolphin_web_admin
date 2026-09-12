@@ -15,7 +15,7 @@ import { Alert, Button, Segmented, Spin, Table, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { ApartmentOutlined, CloudServerOutlined, EditOutlined, PlusCircleOutlined, ReloadOutlined, ThunderboltOutlined } from "@ant-design/icons";
 import Figures from "@/components/figures";
-import { ListPageFrame, ListPanel } from "@/components/list-page-frame";
+import { ListPageFrame, ListPanel, ListTableRegion } from "@/components/list-page-frame";
 import { RibbonBar, RibbonButton } from "@/components/ribbon-bar";
 import { presentationFor } from "@/components/shell/definitions";
 import StatCard from "@/components/stat-card";
@@ -267,13 +267,17 @@ export default function AccessMapPage({ capabilities }: { capabilities: AdminCap
     body = (
       <>
         {store.error !== null && <Alert type="warning" showIcon closable title={store.error} />}
-        <ListPanel>
-          {view === "pages" ? (
-            <Table<PageRule> dataSource={store.pages} rowKey="key" columns={pageColumns} size="middle" pagination={false} scroll={{ x: 960 }} />
-          ) : (
-            <Table<EndpointRule> dataSource={store.endpoints} rowKey="key" columns={endpointColumns} size="middle" pagination={false} scroll={{ x: 1040 }} />
+        <ListTableRegion>
+          {(y) => (
+            <ListPanel>
+              {view === "pages" ? (
+                <Table<PageRule> dataSource={store.pages} rowKey="key" columns={pageColumns} size="middle" pagination={false} scroll={{ x: 960, y }} />
+              ) : (
+                <Table<EndpointRule> dataSource={store.endpoints} rowKey="key" columns={endpointColumns} size="middle" pagination={false} scroll={{ x: 1040, y }} />
+              )}
+            </ListPanel>
           )}
-        </ListPanel>
+        </ListTableRegion>
       </>
     );
   }

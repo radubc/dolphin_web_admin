@@ -19,10 +19,10 @@
  * Public in `PUBLIC_API_PATHS`: signing out must work even when the id token
  * has already expired.
  */
-import { NextResponse, type NextRequest } from "next/server";
+import type { NextRequest, NextResponse } from "next/server";
 import { ApiError } from "@/lib/api/errors";
 import { apiHandler } from "@/lib/api/handler";
-import { noContent } from "@/lib/api/response";
+import { noContent, redirectRelative } from "@/lib/api/response";
 import { revokeRefreshToken } from "@/lib/auth/cognito";
 import { REFRESH_TOKEN_COOKIE } from "@/lib/auth/cookies";
 import { clearSession } from "@/lib/auth/session";
@@ -82,8 +82,8 @@ async function endSession(request: NextRequest): Promise<void> {
 }
 
 /** 303 so the browser follows up with a GET, whatever the method used here. */
-function redirectTo(request: NextRequest, path: string): NextResponse {
-  return NextResponse.redirect(new URL(path, request.nextUrl.origin), 303);
+function redirectTo(path: string): NextResponse {
+  return redirectRelative(path, 303);
 }
 
 /**
@@ -92,12 +92,9 @@ function redirectTo(request: NextRequest, path: string): NextResponse {
  * a cross-site caller gets sent to "/" (navigations) or a 403 (fetch), and no
  * cookie is touched.
  */
-function rejectCrossSite(
-  request: NextRequest,
-  navigation: boolean,
-): NextResponse {
+function rejectCrossSite(navigation: boolean): NextResponse {
   if (navigation) {
-    return redirectTo(request, "/");
+    return redirectTo("/");
   }
   throw new ApiError(403, "csrf_rejected", "Cross-site request rejected.");
 }
@@ -110,10 +107,10 @@ function rejectCrossSite(
  */
 export const GET = apiHandler(async (request: NextRequest) => {
   if (!isSameSite(request)) {
-    return rejectCrossSite(request, true);
+    return rejectCrossSite(true);
   }
   await endSession(request);
-  return redirectTo(request, LOGIN_PATH);
+  return redirectTo(LOGIN_PATH);
 }, GET_OPTIONS);
 
 /**
@@ -125,8 +122,8 @@ export const GET = apiHandler(async (request: NextRequest) => {
 export const POST = apiHandler(async (request: NextRequest) => {
   const navigation = isNavigation(request);
   if (!isSameSite(request)) {
-    return rejectCrossSite(request, navigation);
+    return rejectCrossSite(navigation);
   }
   await endSession(request);
-  return navigation ? redirectTo(request, LOGIN_PATH) : noContent();
+  return navigation ? redirectTo(LOGIN_PATH) : noContent();
 }, POST_OPTIONS);

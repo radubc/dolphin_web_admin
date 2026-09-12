@@ -22,7 +22,7 @@ import type { ColumnsType } from "antd/es/table";
 import { DeleteOutlined, LoadingOutlined, PlusOutlined, ReloadOutlined, SwapOutlined } from "@ant-design/icons";
 import { ListEmpty, ListNoResults } from "@/components/empty-state";
 import Figures from "@/components/figures";
-import { ListPageFrame, ListPanel } from "@/components/list-page-frame";
+import { ListPageFrame, ListPanel, ListTableRegion } from "@/components/list-page-frame";
 import { RibbonBar, RibbonButton, RibbonDivider } from "@/components/ribbon-bar";
 import StatCard from "@/components/stat-card";
 import { canDo, type AdminCapabilities } from "@/lib/admin-access/types";
@@ -400,27 +400,31 @@ export default function CurrencyPairsView({
         {store.total === 0 ? (
           <ListNoResults what="currency pairs" onClearFilters={store.clearFilters} />
         ) : (
-          <ListPanel>
-            <Table<CurrencyPair>
-              dataSource={items}
-              rowKey="id"
-              columns={columns}
-              size="middle"
-              loading={store.refreshing}
-              scroll={{ x: 1050 }}
-              pagination={{
-                current: store.page,
-                pageSize: store.pageSize,
-                total: store.total,
-                showSizeChanger: true,
-                pageSizeOptions: [...WATCH_PAGE_SIZE_OPTIONS],
-                showTotal: (total, range) =>
-                  `${range[0].toLocaleString()}–${range[1].toLocaleString()} of ${total.toLocaleString()}`,
-                onChange: store.setPaging,
-                onShowSizeChange: store.setPaging,
-              }}
-            />
-          </ListPanel>
+          <ListTableRegion>
+            {(y) => (
+              <ListPanel>
+                <Table<CurrencyPair>
+                  dataSource={items}
+                  rowKey="id"
+                  columns={columns}
+                  size="middle"
+                  loading={store.refreshing}
+                  scroll={{ x: 1050, y }}
+                  pagination={{
+                    current: store.page,
+                    pageSize: store.pageSize,
+                    total: store.total,
+                    showSizeChanger: true,
+                    pageSizeOptions: [...WATCH_PAGE_SIZE_OPTIONS],
+                    showTotal: (total, range) =>
+                      `${range[0].toLocaleString()}–${range[1].toLocaleString()} of ${total.toLocaleString()}`,
+                    onChange: store.setPaging,
+                    onShowSizeChange: store.setPaging,
+                  }}
+                />
+              </ListPanel>
+            )}
+          </ListTableRegion>
         )}
       </>
     );

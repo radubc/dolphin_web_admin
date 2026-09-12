@@ -41,12 +41,16 @@ const PUBLIC_API_PATHS: ReadonlySet<string> = new Set([
   // have to work precisely when the id token has expired.
   REFRESH_PATH,
   LOGOUT_PATH,
-  // The two machine endpoints: they authenticate with an `API_KEYS` entry sent
-  // as `x-api-key`, which this proxy does not recognise as a credential. They
-  // are "public" only in the sense that they get past here; `serviceHandler`
+  // The machine endpoints: they authenticate with an `API_KEYS` entry sent as
+  // `x-api-key`, which this proxy does not recognise as a credential. They are
+  // "public" only in the sense that they get past here; `serviceHandler`
   // refuses every request that does not carry a valid key.
   `${API_PREFIX}/v1/service/quotes`,
   `${API_PREFIX}/v1/service/exchange-rates`,
+  // The defaults the consumer app pulls when it creates a tenant (categories
+  // and financial institutions are no longer pushed to the main database).
+  `${API_PREFIX}/v1/service/defaults/categories`,
+  `${API_PREFIX}/v1/service/defaults/financial-institutions`,
 ]);
 
 /** Same character set `src/lib/api/handler.ts` accepts for an inbound request id. */

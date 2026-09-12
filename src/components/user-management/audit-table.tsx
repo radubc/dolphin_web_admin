@@ -9,6 +9,7 @@ import { Button, Table, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { AuditEvent } from "@/lib/admin-access/types";
 import { formatDateTime, formatRelativeTime, humaniseKey } from "@/lib/format";
+import { useListTableBodyHeight } from "@/lib/hooks/use-table-body-height";
 import { surfaceColors } from "@/lib/theme/colors";
 import { AUDIT_ACTION_LABELS, auditTone } from "./access-meta";
 
@@ -38,6 +39,10 @@ function describeMetadata(metadata: Record<string, unknown>): string[] {
 }
 
 export default function AuditTable({ rows, hasMore, loadingMore, onLoadMore }: AuditTableProps) {
+  // Set inside a `ListTableRegion`: the rows scroll, the header and the
+  // "load older" strip below stay.
+  const bodyHeight = useListTableBodyHeight();
+
   const columns: ColumnsType<AuditEvent> = [
     {
       title: "When",
@@ -112,11 +117,14 @@ export default function AuditTable({ rows, hasMore, loadingMore, onLoadMore }: A
         rowKey={(event) => event.id}
         columns={columns}
         size="middle"
-        scroll={{ x: TABLE_MIN_WIDTH }}
+        scroll={{ x: TABLE_MIN_WIDTH, y: bodyHeight }}
         pagination={false}
       />
       {hasMore && (
         <div
+          // Reserved, not scrolled: the region measures it and takes it off the
+          // body height, so the button stays under the rows.
+          data-list-reserve
           className="flex justify-center py-3"
           style={{ borderTop: `1px solid ${surfaceColors.separator}` }}
         >

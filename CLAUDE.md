@@ -23,9 +23,10 @@ Internal admin console for the Penny Squeeze personal-finance product: operator 
 - `src/lib/auth/` — Cognito sign-in, cookie session (`psa_` prefix), refresh
 - `src/lib/admin-access/` — access control: `types.ts` (model + `evaluateRule`), `repository.ts` (storage seam: `prisma-repository.ts` by default, `mock.ts` with `ADMIN_ACCESS_STORE=mock`), `authorize.ts` (`requireAdminSession`, `requirePageAccess`, `adminHandler`), `page-registry.ts` + `endpoint-registry.ts` (what the build ships; rules live in the DB), `client.ts` + stores (browser side)
 - `src/app/api/v1/admin/` — users, roles, actions, audit, pages, endpoints, usage, me, constants, integrations, customers; every handler goes through `adminHandler(fn, { endpoint })`
-- `src/app/api/v1/service/` — machine endpoints for the consumer app (`quotes`, `exchange-rates`), exported through `serviceHandler` and authenticated with `API_KEYS`; each must be listed in `PUBLIC_API_PATHS` in `src/proxy.ts`
+- `src/app/api/v1/service/` — machine endpoints for the consumer app (`quotes`, `exchange-rates`, `defaults/categories`, `defaults/financial-institutions`), exported through `serviceHandler` and authenticated with `API_KEYS`; each must be listed in `PUBLIC_API_PATHS` in `src/proxy.ts`
 - `src/lib/integrations/` — external providers: `types.ts` (wire model), `providers/` (TwelveData and Bank of Canada fetch + parse, no Prisma), `jobs/` (what each run does: catalogs, quotes, rates), `runs.ts` (in-process run records, mirrors `constants/jobs.ts`), `lookup.ts` (the on-demand paths behind the service endpoints), `schedule.ts` (next-run math) + `scheduler.ts` (the per-minute ticker started from `src/instrumentation.ts`), `service.ts` / `repository.ts` / `schemas.ts`, `client.ts` (browser side)
 - `src/components/user-management/`, `access-map/`, `services/`, `constants/`, `integrations/`, `customers/` — the built pages
+- `src/lib/constants/` — the ten reference catalogs the Constants page edits (`types.ts` wire model, `repository.ts`, `service.ts`, the sync `ledger.ts` and the `compare`/`push` jobs). Eight kinds are **pushed** into the main database; `categories` and `financial_institutions` are **pulled** by the consumer app at tenant creation (`PULLED_KINDS`, `defaults.ts`, the two `service/defaults/*` endpoints) and their push/compare answer 409
 - `src/lib/customers/` — the consumer app's users read from the main database (read-only), their status in the **customer** Cognito pool, and invitations (`AdminCreateUser` on that pool, recorded in `admin_customer_invites`); `config.ts` reads the `CUSTOMER_COGNITO_*` variables and never falls back to the admin pool
 - `docs/sql/` — numbered SQL the owner runs in pgAdmin against the admin DB; `docs/*.md` — guides for people
 - `src/components/shell/` — nav bar, side rail, quick actions; tabs and actions are listed in `definitions.ts`, routes in `routes.ts`
@@ -58,7 +59,7 @@ Names only; values live in `.env`, which is never read or quoted by an agent.
 Mirrors the consumer app: `develop` (working branch) → `stage` → `production`. `main` is the GitHub default and PR target. Never push to `stage` or `production` directly.
 
 ## Working rules
-Detailed rules live in `.claude/rules/` (orchestration, Next.js, database, api, auth) and load automatically. The non-negotiables:
+Detailed rules live in `.claude/rules/` (orchestration, Next.js, database, api, auth, ui) and load automatically. The non-negotiables:
 1. Never remove or disable existing functionality without the owner's explicit approval.
 2. Read `node_modules/next/dist/docs/` before writing Next.js code; this version has breaking changes.
 3. Never read `.env`. Never hand-edit generated Prisma code. Never run destructive DB commands. Never migrate either database from this repo: schema changes are numbered SQL files in `docs/sql/` that the owner runs in pgAdmin, followed by `npx prisma db pull --config prisma-admin.config.ts` and `npm run prisma:generate`.

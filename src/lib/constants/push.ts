@@ -80,6 +80,7 @@ import {
 import {
   CONSTANT_KIND_LABELS,
   hasIntegerId,
+  isPulledKind,
   PUSH_BATCH_SIZE,
   PUSH_IDS_MAX,
   type ConstantKind,
@@ -994,8 +995,18 @@ export interface PushBatch {
  * @throws {NotFoundError} an id the admin catalog does not have. This happens
  * before the job is created, so a mistyped id is a plain 404 and leaves no
  * job behind.
+ * @throws {ConflictError} a kind the consumer app pulls rather than reads from
+ * the main database (`PULLED_KINDS`). `startPush` in `./service.ts` refuses
+ * those first; this is the backstop for any other caller, so no code path can
+ * push a catalog the product no longer copies over there.
  */
 export async function preparePush(kind: ConstantKind, input: PushInput): Promise<PushTarget> {
+  if (isPulledKind(kind)) {
+    throw new ConflictError(
+      `${CONSTANT_KIND_LABELS[kind].plural} are pulled by the consumer app at tenant creation; ` +
+        "there is nothing to push.",
+    );
+  }
   if (input.ids !== undefined) {
     const ids = [...new Set(input.ids)];
     if (ids.length === 0) {

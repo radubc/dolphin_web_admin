@@ -20,6 +20,11 @@
  * Row actions are hidden, not disabled, for an operator without
  * `can_write_catalogs`: a control they may never use is noise, and the page
  * gate already let them read.
+ *
+ * `categories` and `financial_institutions` are pulled by the consumer app
+ * rather than pushed from here (`isPulledKind`): their State column and their
+ * row's push button drop out, since there is no push state to show or push to
+ * start; edit, retire/delete and the rest of the row stay exactly as they are.
  */
 
 import { Button, Popconfirm, Space, Table, Tag, Tooltip } from "antd";
@@ -30,20 +35,22 @@ import {
   DeleteOutlined,
   EditOutlined,
 } from "@ant-design/icons";
-import type {
-  AccountBaseTypeRow,
-  AccountTypeRow,
-  CategoryRow,
-  ConstantKind,
-  ConstantRow,
-  CountryRow,
-  CryptocurrencyRow,
-  CurrencyRow,
-  EtfRow,
-  FinancialInstitutionRow,
-  MarketRow,
-  StockRow,
+import {
+  isPulledKind,
+  type AccountBaseTypeRow,
+  type AccountTypeRow,
+  type CategoryRow,
+  type ConstantKind,
+  type ConstantRow,
+  type CountryRow,
+  type CryptocurrencyRow,
+  type CurrencyRow,
+  type EtfRow,
+  type FinancialInstitutionRow,
+  type MarketRow,
+  type StockRow,
 } from "@/lib/constants/types";
+import { useListTableBodyHeight } from "@/lib/hooks/use-table-body-height";
 import { flowColors, surfaceColors } from "@/lib/theme/colors";
 import {
   baseTypeLabel,
@@ -120,6 +127,9 @@ function actionsColumn<T extends ConstantRow>({
   // Some kinds are retired rather than deleted, and the push carries the
   // retirement over; the wording follows what the kind's meta declares.
   const retires = KIND_META[kind].retires;
+  // Pulled by the consumer app rather than pushed from here: there is nothing
+  // for the per-row push button to do.
+  const canPush = !isPulledKind(kind);
 
   return {
     title: "",
@@ -144,24 +154,26 @@ function actionsColumn<T extends ConstantRow>({
             />
           </Tooltip>
 
-          <Popconfirm
-            title="Push to the main app"
-            description={`Upsert ${label} into the main app database. Nothing is deleted there.`}
-            okText="Push"
-            cancelText="Cancel"
-            disabled={busy}
-            onConfirm={() => onPush(row, label)}
-          >
-            <Tooltip title={`Push ${label} to the main app`}>
-              <Button
-                type="text"
-                size="small"
-                aria-label={`Push ${label}`}
-                icon={<CloudUploadOutlined />}
-                disabled={busy}
-              />
-            </Tooltip>
-          </Popconfirm>
+          {canPush && (
+            <Popconfirm
+              title="Push to the main app"
+              description={`Upsert ${label} into the main app database. Nothing is deleted there.`}
+              okText="Push"
+              cancelText="Cancel"
+              disabled={busy}
+              onConfirm={() => onPush(row, label)}
+            >
+              <Tooltip title={`Push ${label} to the main app`}>
+                <Button
+                  type="text"
+                  size="small"
+                  aria-label={`Push ${label}`}
+                  icon={<CloudUploadOutlined />}
+                  disabled={busy}
+                />
+              </Tooltip>
+            </Popconfirm>
+          )}
 
           <Popconfirm
             title={
@@ -245,13 +257,16 @@ function KindTable<T extends ConstantRow>({
   onOpen,
   expandedRowRender,
 }: KindTableProps<T>) {
+  // Set inside a `ListTableRegion`: the rows scroll, the header and pager stay.
+  const bodyHeight = useListTableBodyHeight();
+
   return (
     <Table<T>
       dataSource={[...rows]}
       rowKey={(row) => row.id}
       columns={columns}
       size="middle"
-      scroll={{ x: width }}
+      scroll={{ x: width, y: bodyHeight }}
       loading={loading}
       // Retired rows stay in the list — they are still pushed — but they are
       // history, so they read at half weight.
@@ -580,7 +595,10 @@ export default function ConstantsTable({
           width: 170,
           render: (value: string) => <Tag style={{ marginInlineEnd: 0 }}>{value}</Tag>,
         },
-        stateColumn<FinancialInstitutionRow>(),
+        // No State column: financial institutions are one of the two pulled
+        // kinds (`PULLED_KINDS` in `@/lib/constants/types`) — the consumer app
+        // pulls them instead of this console pushing them, so there is no
+        // push state to show.
         ...(canWrite
           ? [
               actionsColumn<FinancialInstitutionRow>({
@@ -672,7 +690,10 @@ export default function ConstantsTable({
           ),
         },
         retiredColumn<CategoryRow>(),
-        stateColumn<CategoryRow>(),
+        // No State column: categories are the other pulled kind
+        // (`PULLED_KINDS` in `@/lib/constants/types`) — the consumer app pulls
+        // them instead of this console pushing them, so there is no push
+        // state to show.
         ...(canWrite
           ? [
               actionsColumn<CategoryRow>({
