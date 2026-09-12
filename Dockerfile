@@ -71,6 +71,15 @@ RUN npm run prisma:generate
 # `required=true` makes BuildKit fail the build outright if the secret is
 # missing, instead of silently omitting the mount and letting `next build`
 # fall back to a random per-build key.
+# Amazon's RDS certificate bundle. RDS certificates are not signed by a CA
+# that Node trusts, and node-postgres 8 treats sslmode=require as full
+# verification, so the runtime image ships this bundle and DATABASE_URL names
+# it. Fetched here, as root, and made world-readable; the runtime stage
+# copies it with the app's owner (ADD --chown/--chmod on a URL source left
+# the file unreadable to the non-root user on the first deploy).
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /app/certs/rds-global-bundle.pem
+RUN chmod 0644 /app/certs/rds-global-bundle.pem
+
 RUN --mount=type=secret,id=next_actions_key,env=NEXT_SERVER_ACTIONS_ENCRYPTION_KEY,required=true \
     npm run build
 
@@ -99,12 +108,11 @@ COPY --from=build --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=build --chown=nextjs:nodejs /app/public ./public
 
-# Amazon's RDS certificate authorities. RDS certificates are not signed by a
-# CA that Node trusts by default, and node-postgres 8 treats sslmode=require
-# as full verification, so DATABASE_URL must say
-# sslmode=verify-full&sslrootcert=/app/certs/rds-global-bundle.pem and the
-# bundle must be in the image. The global bundle covers every region.
-ADD --chown=nextjs:nodejs --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /app/certs/rds-global-bundle.pem
+# Amazon's RDS certificate authorities, fetched in the build stage (see there)
+# and copied in with the same owner as the rest of the app so the non-root
+# process can read them. DATABASE_URL points at this path with
+# sslmode=verify-full&sslrootcert=/app/certs/rds-global-bundle.pem.
+COPY --from=build --chown=nextjs:nodejs /app/certs ./certs
 
 USER nextjs
 
