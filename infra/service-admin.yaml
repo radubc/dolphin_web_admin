@@ -604,6 +604,24 @@ Resources:
                               Type: URL_DECODE
                             - Priority: 1
                               Type: NORMALIZE_PATH
+                  # `/api/health` is the liveness probe. The deploy workflow
+                  # curls it from a GitHub-hosted runner, whose address is
+                  # never on the allowlist, so without this exemption every
+                  # deploy is marked failed by its own health check even when
+                  # the stack updated cleanly. The endpoint returns only
+                  # `{ status: "ok" }` and carries no session or data.
+                  - NotStatement:
+                      Statement:
+                        ByteMatchStatement:
+                          FieldToMatch:
+                            UriPath: {}
+                          PositionalConstraint: EXACTLY
+                          SearchString: /api/health
+                          TextTransformations:
+                            - Priority: 0
+                              Type: URL_DECODE
+                            - Priority: 1
+                              Type: NORMALIZE_PATH
             VisibilityConfig:
               SampledRequestsEnabled: true
               CloudWatchMetricsEnabled: true
