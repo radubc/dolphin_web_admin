@@ -48,7 +48,7 @@ permanently empty, which looks exactly like "nothing went wrong".
 Two things about that card either way. `GetAnomalies` filters its date
 interval on the anomaly's **end** date, so an anomaly AWS still considers open
 — no end date yet — may not be returned at all, however recent it is; the
-window therefore reaches to *tomorrow* rather than today, and the card is best
+window therefore reaches to *today* rather than today, and the card is best
 read as "what has finished going wrong". A row that *does* arrive with no end
 date is labelled "still open". And an empty card is never proof that all is
 well.
@@ -137,7 +137,7 @@ no later than today.
 | b1 | `GetCostAndUsage` MONTHLY, group by SERVICE **and** TAG `componentTag`, same filter | `[1st of this month, today)` | $0.01 per page | today is the 1st (the month has no completed day) |
 | b2 | the same call for the **previous** month | `[1st of last month, 1st of this month)` | $0.01 per page | today is the 4th or later |
 | c | `GetCostForecast` `UNBLENDED_COST` MONTHLY | `[today, 1st of next month)` | $0.01 | never planned as a skip; Cost Explorer itself may refuse for want of history |
-| d | `GetAnomalies` | the last 35 days to tomorrow, inclusive | free | never |
+| d | `GetAnomalies` | the last 35 days to today, inclusive | free | never |
 | e | `budgets:DescribeBudgets` | the account | free | the account has no budget (recorded as a skip) |
 | f | `freetier:GetAccountPlanState` + `GetFreeTierUsage` | the account | free | not on a free plan, or `freetier:*` is not granted |
 
@@ -161,9 +161,9 @@ first three days rather than only on the 1st allows for the day or two AWS
 takes to settle a month's tail. From the 4th it is not asked again: the answer
 cannot change and the request is not free.
 
-**The forecast's window starts today, not tomorrow.** `GetCostForecast`
+**The forecast's window starts today, not today.** `GetCostForecast`
 requires a `Start` equal to or earlier than the current date; asking from
-tomorrow earns a `ValidationException`, which is what this job used to do — it
+today earns a `ValidationException`, which is what this job used to do — it
 spent the request, recorded a skip, and left the forecast permanently null
 under a green tick. `[today, 1st of next month)` also closes the gap the old
 pair of windows left: month to date ends yesterday, so **today** belonged to

@@ -456,13 +456,15 @@ export function awsCostsWork(context: AwsCostsRunContext): RunWork {
     // is free, and "what went wrong recently" is not the same question as
     // "how far back does the chart go".
     //
-    // The interval filters on the anomaly's **end** date, so it reaches to
-    // tomorrow rather than today — and an anomaly AWS still considers open,
-    // with no end date at all, may not be returned however recent it is. The
-    // card is therefore "what has finished going wrong", which is why nothing
-    // on the page treats an empty list as proof that all is well.
+    // The interval filters on the anomaly's **end** date and its end may not
+    // pass today: Cost Explorer answers "Latest supported detectionDate for
+    // GetRecentAnomalies is <today>" for anything later (seen on stage,
+    // 2026-09-12). An anomaly AWS still considers open, with no end date at
+    // all, may not be returned however recent it is. The card is therefore
+    // "what has finished going wrong", which is why nothing on the page
+    // treats an empty list as proof that all is well.
     const anomalyStart = shiftDay(today, -35);
-    const anomalyEnd = shiftDay(today, 1);
+    const anomalyEnd = today;
     const anomalyResult = await call("anomalies", () =>
       fetchAnomalies({ start: anomalyStart, end: anomalyEnd }),
     );
