@@ -571,6 +571,80 @@ export interface RateHistoryQuery {
 export type ExchangeRateListResponse = WatchListPage<ExchangeRate>;
 
 /* -------------------------------------------------------------------------- */
+/*                       Currency pair history backfill                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * How far back a manual add — and the drawer's "Fetch 6 months" button — go:
+ * `today − 182 days` → today.
+ *
+ * Six months counted in days rather than months, because the window is
+ * arithmetic on `YYYY-MM-DD` and a month is not a fixed length. It costs one
+ * ranged Bank of Canada call either way (the Valet API answers the whole group
+ * for the whole window in one document) and yields about 125 published
+ * business days.
+ */
+export const CURRENCY_PAIR_BACKFILL_DAYS = 182;
+
+/**
+ * How a history fetch ended.
+ *
+ * - `written` — the Bank answered and the days it published were stored.
+ * - `unpublished` — the Bank publishes no series for one of the currencies, so
+ *   no day in the window could be rated. The pair keeps the message in
+ *   `lastError`.
+ * - `busy` — another run of `bank_of_canada_rates` held the integration. The
+ *   pair is on the watch list all the same and tonight's run will rate it; the
+ *   history can be fetched again from the drawer.
+ * - `unavailable` — the integration is switched off or not installed, so
+ *   nothing was called.
+ * - `failed` — the Bank was called and the run did not finish; `error` says
+ *   why.
+ */
+export type CurrencyPairHistoryStatus =
+  | "written"
+  | "unpublished"
+  | "busy"
+  | "unavailable"
+  | "failed";
+
+/** What a six-month history fetch did, as both write endpoints report it. */
+export interface CurrencyPairHistory {
+  status: CurrencyPairHistoryStatus;
+  /** The window asked for, inclusive, `YYYY-MM-DD`. */
+  from: string;
+  to: string;
+  /** Observation days the pair now has inside that window. */
+  days: number;
+  /** The newest of those days, or null when there is none. */
+  latestDate: string | null;
+  /** Rows inserted, replaced, and already correct, as the run counted them. */
+  created: number;
+  updated: number;
+  unchanged: number;
+  /**
+   * True when the newest day the Bank can have published was among them, so
+   * the watch row was stamped current and tonight's run will skip the pair.
+   */
+  current: boolean;
+  /** The `admin_integration_runs` row, when one was started. */
+  runId: string | null;
+  /** Why it is not `written`; null when it is. */
+  error: string | null;
+}
+
+/**
+ * What `POST /api/v1/admin/integrations/currency-pairs` and
+ * `POST /api/v1/admin/integrations/currency-pairs/[id]/backfill` answer: the
+ * watch row as it now stands (newest rate included) and what the history fetch
+ * that ran with it did.
+ */
+export interface CurrencyPairWithHistory {
+  pair: CurrencyPair;
+  history: CurrencyPairHistory;
+}
+
+/* -------------------------------------------------------------------------- */
 /*                         Service endpoints (consumer app)                   */
 /* -------------------------------------------------------------------------- */
 

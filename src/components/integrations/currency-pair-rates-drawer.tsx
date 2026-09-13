@@ -5,10 +5,17 @@
  * newest observation day first, with where the figure came from and when it
  * was fetched.
  *
- * Opened by clicking the row on the currency pair list. Read-only, loaded on
- * open and paged on the server — a pair watched for a year has a few hundred
- * rows, which is not worth shipping in one response and is certainly not worth
+ * Opened by clicking the row on the currency pair list. Loaded on open and
+ * paged on the server — a pair watched for a year has a few hundred rows,
+ * which is not worth shipping in one response and is certainly not worth
  * polling.
+ *
+ * One write lives here: **Fetch 6 months**, beside Refresh, which asks the
+ * server for the same window a manual add fetches (`today − 182 days` → today,
+ * one ranged Bank of Canada call) and then reloads this table. It is shown only
+ * to an operator who may write integrations, and it is disabled for an inactive
+ * pair — the server refuses that with a 409, because switching a pair off is a
+ * decision no fetch overturns.
  *
  * The drawer body is a fixed-height column and the table sits in a
  * `ListTableRegion`, so the rows scroll under their own header and pager while
@@ -16,17 +23,20 @@
  */
 
 import { useEffect, useState } from "react";
-import { Alert, Button, Drawer, Empty, Spin, Table, Tooltip, Typography } from "antd";
+import { Alert, App, Button, Drawer, Empty, Space, Spin, Table, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { HistoryOutlined, ReloadOutlined } from "@ant-design/icons";
+import { CloudDownloadOutlined, HistoryOutlined, ReloadOutlined } from "@ant-design/icons";
 import { ListTableRegion } from "@/components/list-page-frame";
 import { ENTRY_DRAWER_WIDTH } from "@/components/shell/definitions";
 import { integrationsApi } from "@/lib/integrations/client";
-import { RATE_HISTORY_PAGE_SIZE_DEFAULT } from "@/lib/integrations/types";
+import {
+  CURRENCY_PAIR_BACKFILL_DAYS,
+  RATE_HISTORY_PAGE_SIZE_DEFAULT,
+} from "@/lib/integrations/types";
 import type { CurrencyPair, ExchangeRate } from "@/lib/integrations/types";
 import { errorMessage, formatDate, formatDateTimeOrDash, formatRelativeTimeOrNever } from "@/lib/format";
 import { surfaceColors } from "@/lib/theme/colors";
-import { INTEGRATIONS_COLOR, RateSourceTag } from "./integrations-meta";
+import { INTEGRATIONS_COLOR, pairHistorySummary, RateSourceTag } from "./integrations-meta";
 
 /** How many decimals a rate is shown to, as on the list: what Valet publishes. */
 const RATE_DECIMALS = 6;
@@ -36,12 +46,16 @@ const HISTORY_PAGE_SIZE_OPTIONS = [RATE_HISTORY_PAGE_SIZE_DEFAULT, 60, 120] as c
 
 export default function CurrencyPairRatesDrawer({
   pair,
+  canWrite,
   onClose,
 }: {
   /** Null closes the drawer. */
   pair: CurrencyPair | null;
+  /** `can_write_integrations`; without it there is no Fetch button. */
+  canWrite: boolean;
   onClose: () => void;
 }) {
+  const { message } = App.useApp();
   // Kept while the drawer animates shut, so the title does not blank out.
   const [display, setDisplay] = useState<CurrencyPair | null>(pair);
   const [rates, setRates] = useState<ExchangeRate[] | null>(null);
@@ -49,6 +63,7 @@ export default function CurrencyPairRatesDrawer({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(RATE_HISTORY_PAGE_SIZE_DEFAULT);
   const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
 
@@ -78,6 +93,35 @@ export default function CurrencyPairRatesDrawer({
       cancelled = true;
     };
   }, [id, page, pageSize, tick]);
+
+  /**
+   * Asks the server for the pair's last six months, then reloads this table
+   * from page one — the fetch writes older days, which is where the new rows
+   * are. The list behind the drawer reloads on its own: the client announces
+   * the `currency_pairs` scope after the call.
+   *
+   * A provider that is down or busy is not an error: the server answers 200
+   * with a `history.status` saying so, and the toast repeats it as a warning.
+   */
+  const fetchSixMonths = async () => {
+    if (id === null) return;
+    setFetching(true);
+    try {
+      const { history } = await integrationsApi.currencyPairs.backfill(id);
+      const summary = pairHistorySummary(label, history);
+      if (history.status === "written") message.success(summary);
+      else if (history.status === "failed") message.error(summary);
+      else message.warning(summary);
+      setPage(1);
+      setTick((value) => value + 1);
+    } catch (cause) {
+      // A refusal the server means: an inactive pair (409), a pair that has
+      // since been removed (404), or no permission.
+      message.error(errorMessage(cause));
+    } finally {
+      setFetching(false);
+    }
+  };
 
   const columns: ColumnsType<ExchangeRate> = [
     {
@@ -148,8 +192,10 @@ export default function CurrencyPairRatesDrawer({
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           description={
             <Typography.Text type="secondary">
-              Nothing has been downloaded for {label} yet. The daily Bank of Canada run will fetch
-              it, or the consumer app will the next time it asks for this pair.
+              Nothing has been downloaded for {label} yet.{" "}
+              {canWrite && display?.isActive === true
+                ? "Use Fetch 6 months above to bring its history now, or wait for the daily Bank of Canada run."
+                : "The daily Bank of Canada run will fetch it, or the consumer app will the next time it asks for this pair."}
             </Typography.Text>
           }
         />
@@ -219,14 +265,41 @@ export default function CurrencyPairRatesDrawer({
         </span>
       }
       extra={
-        <Button
-          size="small"
-          icon={<ReloadOutlined />}
-          onClick={() => setTick((value) => value + 1)}
-          loading={loading}
-        >
-          Refresh
-        </Button>
+        <Space size="small">
+          {canWrite && (
+            <Tooltip
+              title={
+                display !== null && !display.isActive
+                  ? "This pair is inactive. Activate it on the list first: an inactive pair is deliberately never fetched for."
+                  : `Download the last six months (${CURRENCY_PAIR_BACKFILL_DAYS} days) from the Bank of Canada in one call, and store the days that are missing.`
+              }
+            >
+              {/* A span so the tooltip still shows while the button is disabled. */}
+              <span>
+                <Button
+                  size="small"
+                  icon={<CloudDownloadOutlined />}
+                  onClick={() => {
+                    void fetchSixMonths();
+                  }}
+                  loading={fetching}
+                  disabled={display === null || !display.isActive}
+                >
+                  Fetch 6 months
+                </Button>
+              </span>
+            </Tooltip>
+          )}
+          <Button
+            size="small"
+            icon={<ReloadOutlined />}
+            onClick={() => setTick((value) => value + 1)}
+            loading={loading}
+            disabled={fetching}
+          >
+            Refresh
+          </Button>
+        </Space>
       }
       // A column, so the table region below can be given a definite height;
       // the body keeps its own `overflow: auto` for the states that are taller

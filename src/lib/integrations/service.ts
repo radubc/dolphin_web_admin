@@ -15,7 +15,10 @@ import "server-only";
  *   rate run could, but making one of the three behave differently would only
  *   mean the page needs two code paths for the same button. Every operator
  *   run answers `running` and is followed through `GET …/runs/[runId]`. The
- *   on-demand lookups are the exception, and they run inline by definition.
+ *   on-demand lookups are the exception, and they run inline by definition —
+ *   as is the six-month history a currency pair is added with, or fetched for
+ *   from its drawer (`./backfill.ts`): it is one ranged call, the operator is
+ *   waiting for its verdict, and the answer carries it.
  * - **A missing API key is refused before the run row is written.** Starting a
  *   run that can only fail, and leaving a failed row behind, is worse than a
  *   422 that says which environment variable is unset.
@@ -24,6 +27,7 @@ import { Prisma } from "@/generated/prisma-admin/client";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/api/errors";
 import type { ValidationDetails } from "@/lib/api/validate";
 import { DIRECTORY_INTEGRATION_KEY } from "@/lib/customers/types";
+import { backfillPairHistory, backfillWindow } from "./backfill";
 import { allocateCostsWork } from "./jobs/allocate-costs";
 import { alphaVantageQuotesWork } from "./jobs/alpha-vantage";
 import { awsCostsWork } from "./jobs/aws-costs";
@@ -80,6 +84,7 @@ import {
   type CurrencyPairInput,
   type CurrencyPairListResponse,
   type CurrencyPairPatch,
+  type CurrencyPairWithHistory,
   type ExchangeRateListResponse,
   type Integration,
   type IntegrationKey,
@@ -471,11 +476,42 @@ export async function listCurrencyPairs(query: WatchListQuery): Promise<Currency
   };
 }
 
-/** @throws {ConflictError} the pair is already watched. */
+/** One `admin_currency_pairs` row, as the repository hands it over. */
+type CurrencyPairRow = NonNullable<Awaited<ReturnType<typeof findCurrencyPairById>>>;
+
+/**
+ * The watch row as it stands right now, with its newest cached rate.
+ *
+ * Read again from the database rather than reused from before the fetch: a
+ * backfill stamps `last_rated_at` and clears (or sets) `last_error`, and the
+ * page draws those two columns from the answer.
+ */
+async function currencyPairWithRate(id: string, fallback: CurrencyPairRow): Promise<CurrencyPair> {
+  const row = (await findCurrencyPairById(id)) ?? fallback;
+  const rates = await latestRatesFor([{ from: row.from_currency, to: row.to_currency }]);
+  return toCurrencyPair(row, rates.get(`${row.from_currency}/${row.to_currency}`) ?? null);
+}
+
+/**
+ * Adds a pair to the watch list **and brings six months of history with it**.
+ *
+ * A pair added by hand used to sit there with no rate until that night's run,
+ * which reads as "nothing happened". The add therefore ends with one ranged
+ * Bank of Canada call (`backfillPairHistory`, recorded as an inline
+ * `on_demand` run) for `today − 182 days` → today, and the answer says what
+ * that produced so the page can report it.
+ *
+ * The history fetch never fails the add: a disabled integration, a run that is
+ * already live or a provider error comes back as a `status` on `history`, and
+ * the pair is on the watch list either way — which is what the operator asked
+ * for, and what the nightly run needs.
+ *
+ * @throws {ConflictError} the pair is already watched.
+ */
 export async function addCurrencyPair(
   input: CurrencyPairInput,
   createdBy: string | null,
-): Promise<CurrencyPair> {
+): Promise<CurrencyPairWithHistory> {
   const existing = await findCurrencyPair(input.fromCurrency, input.toCurrency);
   if (existing) {
     throw new ConflictError(
@@ -495,7 +531,49 @@ export async function addCurrencyPair(
       notFound: "That currency pair is not on the watch list.",
     },
   );
-  return toCurrencyPair(row, null);
+  const { from, to } = backfillWindow();
+  const history = await backfillPairHistory(
+    { from: row.from_currency, to: row.to_currency },
+    from,
+    to,
+    { requestedBy: createdBy, reason: "manual_add" },
+  );
+  return { pair: await currencyPairWithRate(row.id, row), history };
+}
+
+/**
+ * Fetches the last six months for a pair that is already watched — the
+ * drawer's "Fetch 6 months" button.
+ *
+ * The same window and the same shared function the manual add uses, so both
+ * answers mean the same thing. An **inactive** pair is refused: switching a
+ * pair off is an operator's decision that no fetch overturns, exactly as the
+ * on-demand lookup treats it (it answers from the cache and calls nobody).
+ *
+ * @throws {NotFoundError} no such watch row.
+ * @throws {ConflictError} the pair is inactive.
+ */
+export async function backfillCurrencyPairHistory(
+  id: string,
+  requestedBy: string | null,
+): Promise<CurrencyPairWithHistory> {
+  requireUuid(id, "currency pair");
+  const existing = await findCurrencyPairById(id);
+  if (!existing) throw new NotFoundError("That currency pair is not on the watch list.");
+  const label = `${existing.from_currency}/${existing.to_currency}`;
+  if (!existing.is_active) {
+    throw new ConflictError(
+      `${label} is inactive. Activate it before fetching its history: an inactive pair is deliberately never fetched for.`,
+    );
+  }
+  const { from, to } = backfillWindow();
+  const history = await backfillPairHistory(
+    { from: existing.from_currency, to: existing.to_currency },
+    from,
+    to,
+    { requestedBy, reason: "manual_backfill" },
+  );
+  return { pair: await currencyPairWithRate(id, existing), history };
 }
 
 export async function patchCurrencyPair(

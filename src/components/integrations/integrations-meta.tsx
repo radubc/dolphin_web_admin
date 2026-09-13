@@ -14,8 +14,10 @@ import { Tag, Tooltip } from "antd";
 import dayjs from "dayjs";
 import timezonePlugin from "dayjs/plugin/timezone";
 import utcPlugin from "dayjs/plugin/utc";
+import { formatDate } from "@/lib/format";
 import {
   DEFAULT_TIMEZONE,
+  type CurrencyPairHistory,
   type IntegrationKey,
   type IntegrationProvider,
   type IntegrationSchedule,
@@ -367,6 +369,42 @@ export function PercentChange({ fraction }: { fraction: number | null }) {
       {percent.toFixed(2)} %
     </span>
   );
+}
+
+/**
+ * One sentence for what a six-month history fetch did, for the toast the add
+ * drawer and the history drawer both raise.
+ *
+ * Written once here so "182 days fetched" and "the Bank does not publish X"
+ * read the same wherever they appear. `days` is the number of **published**
+ * observation days in the window — about 125 for six months, never 182 — so
+ * the sentence quotes what was actually stored rather than the window length.
+ */
+export function pairHistorySummary(
+  label: string,
+  history: CurrencyPairHistory,
+  options: { added?: boolean } = {},
+): string {
+  const lead = options.added === true ? `Added ${label} to the watch list. ` : "";
+  switch (history.status) {
+    case "written": {
+      const latest =
+        history.latestDate === null ? "" : `, the newest ${formatDate(history.latestDate)}`;
+      const stored =
+        history.created === 0
+          ? " Every day was already stored."
+          : ` ${history.created.toLocaleString()} new ${history.created === 1 ? "day" : "days"} stored.`;
+      const days = `${history.days.toLocaleString()} ${history.days === 1 ? "day" : "days"}`;
+      return `${lead}${days} of history fetched for ${label}${latest}.${stored}`;
+    }
+    case "unpublished":
+      return `${lead}${history.error ?? "The Bank of Canada publishes no series for one of these currencies."}`;
+    case "busy":
+    case "unavailable":
+      return `${lead}${history.error ?? "No history was fetched."}`;
+    default:
+      return `${lead}The history could not be fetched: ${history.error ?? "the Bank of Canada run failed."}`;
+  }
 }
 
 /** The last error, one line, with the whole thing on hover. */

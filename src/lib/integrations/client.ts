@@ -15,6 +15,7 @@ import type {
   CurrencyPairInput,
   CurrencyPairListResponse,
   CurrencyPairPatch,
+  CurrencyPairWithHistory,
   ExchangeRateListResponse,
   Integration,
   IntegrationKey,
@@ -141,10 +142,20 @@ export const integrationsApi = {
     list: (query: WatchListQuery = {}) =>
       apiFetch<CurrencyPairListResponse>(`${currencyPairsPath}${watchSearch(query)}`),
 
+    /**
+     * Adds the pair **and** brings six months of history with it: the answer
+     * carries the watch row (its newest rate already filled in when the fetch
+     * worked) and a `history` saying what that fetch did. The change
+     * announcement then reloads the list, so the "Latest rate" column fills
+     * without the operator refreshing.
+     */
     create: async (input: CurrencyPairInput) => {
-      const pair = await apiFetch<CurrencyPair>(currencyPairsPath, { method: "POST", json: input });
+      const result = await apiFetch<CurrencyPairWithHistory>(currencyPairsPath, {
+        method: "POST",
+        json: input,
+      });
       notifyIntegrationsChanged("currency_pairs");
-      return pair;
+      return result;
     },
 
     update: async (id: string, patch: CurrencyPairPatch) => {
@@ -167,5 +178,20 @@ export const integrationsApi = {
       apiFetch<ExchangeRateListResponse>(
         `${currencyPairsPath}/${encodeURIComponent(id)}/rates${historySearch(query)}`,
       ),
+
+    /**
+     * Fetches the last six months for a pair that is already watched — the
+     * same window and the same answer as an add. 409 when the pair is
+     * inactive; a provider that is down is *not* an error, it is a `history`
+     * with a status.
+     */
+    backfill: async (id: string) => {
+      const result = await apiFetch<CurrencyPairWithHistory>(
+        `${currencyPairsPath}/${encodeURIComponent(id)}/backfill`,
+        { method: "POST" },
+      );
+      notifyIntegrationsChanged("currency_pairs");
+      return result;
+    },
   },
 };

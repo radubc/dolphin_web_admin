@@ -688,6 +688,18 @@ export const ENDPOINT_REGISTRY: readonly EndpointRegistryEntry[] = [
     defaults: any("can_read_integrations", "can_write_integrations"),
   },
   {
+    key: "admin.integrations.currency_pairs.backfill",
+    method: "POST",
+    path: "/api/v1/admin/integrations/currency-pairs/[id]/backfill",
+    name: "Fetch currency pair history",
+    description:
+      "Fetches the last six months (today − 182 days → today) for one watched pair in a single ranged Bank of Canada call, recorded as an on_demand run, and answers the watch row with what the fetch produced. A write: it stores rates and may stamp the pair current. An inactive pair is a 409.",
+    category: "integrations",
+    authKind: "admin",
+    rateLimit: "api",
+    defaults: any("can_write_integrations"),
+  },
+  {
     key: "admin.customers.list",
     method: "GET",
     path: "/api/v1/admin/customers",

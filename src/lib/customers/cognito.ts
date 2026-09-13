@@ -1,4 +1,6 @@
 import "server-only";
+
+import { randomInt } from "node:crypto";
 /**
  * The customer Cognito user pool, as the admin console reads and writes it.
  *
@@ -368,6 +370,29 @@ export interface CreatedPoolUser {
 }
 
 /**
+ * A one-time temporary password for AdminCreateUser that satisfies the pool's
+ * policy (at least 8 characters with upper case, lower case, a digit and a
+ * symbol): 16 characters, one guaranteed from each class, the rest drawn from
+ * all four, shuffled with the same CSPRNG. The person replaces it at first
+ * sign-in (NEW_PASSWORD_REQUIRED), so it only has to be strong and unique.
+ */
+function temporaryPassword(): string {
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const lower = "abcdefghijkmnopqrstuvwxyz";
+  const digits = "23456789";
+  const symbols = "!@#$%^&*-_=+?";
+  const all = upper + lower + digits + symbols;
+  const pick = (set: string): string => set[randomInt(set.length)];
+  const chars = [pick(upper), pick(lower), pick(digits), pick(symbols)];
+  while (chars.length < 16) chars.push(pick(all));
+  for (let i = chars.length - 1; i > 0; i -= 1) {
+    const j = randomInt(i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join("");
+}
+
+/**
  * Creates the account and lets Cognito email the temporary password.
  *
  * The email is marked verified because the invitation itself proves the
@@ -397,6 +422,14 @@ export async function createInvitedUser(
         UserPoolId: config.userPoolId,
         Username: email,
         UserAttributes: userAttributes,
+        // Generated here rather than left to Cognito: since the pool allows a
+        // passkey as a first sign-in factor (2026-09-12), AdminCreateUser
+        // without a TemporaryPassword means "make a passwordless account",
+        // which a pool without email/SMS one-time codes refuses with
+        // "User is required to have a password." Cognito still puts this
+        // value in the invitation email ({####}); it is never logged or
+        // stored here.
+        TemporaryPassword: temporaryPassword(),
         DesiredDeliveryMediums: ["EMAIL"],
       }),
     );

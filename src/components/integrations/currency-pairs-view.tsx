@@ -466,10 +466,23 @@ export default function CurrencyPairsView({
         open={adding}
         canReadCurrencies={canReadCurrencies}
         onClose={() => setAdding(false)}
-        onSaved={(summary) => message.success(summary)}
+        onSaved={(summary, historyStatus) => {
+          // The pair is on the watch list whatever the history fetch did, so
+          // only a failed fetch is loud: "the Bank does not publish X" and "a
+          // run is already in progress" are remarks about the rates, not about
+          // the add. The list itself reloads on its own — the client announces
+          // the write — so the new row arrives with its rate already filled in.
+          if (historyStatus === "written") message.success(summary);
+          else if (historyStatus === "failed") message.error(summary);
+          else message.warning(summary);
+        }}
       />
 
-      <CurrencyPairRatesDrawer pair={history} onClose={() => setHistory(null)} />
+      <CurrencyPairRatesDrawer
+        pair={history}
+        canWrite={canWrite}
+        onClose={() => setHistory(null)}
+      />
     </>
   );
 }

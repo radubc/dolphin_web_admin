@@ -10,6 +10,12 @@
  * When the operator may read the catalogs the two fields are Selects over the
  * currency catalog, which is small enough to read in one page; without that
  * permission they are three-letter inputs and the server has the final say.
+ *
+ * The add is not only a row: the server fetches the pair's last six months in
+ * the same request, so the toast reports what the Bank of Canada answered —
+ * how many days were stored, or why none were. The pair is on the watch list
+ * either way, which is why a fetch that found nothing is a warning and not an
+ * error.
  */
 
 import { useEffect, useState } from "react";
@@ -23,10 +29,11 @@ import FormSection from "@/components/form-section";
 import { ENTRY_DRAWER_WIDTH } from "@/components/shell/definitions";
 import { constantsApi } from "@/lib/constants/client";
 import { integrationsApi } from "@/lib/integrations/client";
-import type { CurrencyPairInput } from "@/lib/integrations/types";
+import type { CurrencyPairHistoryStatus, CurrencyPairInput } from "@/lib/integrations/types";
+import { CURRENCY_PAIR_BACKFILL_DAYS } from "@/lib/integrations/types";
 import { errorMessage } from "@/lib/format";
 import { surfaceColors } from "@/lib/theme/colors";
-import { INTEGRATIONS_COLOR } from "./integrations-meta";
+import { INTEGRATIONS_COLOR, pairHistorySummary } from "./integrations-meta";
 
 /** Save lives in the footer, outside the form, and submits by association. */
 const FORM_NAME = "currency-pair-form";
@@ -59,8 +66,13 @@ export interface CurrencyPairDrawerProps {
   /** Whether the operator may read the catalogs; without it the codes are typed. */
   canReadCurrencies: boolean;
   onClose: () => void;
-  /** A sentence for the page's toast, after the write went through. */
-  onSaved: (summary: string) => void;
+  /**
+   * A sentence for the page's toast, after the write went through, with how
+   * the history fetch that came with it ended: the pair is on the watch list
+   * whatever that says, so a fetch that found nothing is a warning rather than
+   * an error.
+   */
+  onSaved: (summary: string, historyStatus: CurrencyPairHistoryStatus) => void;
 }
 
 export default function CurrencyPairDrawer({
@@ -110,8 +122,13 @@ export default function CurrencyPairDrawer({
     };
     setSaving(true);
     try {
-      const created = await integrationsApi.currencyPairs.create(input);
-      onSaved(`Added ${created.fromCurrency}/${created.toCurrency} to the watch list.`);
+      // The add brings six months of history with it, so the toast reports
+      // both: that the pair is watched, and what the Bank answered for it.
+      const { pair, history } = await integrationsApi.currencyPairs.create(input);
+      onSaved(
+        pairHistorySummary(`${pair.fromCurrency}/${pair.toCurrency}`, history, { added: true }),
+        history.status,
+      );
       onClose();
     } catch (cause) {
       setError(errorMessage(cause));
@@ -240,6 +257,12 @@ export default function CurrencyPairDrawer({
             The rate is how many of the second currency one of the first buys. The Bank of Canada
             publishes roughly 27 currencies against CAD, so a pair with CAD on one side comes
             straight from its series and any other pair is the ratio of two of them.
+          </Typography.Text>
+
+          <Typography.Text type="secondary" className="text-xs">
+            Adding the pair also downloads the last six months for it ({CURRENCY_PAIR_BACKFILL_DAYS}{" "}
+            days, about 125 published business days) in one Bank of Canada call, so its rate is on
+            the list straight away instead of after tonight&apos;s run.
           </Typography.Text>
 
           {canReadCurrencies && currenciesFailed && (

@@ -304,9 +304,9 @@ beyond `cloudwatch:GetMetricData`.
    **before** Cognito is called, so a failure leaves a trace.
 3. `AdminCreateUser` creates the account in the customer pool with the email
    marked verified, the `name` / `locale` attributes when given, and
-   `DesiredDeliveryMediums: ["EMAIL"]`. Cognito generates a temporary password
-   and emails it. **This app never sees that password**, and nothing about it
-   is stored or logged.
+   `DesiredDeliveryMediums: ["EMAIL"]` and a `TemporaryPassword` the console generates itself (16 characters meeting the pool policy, never logged or stored — since the pool allows passkeys as a first factor, an invite without one would be a request for a passwordless account, which Cognito refuses with "User is required to have a password"). Cognito puts that temporary password
+   in the invitation email. **This app holds it for the one call only**; nothing
+   about it is stored or logged.
 4. The person receives Cognito's invitation email: their username (the email
    address) and the temporary password, which expires after the pool's
    configured window (7 days by default).

@@ -116,10 +116,11 @@ Default rules as seeded; all editable on the Access Map.
 | `admin.integrations.quote_symbols.update` | `PATCH /api/v1/admin/integrations/quote-symbols/[id]` | `{ isActive }`. | `can_write_integrations` |
 | `admin.integrations.quote_symbols.delete` | `DELETE /api/v1/admin/integrations/quote-symbols/[id]` | Removes the watch row; cached quotes stay. 204. | `can_write_integrations` |
 | `admin.integrations.currency_pairs.list` | `GET /api/v1/admin/integrations/currency-pairs?page=&pageSize=&q=&active=` | One page of the pair watch list, each item with `latestRate`. | `can_read_integrations` or `can_write_integrations` |
-| `admin.integrations.currency_pairs.create` | `POST /api/v1/admin/integrations/currency-pairs` | `{ fromCurrency, toCurrency }`, three letters each, must differ. 201; 409 on a duplicate. | `can_write_integrations` |
+| `admin.integrations.currency_pairs.create` | `POST /api/v1/admin/integrations/currency-pairs` | `{ fromCurrency, toCurrency }`, three letters each, must differ. 201 `{ pair, history }` — the watch row **and** the six months of history the add fetches for it (see below); 409 on a duplicate. | `can_write_integrations` |
 | `admin.integrations.currency_pairs.update` | `PATCH /api/v1/admin/integrations/currency-pairs/[id]` | `{ isActive }`. | `can_write_integrations` |
 | `admin.integrations.currency_pairs.delete` | `DELETE /api/v1/admin/integrations/currency-pairs/[id]` | Removes the watch row; cached rates stay. 204. | `can_write_integrations` |
 | `admin.integrations.currency_pairs.rates` | `GET /api/v1/admin/integrations/currency-pairs/[id]/rates?page=&pageSize=` | One page of the pair's download history — `{ items: ExchangeRate[], total, page, pageSize }`, newest observation day first, then newest fetch. `pageSize` 1..200, default 30. Addressed by the watch row's id, so a pair removed from the watch list is a 404 even though its rates are still stored. | `can_read_integrations` or `can_write_integrations` |
+| `admin.integrations.currency_pairs.backfill` | `POST /api/v1/admin/integrations/currency-pairs/[id]/backfill` | No body. Fetches the pair's last six months (`today − 182 days` → today) in one ranged Bank of Canada call and stores the days the cache did not have. 200 `{ pair, history }`, the same shape the create endpoint answers; 404 for an unknown id, **409 for an inactive pair**. A provider that is down, disabled or busy is *not* an error — it is a `history.status`. | `can_write_integrations` |
 | `admin.customers.list` | `GET /api/v1/admin/customers?page=&pageSize=&q=&status=&includeDeleted=` | One page of the consumer app's users, each with tenants, `lastSeenAt` (the consumer app's sign-in stamp), `lastActiveAt` (the derived fallback), `accountCount`, `transactionCount`, the pool account and a derived `status`, plus header `counts` (now including `deleted`) and `cognitoAvailable`. `q` matches email and tenant name. `status=deleted` selects the soft-deleted rows and implies `includeDeleted`; **every other `status` value excludes them**, whatever `includeDeleted` says — see the note below. | `can_read_user_list`, `can_read_user_detail` or `can_invite_users` |
 | `admin.customers.get` | `GET /api/v1/admin/customers/[id]` | One customer by `users.id`. 404 when there is no such row. | `can_read_user_list`, `can_read_user_detail` or `can_invite_users` |
 | `admin.customers.invites.list` | `GET /api/v1/admin/customers/invites?page=&pageSize=&q=&status=` | Invitations, newest first, with `counts` per status, `canSend` and `unavailableReason`. | `can_read_user_list`, `can_read_user_detail` or `can_invite_users` |
@@ -323,6 +324,33 @@ An integration whose API key is not configured is refused with 422
 that could only fail. A run that is `running` with a stale heartbeat is
 reported as `interrupted` — every batch commits on its own, so nothing already
 written is lost and it can simply be started again.
+
+**Currency pair history.** Two endpoints answer
+`{ pair: CurrencyPair, history: CurrencyPairHistory }`: adding a pair by hand
+(`…currency_pairs.create`) and the drawer's "Fetch 6 months"
+(`…currency_pairs.backfill`). Both fetch the same window — `today − 182 days` →
+today, one ranged Bank of Canada call, recorded as an inline `on_demand` run —
+and `history` says what it did:
+
+```json
+{ "status": "written", "from": "2026-03-14", "to": "2026-09-12",
+  "days": 125, "latestDate": "2026-09-11",
+  "created": 125, "updated": 0, "unchanged": 0,
+  "current": true, "runId": "…", "error": null }
+```
+
+`status` is `written`, `unpublished` (the Bank publishes no series for one of
+the currencies; the message is on the pair's `lastError` too), `busy` (another
+run of `bank_of_canada_rates` held the integration), `unavailable` (the
+integration is off or not installed) or `failed` (the call was made and the run
+did not finish). Only the first is a success, and **none of them is an HTTP
+error**: the pair is created, or is still watched, either way, and `error`
+carries the sentence to show. `days` counts published observation days, so a
+six-month window is about 125, never 182. `current` says the newest day the
+Bank can have published was among them, which is when the pair's
+`last_rated_at` is stamped and that night's run skips it. The one refusal is a
+**409 on an inactive pair** for the backfill: switching a pair off is an
+operator's decision that no fetch overturns.
 
 **Scheduling.** A 60-second in-process tick (`src/instrumentation.ts`, switched
 off with `INTEGRATIONS_SCHEDULER=off`) starts the integrations whose

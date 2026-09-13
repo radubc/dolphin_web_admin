@@ -149,6 +149,43 @@ left. Clicking a pair on the page opens its **download history**: every rate
 stored for it, newest observation day first, with the source and the fetch
 time.
 
+**Adding a pair by hand brings six months with it.** Until 2026-09-12 a manual
+add inserted the watch row and stopped there, so the pair sat with an empty
+"Latest rate" column until that night's run — which is what the owner reported
+from stage. The add now ends with one ranged Bank of Canada call for
+`today − 182 days → today` (about 125 published business days), recorded as an
+inline `on_demand` run so it appears in the runs drawer, and the create
+endpoint answers `{ pair, history }`: `history` carries `status`, `days`,
+`from`, `to`, `latestDate`, the row counts and whether the pair was stamped
+current. The toast repeats it in words — "125 days of history fetched for
+USD/CAD, the newest 11 Sep 2026" — or says why there are none.
+
+The same fetch is available for a pair that is already on the list: **Fetch 6
+months**, beside Refresh in the download-history drawer, which posts to
+`…/currency-pairs/[id]/backfill` and answers in the same shape. Both go through
+`backfillPairHistory` in `src/lib/integrations/backfill.ts`, which is
+`fetchObservations` + `writeHistoricalRates` from `jobs/rates.ts` with three
+rules on top:
+
+- the **watch row is stamped only when the window really reaches the newest day
+  the Bank can have published** (`publishedThrough`): then `last_rated_at` is
+  set and `last_error` cleared, so the pair counts as current and that night's
+  run skips it. A series the Bank discontinued mid-window leaves the row
+  untouched, so the run still tries;
+- a currency the Bank publishes **no** series for produces no day at all, and
+  the pair keeps the "not published" message in `last_error` — the verdict the
+  nightly run would have written anyway;
+- it **never fails the operation**. A disabled integration, a run that is
+  already live (the 409 `beginRun` raises) or a provider error comes back as a
+  `history.status` of `unavailable` / `busy` / `failed` with a message, and the
+  pair is on the watch list either way; the history can be fetched again from
+  the drawer.
+
+An **inactive** pair refuses the backfill with a 409, the same rule the
+on-demand lookup follows: switching a pair off is an operator's decision that
+no fetch overturns. None of this touches the consumer app's own endpoint —
+`GET /api/v1/service/exchange-rates` still goes through `lookup.ts`, unchanged.
+
 Rows enter either list in two ways, recorded in `source`:
 
 - **manual** — an operator adds it on the page;
@@ -318,6 +355,12 @@ not set `last_error` when the Bank did not publish a currency back then (that
 says nothing about the pair today). A pair the request put on the watch list
 for the first time is therefore created without a `last_rated_at`, and the
 nightly run picks it up.
+
+The operator-facing six-month backfill (above) reuses the same two functions
+but *does* stamp the row — because its window ends **today**, so when the
+newest published day is among the days written the pair genuinely is current.
+That decision lives in `backfill.ts`, not in `writeHistoricalRates`, which is
+why the service lookups are unaffected by it.
 
 A quote lookup asks TwelveData for at most one batch (`batchSize` symbols)
 inside the request, and Alpha Vantage for at most **three** symbols (the whole

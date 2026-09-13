@@ -5,10 +5,18 @@
  * carrying its newest cached rate.
  *
  * POST adds a pair: two ISO 4217 codes, uppercased, which must differ. A
- * currency the Bank of Canada does not publish is still accepted — the next
- * run records that verdict on the row itself (`lastError`), which is more
+ * currency the Bank of Canada does not publish is still accepted — the fetch
+ * below records that verdict on the row itself (`lastError`), which is more
  * useful than refusing the request with a list this app would have to keep in
  * step with the Bank's.
+ *
+ * The add also **brings the pair's last six months with it** (`today − 182
+ * days` → today, one ranged Bank of Canada call recorded as an inline
+ * `on_demand` run), so the list shows a rate at once instead of after that
+ * night's run, and answers `{ pair, history }` with what the fetch produced.
+ * The fetch cannot fail the add: a provider that is down, switched off or
+ * already running a job comes back as a `history.status` and the pair is on
+ * the watch list either way.
  */
 import { adminHandler } from "@/lib/admin-access/authorize";
 import { created, ok } from "@/lib/api/response";
