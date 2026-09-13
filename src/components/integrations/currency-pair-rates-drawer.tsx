@@ -23,10 +23,11 @@
  */
 
 import { useEffect, useState } from "react";
-import { Alert, App, Button, Drawer, Empty, Space, Spin, Table, Tooltip, Typography } from "antd";
+import { Alert, App, Button, Drawer, Empty, Space, Spin, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { CloudDownloadOutlined, HistoryOutlined, ReloadOutlined } from "@ant-design/icons";
 import { ListTableRegion } from "@/components/list-page-frame";
+import { ResponsiveTable } from "@/components/responsive-table";
 import { ENTRY_DRAWER_WIDTH } from "@/components/shell/definitions";
 import { integrationsApi } from "@/lib/integrations/client";
 import {
@@ -209,7 +210,7 @@ export default function CurrencyPairRatesDrawer({
             body — so there is no panel border for the region to reserve. */}
         <ListTableRegion panelBorder={false}>
           {(y) => (
-            <Table<ExchangeRate>
+            <ResponsiveTable<ExchangeRate>
               dataSource={rates ?? []}
               rowKey={(row) => `${row.date}-${row.fetchedAt}`}
               columns={columns}

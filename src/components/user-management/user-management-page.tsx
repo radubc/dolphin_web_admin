@@ -312,7 +312,7 @@ export default function UserManagementPage({ capabilities }: UserManagementPageP
         rail={store.loading || views.length === 0 ? undefined : rail}
       >
         {views.length > 1 && (
-          <span role="group" aria-label="Section">
+          <span role="group" aria-label="Section" className="max-lg:max-w-full max-lg:overflow-x-auto">
             <Segmented<AccessView>
               value={view}
               onChange={store.setView}

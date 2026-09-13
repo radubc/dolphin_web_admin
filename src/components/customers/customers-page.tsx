@@ -67,7 +67,11 @@ export default function CustomersPage({ capabilities, initialView }: CustomersPa
   }, []);
 
   const switcher = (
-    <span role="group" aria-label="Customers view" className="inline-block min-w-max">
+    <span
+      role="group"
+      aria-label="Customers view"
+      className="inline-block min-w-max max-lg:max-w-full max-lg:overflow-x-auto"
+    >
       <Segmented<CustomersViewKey>
         value={view}
         onChange={changeView}

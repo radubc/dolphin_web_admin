@@ -24,10 +24,11 @@
  */
 
 import { useState } from "react";
-import { Alert, Button, Drawer, Empty, Select, Spin, Table, Tag, Tooltip, Typography } from "antd";
+import { Alert, Button, Drawer, Empty, Select, Spin, Tag, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { PieChartOutlined, TeamOutlined } from "@ant-design/icons";
 import { ListTableRegion } from "@/components/list-page-frame";
+import { ResponsiveTable } from "@/components/responsive-table";
 import { ENTRY_DRAWER_WIDTH } from "@/components/shell/definitions";
 import type { PerClientTenant } from "@/lib/costs/allocation";
 import { formatMonth } from "@/lib/costs/calendar";
@@ -264,7 +265,7 @@ function PerClientTableRegion({ tenants }: { tenants: readonly PerClientTenant[]
     // there is no panel border for the region to reserve.
     <ListTableRegion panelBorder={false}>
       {(y) => (
-        <Table<PerClientTenant>
+        <ResponsiveTable<PerClientTenant>
           dataSource={tenants as PerClientTenant[]}
           rowKey="tenantId"
           columns={perClientColumns()}

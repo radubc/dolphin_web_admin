@@ -9,6 +9,20 @@ import { presentationFor, type ShellTab } from "./definitions";
 export const RAIL_WIDTH = 100;
 
 /**
+ * Whether a tab is the one being looked at, given what `usePathname()` reports.
+ * Overview is an exact match — everything is "under" `/` — and any other tab
+ * also owns its sub-paths, so `/customers/42` still lights Customers.
+ *
+ * Exported because the compact layout's bottom tab bar has to agree with the
+ * rail on this; two copies would be two chances to drift apart.
+ */
+export function isTabActive(pathname: string, href: string): boolean {
+  return href === "/"
+    ? pathname === "/"
+    : pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/**
  * One tab. The active one is the accent blue — icon, label, a 3px rule down
  * its leading edge and a soft blue wash behind it — rather than the tab's own
  * feature colour: one colour reads as "you are here".
@@ -41,21 +55,22 @@ function RailTab({ tab, active }: { tab: ShellTab; active: boolean }) {
 }
 
 /**
- * The vertical tab rail. The tabs arrive from the layout already filtered by
- * the access map — what a person cannot open is not drawn — so the rail is
- * the permission model made visible. The active one is whatever
- * `usePathname()` reports.
+ * The vertical tab rail, the desktop layout's navigation. The tabs arrive from
+ * the layout already filtered by the access map — what a person cannot open is
+ * not drawn — so the rail is the permission model made visible. The active one
+ * is whatever `usePathname()` reports.
+ *
+ * Hidden below `lg`, where `./bottom-tab-bar.tsx` draws the same list along
+ * the bottom of the window.
  */
 export default function SideRail({ tabs }: { tabs: readonly ShellTab[] }) {
   const pathname = usePathname();
 
-  const isActive = (href: string) =>
-    href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
-
   return (
     <nav
       aria-label="Main"
-      className="flex shrink-0 flex-col gap-1 overflow-y-auto px-1.5 py-5"
+      // Below `lg` the bottom tab bar carries these same tabs instead.
+      className="flex shrink-0 flex-col gap-1 overflow-y-auto px-1.5 py-5 max-lg:hidden"
       style={{
         width: RAIL_WIDTH,
         background: surfaceColors.card,
@@ -63,7 +78,7 @@ export default function SideRail({ tabs }: { tabs: readonly ShellTab[] }) {
       }}
     >
       {tabs.map((tab) => (
-        <RailTab key={tab.key} tab={tab} active={isActive(tab.href)} />
+        <RailTab key={tab.key} tab={tab} active={isTabActive(pathname, tab.href)} />
       ))}
     </nav>
   );

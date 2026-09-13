@@ -22,13 +22,14 @@
  */
 
 import { useState } from "react";
-import { Alert, App, Button, Input, Popconfirm, Segmented, Spin, Switch, Table, Tooltip, Typography } from "antd";
+import { Alert, App, Button, Input, Popconfirm, Segmented, Spin, Switch, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { DeleteOutlined, LoadingOutlined, PlusOutlined, ReloadOutlined, SwapOutlined } from "@ant-design/icons";
 import { ListEmpty, ListNoResults } from "@/components/empty-state";
 import Figures from "@/components/figures";
 import { ListPageFrame, ListPanel, ListTableRegion } from "@/components/list-page-frame";
 import { RibbonBar, RibbonButton, RibbonDivider } from "@/components/ribbon-bar";
+import { ResponsiveTable } from "@/components/responsive-table";
 import StatCard from "@/components/stat-card";
 import { canDo, type AdminCapabilities } from "@/lib/admin-access/types";
 import { integrationsApi } from "@/lib/integrations/client";
@@ -340,20 +341,24 @@ export default function CurrencyPairsView({
 
   const toolbar = (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-      <Input.Search
-        allowClear
-        value={store.search}
-        loading={store.refreshing}
-        placeholder="Search either currency code…"
-        aria-label="Search currency pairs"
-        // The query follows the box after a 300 ms pause; Enter only asks for
-        // the same query sooner, so both handlers set the same state.
-        onChange={(event) => store.setSearch(event.target.value)}
-        onSearch={store.setSearch}
-        style={{ width: 300 }}
-      />
+      {/* The width lives on this plain wrapper, which the search box fills: antd's own
+          full-width rule on the box is unlayered and would beat a Tailwind width
+          set on the box itself. Row-wide on compact, the old fixed width on desktop. */}
+      <div className="w-full lg:w-[300px]">
+        <Input.Search
+          allowClear
+          value={store.search}
+          loading={store.refreshing}
+          placeholder="Search either currency code…"
+          aria-label="Search currency pairs"
+          // The query follows the box after a 300 ms pause; Enter only asks for
+          // the same query sooner, so both handlers set the same state.
+          onChange={(event) => store.setSearch(event.target.value)}
+          onSearch={store.setSearch}
+        />
+      </div>
 
-      <span role="group" aria-label="Filter by active">
+      <span role="group" aria-label="Filter by active" className="max-lg:max-w-full max-lg:overflow-x-auto">
         <Segmented<ActiveFilter>
           value={store.activeFilter}
           onChange={store.setActiveFilter}
@@ -418,7 +423,7 @@ export default function CurrencyPairsView({
           <ListTableRegion>
             {(y) => (
               <ListPanel>
-                <Table<CurrencyPair>
+                <ResponsiveTable<CurrencyPair>
                   dataSource={items}
                   rowKey="id"
                   columns={columns}

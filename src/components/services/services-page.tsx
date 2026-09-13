@@ -7,13 +7,14 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Input, Segmented, Spin, Table, Tag, Tooltip, Typography } from "antd";
+import { Alert, Button, Input, Segmented, Spin, Tag, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { CloudServerOutlined, ReloadOutlined } from "@ant-design/icons";
 import Link from "next/link";
 import { RuleSummary, AUTH_KIND_LABELS, MethodTag, SERVICES_COLOR } from "@/components/access-map/rule-meta";
 import Figures from "@/components/figures";
 import { ListPageFrame, ListPanel, ListTableRegion } from "@/components/list-page-frame";
+import { ResponsiveTable } from "@/components/responsive-table";
 import { RibbonBar, RibbonButton } from "@/components/ribbon-bar";
 import StatCard from "@/components/stat-card";
 import { categoryLabel } from "@/components/user-management/access-meta";
@@ -249,12 +250,19 @@ export default function ServicesPage({ capabilities }: { capabilities: AdminCapa
     body = (
       <>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <Input.Search allowClear value={search} placeholder="Search path, name or key…" onChange={(event) => setSearch(event.target.value)} onSearch={setSearch} style={{ width: 300 }} />
-          <Segmented<string>
-            value={category}
-            onChange={setCategory}
-            options={[{ value: "all", label: "All" }, ...categories.map((value) => ({ value, label: categoryLabel(value) }))]}
-          />
+          {/* The width lives on this plain wrapper, which the search box fills: antd's own
+              full-width rule on the box is unlayered and would beat a Tailwind width
+              set on the box itself. Row-wide on compact, the old fixed width on desktop. */}
+          <div className="w-full lg:w-[300px]">
+            <Input.Search allowClear value={search} placeholder="Search path, name or key…" onChange={(event) => setSearch(event.target.value)} onSearch={setSearch} />
+          </div>
+          <span role="group" aria-label="Filter by category" className="max-lg:max-w-full max-lg:overflow-x-auto">
+            <Segmented<string>
+              value={category}
+              onChange={setCategory}
+              options={[{ value: "all", label: "All" }, ...categories.map((value) => ({ value, label: categoryLabel(value) }))]}
+            />
+          </span>
           {capabilities.isSuperAdmin && (
             <Typography.Text type="secondary" className="ms-auto text-xs">
               Edit rules on the <Link href="/access-map">Access Map</Link>.
@@ -264,7 +272,7 @@ export default function ServicesPage({ capabilities }: { capabilities: AdminCapa
         <ListTableRegion>
           {(y) => (
             <ListPanel>
-              <Table<ServiceRow>
+              <ResponsiveTable<ServiceRow>
                 dataSource={rows}
                 rowKey="key"
                 columns={columns}

@@ -5,12 +5,13 @@
  * grants (grouped by area on hover), and how many enabled users hold it.
  */
 
-import { Button, Table, Tag, Tooltip } from "antd";
+import { Button, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { EditOutlined, LockOutlined } from "@ant-design/icons";
 import type { AdminAction, AdminRole } from "@/lib/admin-access/types";
 import { humaniseKey, pluralise } from "@/lib/format";
 import { useListTableBodyHeight } from "@/lib/hooks/use-table-body-height";
+import { ResponsiveTable } from "@/components/responsive-table";
 import { surfaceColors } from "@/lib/theme/colors";
 import { categoryLabel } from "./access-meta";
 
@@ -163,7 +164,7 @@ export default function RolesTable({
   ];
 
   return (
-    <Table<AdminRole>
+    <ResponsiveTable<AdminRole>
       dataSource={[...rows]}
       rowKey={(role) => role.id}
       columns={columns}

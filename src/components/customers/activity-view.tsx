@@ -32,7 +32,7 @@
  */
 
 import { useState } from "react";
-import { Alert, Button, Segmented, Spin, Table, Tooltip, Typography } from "antd";
+import { Alert, Button, Segmented, Spin, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   CameraOutlined,
@@ -49,6 +49,7 @@ import DayBarChart, { type DayBar } from "@/components/day-bar-chart";
 import Figures, { type Figure } from "@/components/figures";
 import { ListPageFrame } from "@/components/list-page-frame";
 import { RibbonBar, RibbonButton, RibbonDivider } from "@/components/ribbon-bar";
+import { ResponsiveTable } from "@/components/responsive-table";
 import StatCard from "@/components/stat-card";
 import {
   DAU_WINDOW_DAYS,
@@ -731,7 +732,7 @@ export default function ActivityView({ switcher, canSnapshot }: ActivityViewProp
           icon={<RiseOutlined />}
           caption={`Churn is departures divided by the customers the month began with — everyone who existed and had not been deleted at 00:00 UTC on the 1st, plus anyone seen in the ${MAU_WINDOW_DAYS} days before it. The last row is the month in progress.`}
         >
-          <Table<ChurnMonth>
+          <ResponsiveTable<ChurnMonth>
             dataSource={[...stats.churnPerMonth].reverse()}
             rowKey="month"
             columns={churnColumns}
@@ -746,7 +747,7 @@ export default function ActivityView({ switcher, canSnapshot }: ActivityViewProp
           icon={<LineChartOutlined />}
           caption={`Of everyone whose account was created in a month, how many have been seen in the last ${MAU_WINDOW_DAYS} days. A deleted account stays in the cohort and can never be retained, so a cohort that left reads as retention falling.`}
         >
-          <Table<RetentionMonth>
+          <ResponsiveTable<RetentionMonth>
             dataSource={[...stats.retentionBySignupMonth].reverse()}
             rowKey="month"
             columns={retentionColumns}
@@ -774,7 +775,7 @@ export default function ActivityView({ switcher, canSnapshot }: ActivityViewProp
             </span>
           }
         >
-          <Table<TenantSize>
+          <ResponsiveTable<TenantSize>
             dataSource={
               tenantsBy === "bytes"
                 ? stats.largestTenants.byBytes

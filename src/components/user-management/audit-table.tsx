@@ -5,11 +5,12 @@
  * Metadata is shown as compact key/value chips rather than raw JSON.
  */
 
-import { Button, Table, Tag, Tooltip } from "antd";
+import { Button, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { AuditEvent } from "@/lib/admin-access/types";
 import { formatDateTime, formatRelativeTime, humaniseKey } from "@/lib/format";
 import { useListTableBodyHeight } from "@/lib/hooks/use-table-body-height";
+import { ResponsiveTable } from "@/components/responsive-table";
 import { surfaceColors } from "@/lib/theme/colors";
 import { AUDIT_ACTION_LABELS, auditTone } from "./access-meta";
 
@@ -112,13 +113,22 @@ export default function AuditTable({ rows, hasMore, loadingMore, onLoadMore }: A
 
   return (
     <>
-      <Table<AuditEvent>
+      <ResponsiveTable<AuditEvent>
         dataSource={[...rows]}
         rowKey={(event) => event.id}
         columns={columns}
         size="middle"
         scroll={{ x: TABLE_MIN_WIDTH, y: bodyHeight }}
         pagination={false}
+        compact={{
+          title: (event) => (
+            <>
+              {event.actorEmail ?? "System"}
+              {" · "}
+              {AUDIT_ACTION_LABELS[event.action] ?? humaniseKey(event.action)}
+            </>
+          ),
+        }}
       />
       {hasMore && (
         <div

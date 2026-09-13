@@ -77,6 +77,10 @@ function displayNameFor(name: string | null, email: string | null): string {
  * The popovers are owned here because they hang off these buttons; anything
  * they *open* — drawers, the notification centre — is shell state and is raised
  * through the callbacks above.
+ *
+ * On compact the bar keeps the brand, "New", the bell and the avatar, and
+ * gives up the display name, Help and the gear — the last two reappear inside
+ * the avatar menu, so nothing becomes unreachable.
  */
 export default function NavBar({
   email,
@@ -101,7 +105,9 @@ export default function NavBar({
 
   return (
     <header
-      className="flex shrink-0 items-center gap-5 px-5"
+      // Compact keeps the same bar, tightened: `max-lg:` only ever applies
+      // below `lg`, so the desktop bar is untouched.
+      className="flex shrink-0 items-center gap-5 px-5 max-lg:gap-3 max-lg:px-4"
       style={{
         height: NAV_BAR_HEIGHT,
         background: surfaceColors.card,
@@ -119,8 +125,10 @@ export default function NavBar({
           priority
           style={{ height: LOGO_HEIGHT, width: "auto" }}
         />
+        {/* Hidden on compact: the avatar menu already names the account, and
+            the bar needs the width for "New" and the bell. */}
         <span
-          className="truncate text-base font-semibold"
+          className="truncate text-base font-semibold max-lg:hidden"
           style={{ color: surfaceColors.text }}
         >
           {displayNameFor(name, email)}
@@ -156,15 +164,26 @@ export default function NavBar({
         </Popover>
       </div>
 
-      <div className="flex items-center gap-5">
-        <Button
-          type="text"
-          shape="circle"
-          title="Help"
-          aria-label="Help"
-          icon={<QuestionCircleOutlined style={TOOLBAR_ICON_STYLE} />}
-          onClick={onOpenHelp}
-        />
+      <div className="flex items-center gap-5 max-lg:gap-3">
+        {/* Help and Settings fold into the avatar menu on compact; the bell
+            and the avatar stay in the bar.
+
+            The `max-lg:hidden` sits on a plain wrapper rather than on the
+            antd control itself: antd injects its CSS unlayered, so its
+            `.ant-btn { display: inline-flex }` outranks a Tailwind utility in
+            `@layer utilities` no matter how specific the selector is. The
+            wrapper is `inline-flex` for the same reason the bell's is —
+            a block box would open a line box under the button. */}
+        <span className="inline-flex max-lg:hidden">
+          <Button
+            type="text"
+            shape="circle"
+            title="Help"
+            aria-label="Help"
+            icon={<QuestionCircleOutlined style={TOOLBAR_ICON_STYLE} />}
+            onClick={onOpenHelp}
+          />
+        </span>
 
         <Popover
           open={notificationsOpen}
@@ -209,28 +228,39 @@ export default function NavBar({
           </span>
         </Popover>
 
-        <Popover
-          open={settingsOpen}
-          onOpenChange={setSettingsOpen}
-          trigger="click"
-          placement="bottomRight"
-          content={
-            <SettingsPopover
-              entries={settingsEntries}
-              onSelect={() => setSettingsOpen(false)}
+        {/* Wrapped, not classed, for the cascade reason above; the Button
+            stays the popover's trigger. */}
+        <span className="inline-flex max-lg:hidden">
+          <Popover
+            open={settingsOpen}
+            onOpenChange={setSettingsOpen}
+            trigger="click"
+            placement="bottomRight"
+            content={
+              <SettingsPopover
+                entries={settingsEntries}
+                onSelect={() => setSettingsOpen(false)}
+              />
+            }
+          >
+            <Button
+              type="text"
+              shape="circle"
+              title="Settings"
+              aria-label="Settings"
+              icon={<SettingOutlined style={TOOLBAR_ICON_STYLE} />}
             />
-          }
-        >
-          <Button
-            type="text"
-            shape="circle"
-            title="Settings"
-            aria-label="Settings"
-            icon={<SettingOutlined style={TOOLBAR_ICON_STYLE} />}
-          />
-        </Popover>
+          </Popover>
+        </span>
 
-        <UserMenu email={email} onOpenAccount={onOpenAccount} />
+        {/* The menu grows a Help item and the settings pages on compact, where
+            the two buttons above are hidden; on desktop it is unchanged. */}
+        <UserMenu
+          email={email}
+          settingsEntries={settingsEntries}
+          onOpenAccount={onOpenAccount}
+          onOpenHelp={onOpenHelp}
+        />
       </div>
     </header>
   );

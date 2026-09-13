@@ -12,9 +12,10 @@
  * `aside`.
  */
 
-import { Empty, Progress, Table, Tag, Tooltip, Typography } from "antd";
+import { Empty, Progress, Tag, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { WarningOutlined } from "@ant-design/icons";
+import { ResponsiveTable } from "@/components/responsive-table";
 import { formatDay } from "@/lib/costs/calendar";
 import {
   componentLabel,
@@ -202,7 +203,7 @@ export function ServicesTable({ rows }: { rows: readonly CostByService[] }) {
   ];
 
   return (
-    <Table<CostByService>
+    <ResponsiveTable<CostByService>
       dataSource={rows as CostByService[]}
       rowKey="service"
       columns={columns}
@@ -270,7 +271,7 @@ export function ComponentsTable({ rows }: { rows: readonly CostByComponent[] }) 
       }
       footnote="From the Component cost allocation tag. Spend on resources the tag does not cover is shown as Untagged."
     >
-      <Table<CostByComponent>
+      <ResponsiveTable<CostByComponent>
         dataSource={rows as CostByComponent[]}
         rowKey="component"
         columns={columns}

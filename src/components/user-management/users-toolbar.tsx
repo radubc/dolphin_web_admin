@@ -41,17 +41,21 @@ export default function UsersToolbar({
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-      <Input.Search
-        allowClear
-        value={filters.search}
-        placeholder="Search by name, email or role…"
-        aria-label="Search admin users"
-        onChange={(event) => onSearchChange(event.target.value)}
-        onSearch={onSearchChange}
-        style={{ width: 300 }}
-      />
+      {/* The width lives on this plain wrapper, which the search box fills: antd's own
+          full-width rule on the box is unlayered and would beat a Tailwind width
+          set on the box itself. Row-wide on compact, the old fixed width on desktop. */}
+      <div className="w-full lg:w-[300px]">
+        <Input.Search
+          allowClear
+          value={filters.search}
+          placeholder="Search by name, email or role…"
+          aria-label="Search admin users"
+          onChange={(event) => onSearchChange(event.target.value)}
+          onSearch={onSearchChange}
+        />
+      </div>
 
-      <span role="group" aria-label="Filter by status">
+      <span role="group" aria-label="Filter by status" className="max-lg:max-w-full max-lg:overflow-x-auto">
         <Segmented<UserStatusFilter>
           value={filters.status}
           onChange={onStatusChange}
@@ -66,7 +70,9 @@ export default function UsersToolbar({
         onChange={(value) => onRoleChange(value ?? null)}
         options={roleOptions}
         aria-label="Filter by role"
-        style={{ width: 220 }}
+        // On the box itself, unlike the search: antd sets no width on a Select
+        // outside a Form.Item, so nothing outranks this. Wrap it if that changes.
+        className="w-full lg:w-[220px]"
       />
     </div>
   );

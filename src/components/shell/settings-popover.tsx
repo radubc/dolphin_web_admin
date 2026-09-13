@@ -24,8 +24,10 @@ interface SettingsPopoverProps {
  * rather than opening a blank card.
  */
 export default function SettingsPopover({ entries, onSelect }: SettingsPopoverProps) {
+  // The cap keeps the card inside a 375px phone with the popover's own
+  // margin to spare; on anything wider it is the 320px it always was.
   return (
-    <div className="flex w-[320px] flex-col gap-0.5">
+    <div className="flex w-[320px] max-w-[calc(100vw-32px)] flex-col gap-0.5">
       <AccentHeading className="mb-2 px-2.5">Settings</AccentHeading>
       {entries.length === 0 ? (
         <Typography.Text type="secondary" className="px-2.5 py-2 text-sm">

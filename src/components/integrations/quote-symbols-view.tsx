@@ -23,13 +23,14 @@
  */
 
 import { useState } from "react";
-import { Alert, App, Button, Input, Popconfirm, Segmented, Spin, Switch, Table, Tooltip, Typography } from "antd";
+import { Alert, App, Button, Input, Popconfirm, Segmented, Spin, Switch, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { DeleteOutlined, LoadingOutlined, PlusOutlined, ReloadOutlined, StockOutlined } from "@ant-design/icons";
 import { ListEmpty, ListNoResults } from "@/components/empty-state";
 import Figures from "@/components/figures";
 import { ListPageFrame, ListPanel, ListTableRegion } from "@/components/list-page-frame";
 import { RibbonBar, RibbonButton, RibbonDivider } from "@/components/ribbon-bar";
+import { ResponsiveTable } from "@/components/responsive-table";
 import StatCard from "@/components/stat-card";
 import { canDo, type AdminCapabilities } from "@/lib/admin-access/types";
 import { integrationsApi } from "@/lib/integrations/client";
@@ -50,6 +51,26 @@ import {
 } from "./integrations-meta";
 import QuoteSymbolDrawer from "./quote-symbol-drawer";
 import { useQuoteSymbolsStore, WATCH_PAGE_SIZE_OPTIONS, type ActiveFilter, type KindFilter } from "./use-watch-lists";
+
+/**
+ * The "Symbol" column's content: the canonical ticker and, under it, the
+ * name if one is known. Shared between the column's own `render` and the
+ * compact card's heading so the two never drift apart — the "Kind" column is
+ * first in the desktop table, but a card is named for the symbol, not its
+ * kind.
+ */
+function renderSymbolCell(row: QuoteSymbol) {
+  return (
+    <span className="flex flex-col">
+      <code style={{ color: surfaceColors.text }}>{row.canonical}</code>
+      {row.name !== null && row.name !== "" && (
+        <span className="truncate text-xs" style={{ color: surfaceColors.textTertiary }}>
+          {row.name}
+        </span>
+      )}
+    </span>
+  );
+}
 
 export default function QuoteSymbolsView({
   capabilities,
@@ -112,16 +133,7 @@ export default function QuoteSymbolsView({
       title: "Symbol",
       key: "canonical",
       width: 190,
-      render: (_value, row) => (
-        <span className="flex flex-col">
-          <code style={{ color: surfaceColors.text }}>{row.canonical}</code>
-          {row.name !== null && row.name !== "" && (
-            <span className="truncate text-xs" style={{ color: surfaceColors.textTertiary }}>
-              {row.name}
-            </span>
-          )}
-        </span>
-      ),
+      render: (_value, row) => renderSymbolCell(row),
     },
     {
       title: "Exchange",
@@ -362,20 +374,24 @@ export default function QuoteSymbolsView({
 
   const toolbar = (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-      <Input.Search
-        allowClear
-        value={store.search}
-        loading={store.refreshing}
-        placeholder="Search symbol or name…"
-        aria-label="Search quote symbols"
-        // The query follows the box after a 300 ms pause; Enter only asks for
-        // the same query sooner, so both handlers set the same state.
-        onChange={(event) => store.setSearch(event.target.value)}
-        onSearch={store.setSearch}
-        style={{ width: 300 }}
-      />
+      {/* The width lives on this plain wrapper, which the search box fills: antd's own
+          full-width rule on the box is unlayered and would beat a Tailwind width
+          set on the box itself. Row-wide on compact, the old fixed width on desktop. */}
+      <div className="w-full lg:w-[300px]">
+        <Input.Search
+          allowClear
+          value={store.search}
+          loading={store.refreshing}
+          placeholder="Search symbol or name…"
+          aria-label="Search quote symbols"
+          // The query follows the box after a 300 ms pause; Enter only asks for
+          // the same query sooner, so both handlers set the same state.
+          onChange={(event) => store.setSearch(event.target.value)}
+          onSearch={store.setSearch}
+        />
+      </div>
 
-      <span role="group" aria-label="Filter by kind">
+      <span role="group" aria-label="Filter by kind" className="max-lg:max-w-full max-lg:overflow-x-auto">
         <Segmented<KindFilter>
           value={store.kindFilter}
           onChange={store.setKindFilter}
@@ -386,7 +402,7 @@ export default function QuoteSymbolsView({
         />
       </span>
 
-      <span role="group" aria-label="Filter by active">
+      <span role="group" aria-label="Filter by active" className="max-lg:max-w-full max-lg:overflow-x-auto">
         <Segmented<ActiveFilter>
           value={store.activeFilter}
           onChange={store.setActiveFilter}
@@ -455,13 +471,14 @@ export default function QuoteSymbolsView({
           <ListTableRegion>
             {(y) => (
               <ListPanel>
-                <Table<QuoteSymbol>
+                <ResponsiveTable<QuoteSymbol>
                   dataSource={items}
                   rowKey="id"
                   columns={columns}
                   size="middle"
                   loading={store.refreshing}
                   scroll={{ x: 1320, y }}
+                  compact={{ title: (row) => renderSymbolCell(row) }}
                   pagination={{
                     current: store.page,
                     pageSize: store.pageSize,

@@ -27,7 +27,7 @@
  * start; edit, retire/delete and the rest of the row stay exactly as they are.
  */
 
-import { Button, Popconfirm, Space, Table, Tag, Tooltip } from "antd";
+import { Button, Popconfirm, Space, Tag, Tooltip } from "antd";
 import type { ColumnType, ColumnsType } from "antd/es/table";
 import {
   CheckOutlined,
@@ -51,6 +51,7 @@ import {
   type StockRow,
 } from "@/lib/constants/types";
 import { useListTableBodyHeight } from "@/lib/hooks/use-table-body-height";
+import { ResponsiveTable } from "@/components/responsive-table";
 import { flowColors, surfaceColors } from "@/lib/theme/colors";
 import {
   baseTypeLabel,
@@ -261,13 +262,17 @@ function KindTable<T extends ConstantRow>({
   const bodyHeight = useListTableBodyHeight();
 
   return (
-    <Table<T>
+    <ResponsiveTable<T>
       dataSource={[...rows]}
       rowKey={(row) => row.id}
       columns={columns}
       size="middle"
       scroll={{ x: width, y: bodyHeight }}
       loading={loading}
+      // The card heading: the row's own name/symbol/code, the same text its
+      // aria-labels already use — not the State tag, which stays a normal
+      // row on the card.
+      compact={{ title: (row) => labelOf(row) }}
       // Retired rows stay in the list — they are still pushed — but they are
       // history, so they read at half weight.
       rowClassName={(row) => (isRetired(row) ? "opacity-55" : "")}
@@ -292,11 +297,9 @@ function KindTable<T extends ConstantRow>({
         onChange: (keys) => onSelectionChange(keys.map(String)),
         getCheckboxProps: (row) => ({ disabled: busy, "aria-label": `Select ${labelOf(row)}` }),
       }}
-      onRow={(row) => ({
-        onDoubleClick: () => {
-          if (canWrite && !busy) onOpen(row);
-        },
-      })}
+      // No handler at all when the row cannot be opened, rather than one that
+      // does nothing: on compact a handler is what makes the card offer "Open".
+      onRow={(row) => (canWrite && !busy ? { onDoubleClick: () => onOpen(row) } : {})}
     />
   );
 }

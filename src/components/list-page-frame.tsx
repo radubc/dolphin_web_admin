@@ -26,10 +26,18 @@
  *
  * Below 1100px the rail would squeeze the list to an unreadable width, so its
  * cards move above the content instead.
+ *
+ * On the *compact* layout — a phone or an upright tablet, `useCompactLayout`,
+ * below 1024px — two of those rules are relaxed, because a 700px-tall phone has
+ * no pixels to spend on chrome that never moves: the band scrolls with the page
+ * instead of sticking to the top of it, and `ListTableRegion` stops pinning the
+ * table, so the whole body is the one scroller. Everything at 1024px and above
+ * is the owner's desktop layout and is left exactly as it was.
  */
 
 import type { ReactNode } from "react";
 import PageHeader from "@/components/page-header";
+import { useCompactLayout } from "@/lib/hooks/use-compact-layout";
 import { useMediaQuery } from "@/lib/hooks/use-media-query";
 import {
   TableBodyHeightContext,
@@ -96,8 +104,14 @@ export function ListPageFrame({
       style={{ backgroundColor: surfaceColors.page }}
     >
       {/* Header and ribbon glued into one sticky block, so they move as a unit
-          instead of needing matched offsets against each other. */}
-      <div className="sticky top-0 z-10 shrink-0">
+          instead of needing matched offsets against each other.
+
+          Sticky from `lg` up only: on a phone the band is a third of the
+          window, and a title that cannot be scrolled away is a third of the
+          window the list never gets back. Below `lg` it is a plain static
+          block that scrolls off with the body, which is also why `z-10` stops
+          mattering there — a static box creates no stacking context. */}
+      <div className="z-10 shrink-0 lg:sticky lg:top-0">
         <PageHeader title={title} caption={caption} actions={figures} />
         {ribbon}
       </div>
@@ -108,7 +122,9 @@ export function ListPageFrame({
           on a very short window. A rail taller than the window scrolls inside
           its own `aside` below instead, which is its own scroll container. The
           band above therefore never moves, whatever the screen puts here. */}
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-5">
+      {/* `p-3` up to `lg`, the desktop's `p-5` from there: 16 of a phone's
+          ~390 horizontal pixels are worth more to a table than to a margin. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3 lg:p-5">
         {rail !== undefined && wide ? (
           <div className="flex min-h-0 flex-1 gap-4">
             <div className={LIST_COLUMN}>{children}</div>
@@ -128,8 +144,15 @@ export function ListPageFrame({
           </div>
         ) : (
           <>
+            {/* Stacked above the list. Every rail in the app is already a
+                single column of cards, and `max-lg:min-w-0` keeps it that way
+                on a phone: a card that would rather be wider than the window
+                shrinks instead of pushing the page sideways. */}
             {rail !== undefined && (
-              <section className="shrink-0" aria-label={`${title} breakdowns`}>
+              <section
+                className="shrink-0 max-lg:min-w-0"
+                aria-label={`${title} breakdowns`}
+              >
                 {rail}
               </section>
             )}
@@ -206,6 +229,15 @@ export function ListPanel({ children }: { children: ReactNode }) {
  * defaults on because that is how every list page uses this. Turn it off for
  * a region that wraps a bare `<Table>` with no panel of its own — the runs
  * drawer, say — so the height it measures does not overshoot by those 2px.
+ *
+ * **On the compact layout the region pins nothing.** A phone has no room for a
+ * scroller inside a scroller: the height it would hand out is a handful of
+ * rows, and the two scroll gestures fight each other. So below `lg` the region
+ * measures nothing, hands `undefined` to its function child and publishes
+ * `undefined` on the context — which is exactly the "not measured yet" case
+ * every table here already handles by rendering in full — and never clips
+ * itself, so the frame's body scrolls the page as one. `ResponsiveTable`
+ * (`src/components/responsive-table.tsx`) draws its cards in the same space.
  */
 export function ListTableRegion({
   children,
@@ -215,15 +247,25 @@ export function ListTableRegion({
   /** Whether the region has a `ListPanel`'s border to account for. */
   panelBorder?: boolean;
 }) {
+  // Structural rather than cosmetic — the number handed to `scroll.y` decides
+  // whether antd splits the table into a fixed header and a scrolling body at
+  // all — so this is the hook and not a Tailwind variant.
+  const compact = useCompactLayout();
   const { ref, height } = useTableBodyHeight({ panelBorder });
+  const pinned = compact ? undefined : height;
 
   return (
     <div
-      ref={ref}
-      className={`flex min-h-0 min-w-0 flex-1 flex-col ${height === undefined ? "" : "overflow-hidden"}`}
+      // The ref is only attached on the desktop layout: with no element to
+      // watch, the hook's observers never attach and it never re-renders.
+      ref={compact ? undefined : ref}
+      // Same computed box as before from `lg` up. Below it the region is an
+      // ordinary block in the body's column — content height, no clipping —
+      // so the cards or the full table simply scroll with the page.
+      className={`flex min-w-0 flex-col lg:min-h-0 lg:flex-1 ${pinned === undefined ? "" : "lg:overflow-hidden"}`}
     >
-      <TableBodyHeightContext value={height}>
-        {typeof children === "function" ? children(height) : children}
+      <TableBodyHeightContext value={pinned}>
+        {typeof children === "function" ? children(pinned) : children}
       </TableBodyHeightContext>
     </div>
   );

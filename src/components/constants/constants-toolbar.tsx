@@ -112,24 +112,29 @@ export default function ConstantsToolbar({
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-      <Input.Search
-        allowClear
-        value={search}
-        loading={searching}
-        disabled={disabled}
-        placeholder={placeholder}
-        aria-label={`Search ${KIND_META[kind].plural}`}
-        // The query follows the box after a 300 ms pause; Enter only asks for
-        // the same query sooner, so both handlers set the same state.
-        onChange={(event) => onSearchChange(event.target.value)}
-        onSearch={onSearchChange}
-        style={{ width: 320 }}
-      />
+      {/* The width lives on this plain wrapper, which the search box fills: antd's own
+          full-width rule on the box is unlayered and would beat a Tailwind width
+          set on the box itself. Row-wide on compact, the old fixed width on desktop. */}
+      <div className="w-full lg:w-[320px]">
+        <Input.Search
+          allowClear
+          value={search}
+          loading={searching}
+          disabled={disabled}
+          placeholder={placeholder}
+          aria-label={`Search ${KIND_META[kind].plural}`}
+          // The query follows the box after a 300 ms pause; Enter only asks for
+          // the same query sooner, so both handlers set the same state.
+          onChange={(event) => onSearchChange(event.target.value)}
+          onSearch={onSearchChange}
+        />
+      </div>
 
       {isMarketKind(kind) && (
         <span
           role="group"
           aria-label="Filter by market"
+          className="max-lg:w-full"
           title="Canadian and US listings come first whatever this is set to"
         >
           <Select<MarketFilter>
@@ -137,12 +142,14 @@ export default function ConstantsToolbar({
             disabled={disabled}
             onChange={onMarketChange}
             options={MARKET_OPTIONS}
-            style={{ width: 170 }}
+            // On the box itself, unlike the search: antd sets no width on a Select
+            // outside a Form.Item, so nothing outranks this. Wrap it if that changes.
+            className="w-full lg:w-[170px]"
           />
         </span>
       )}
 
-      <span role="group" aria-label="Filter by push state">
+      <span role="group" aria-label="Filter by push state" className="max-lg:max-w-full max-lg:overflow-x-auto">
         <Segmented<StateFilter>
           value={stateFilter}
           disabled={disabled}

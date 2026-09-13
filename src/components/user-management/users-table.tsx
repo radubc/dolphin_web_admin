@@ -6,12 +6,13 @@
  * opens the form, and a double-click anywhere on the row does the same.
  */
 
-import { Avatar, Button, Table, Tooltip } from "antd";
+import { Avatar, Button, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { EditOutlined } from "@ant-design/icons";
 import type { AdminRole, AdminUser } from "@/lib/admin-access/types";
 import { formatDate, formatDateTimeOrDash, formatRelativeTimeOrNever } from "@/lib/format";
 import { useListTableBodyHeight } from "@/lib/hooks/use-table-body-height";
+import { ResponsiveTable } from "@/components/responsive-table";
 import { accentBlue, accentTints, surfaceColors, withAlpha } from "@/lib/theme/colors";
 import { initialsOf, RoleTag, StatusTag, SUPER_ADMIN_COLOR, SuperAdminTag } from "./access-meta";
 
@@ -169,7 +170,7 @@ export default function UsersTable({
   ];
 
   return (
-    <Table<AdminUser>
+    <ResponsiveTable<AdminUser>
       dataSource={[...rows]}
       rowKey={(user) => user.id}
       columns={columns}

@@ -17,6 +17,17 @@
  *     must never reflow while a user is changing a selection.
  *   - The trailing slot is pushed right by a flexible spacer, so the read-out
  *     sits at the far edge no matter how many buttons precede it.
+ *
+ * The first rule is what shapes the *compact* layout (a phone or an upright
+ * tablet, below `lg`): the actions may not wrap, drop into an overflow menu or
+ * change order, so the row of them becomes a strip that scrolls sideways with
+ * a finger, and the trailing read-out moves to its own line underneath where
+ * there is width for it. Nothing is hidden and nothing moves.
+ *
+ * Desktop is untouched, and by construction: the two wrappers the compact
+ * layout needs are `display: contents` from `lg` up, so at desktop widths the
+ * buttons, the spacer and the read-out are direct flex children of the band
+ * exactly as they were before the strip existed.
  */
 
 import { Button, Tooltip } from "antd";
@@ -119,17 +130,39 @@ export interface RibbonBarProps {
 export function RibbonBar({ children, trailing }: RibbonBarProps) {
   return (
     <div
-      className="flex items-center gap-1 px-3 py-1"
+      // A column below `lg` — the strip, then the read-out — and the same
+      // single centred row it has always been from `lg` up.
+      className="flex flex-col px-3 py-1 lg:flex-row lg:items-center lg:gap-1"
       style={{
         backgroundColor: surfaceColors.cardHeader,
         borderBottom: `1px solid ${surfaceColors.separator}`,
       }}
     >
-      {children}
+      {/* The scrolling strip. `lg:contents` dissolves it at desktop widths, so
+          the buttons remain direct children of the band and neither the
+          overflow nor the gap declared here ever applies there.
 
-      <div className="min-w-3 flex-1" />
+          On compact: no wrapping (a flex row does not wrap by default),
+          `[&>*]:shrink-0` so a button keeps its width instead of being
+          squeezed out of shape — scoped to `max-lg` because a desktop ribbon
+          is allowed to shrink its buttons as it always has — and the
+          scrollbar is hidden in both engines, since a bar that is 56px tall
+          cannot afford a 15px gutter and a finger needs no bar to drag. */}
+      <div className="flex items-center gap-1 overflow-x-auto max-lg:[&>*]:shrink-0 lg:contents [&::-webkit-scrollbar]:hidden [scrollbar-width:none]">
+        {children}
 
-      {trailing}
+        {/* The flexible spacer that pushes the read-out to the far edge.
+            Desktop only: on compact the read-out is on its own line and a
+            spacer would only add scrollable width to the strip. */}
+        <div className="hidden min-w-3 flex-1 lg:block" />
+      </div>
+
+      {trailing !== undefined && trailing !== null && (
+        // Its own line on compact, right-aligned under the strip; dissolved
+        // into the band's row from `lg` up, where it is the element the
+        // spacer above pushes right.
+        <div className="lg:contents max-lg:pt-0.5 max-lg:text-right">{trailing}</div>
+      )}
     </div>
   );
 }

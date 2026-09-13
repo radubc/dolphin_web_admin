@@ -11,11 +11,12 @@
  */
 
 import { useMemo } from "react";
-import { Alert, Button, Segmented, Spin, Table, Tag, Tooltip } from "antd";
+import { Alert, Button, Segmented, Spin, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { ApartmentOutlined, CloudServerOutlined, EditOutlined, PlusCircleOutlined, ReloadOutlined, ThunderboltOutlined } from "@ant-design/icons";
 import Figures from "@/components/figures";
 import { ListPageFrame, ListPanel, ListTableRegion } from "@/components/list-page-frame";
+import { ResponsiveTable } from "@/components/responsive-table";
 import { RibbonBar, RibbonButton } from "@/components/ribbon-bar";
 import { presentationFor } from "@/components/shell/definitions";
 import StatCard from "@/components/stat-card";
@@ -271,9 +272,9 @@ export default function AccessMapPage({ capabilities }: { capabilities: AdminCap
           {(y) => (
             <ListPanel>
               {view === "pages" ? (
-                <Table<PageRule> dataSource={store.pages} rowKey="key" columns={pageColumns} size="middle" pagination={false} scroll={{ x: 960, y }} />
+                <ResponsiveTable<PageRule> dataSource={store.pages} rowKey="key" columns={pageColumns} size="middle" pagination={false} scroll={{ x: 960, y }} />
               ) : (
-                <Table<EndpointRule> dataSource={store.endpoints} rowKey="key" columns={endpointColumns} size="middle" pagination={false} scroll={{ x: 1040, y }} />
+                <ResponsiveTable<EndpointRule> dataSource={store.endpoints} rowKey="key" columns={endpointColumns} size="middle" pagination={false} scroll={{ x: 1040, y }} />
               )}
             </ListPanel>
           )}
@@ -291,7 +292,7 @@ export default function AccessMapPage({ capabilities }: { capabilities: AdminCap
         ribbon={ribbon}
         rail={store.loading ? undefined : rail}
       >
-        <span role="group" aria-label="Section">
+        <span role="group" aria-label="Section" className="max-lg:max-w-full max-lg:overflow-x-auto">
           <Segmented<View>
             value={view}
             onChange={setView}

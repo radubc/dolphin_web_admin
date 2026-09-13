@@ -16,10 +16,11 @@
  */
 
 import { useEffect, useState } from "react";
-import { Alert, Button, Drawer, Empty, Spin, Table, Tooltip, Typography } from "antd";
+import { Alert, Button, Drawer, Empty, Spin, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { HistoryOutlined, ReloadOutlined } from "@ant-design/icons";
 import { ListTableRegion } from "@/components/list-page-frame";
+import { ResponsiveTable } from "@/components/responsive-table";
 import { ENTRY_DRAWER_WIDTH } from "@/components/shell/definitions";
 import { integrationsApi } from "@/lib/integrations/client";
 import type { Integration, IntegrationRun } from "@/lib/integrations/types";
@@ -168,7 +169,7 @@ export default function IntegrationRunsDrawer({
             body — so there is no panel border for the region to reserve. */}
         <ListTableRegion panelBorder={false}>
           {(y) => (
-            <Table<IntegrationRun>
+            <ResponsiveTable<IntegrationRun>
               dataSource={runs ?? []}
               rowKey="id"
               columns={columns}

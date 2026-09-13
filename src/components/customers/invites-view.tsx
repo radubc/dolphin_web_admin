@@ -32,7 +32,6 @@ import {
   Segmented,
   Space,
   Spin,
-  Table,
   Tooltip,
   Typography,
 } from "antd";
@@ -50,6 +49,7 @@ import { ListEmpty, ListNoResults } from "@/components/empty-state";
 import Figures from "@/components/figures";
 import { ListPageFrame, ListPanel, ListTableRegion } from "@/components/list-page-frame";
 import { RibbonBar, RibbonButton, RibbonDivider } from "@/components/ribbon-bar";
+import { ResponsiveTable } from "@/components/responsive-table";
 import StatCard from "@/components/stat-card";
 import { customersApi } from "@/lib/customers/client";
 import type { CustomerInvite } from "@/lib/customers/types";
@@ -376,18 +376,22 @@ export default function InvitesView({ canInvite, onInvite, switcher, onSendabili
 
   const toolbar = (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-      <Input.Search
-        allowClear
-        value={store.search}
-        loading={store.refreshing}
-        placeholder="Search email or note…"
-        aria-label="Search invitations"
-        onChange={(event) => store.setSearch(event.target.value)}
-        onSearch={store.setSearch}
-        style={{ width: 300 }}
-      />
+      {/* The width lives on this plain wrapper, which the search box fills: antd's own
+          full-width rule on the box is unlayered and would beat a Tailwind width
+          set on the box itself. Row-wide on compact, the old fixed width on desktop. */}
+      <div className="w-full lg:w-[300px]">
+        <Input.Search
+          allowClear
+          value={store.search}
+          loading={store.refreshing}
+          placeholder="Search email or note…"
+          aria-label="Search invitations"
+          onChange={(event) => store.setSearch(event.target.value)}
+          onSearch={store.setSearch}
+        />
+      </div>
 
-      <span role="group" aria-label="Filter by status">
+      <span role="group" aria-label="Filter by status" className="max-lg:max-w-full max-lg:overflow-x-auto">
         <Segmented<InviteStatusFilter>
           value={store.statusFilter}
           onChange={store.setStatusFilter}
@@ -454,7 +458,7 @@ export default function InvitesView({ canInvite, onInvite, switcher, onSendabili
           <ListTableRegion>
             {(y) => (
               <ListPanel>
-                <Table<CustomerInvite>
+                <ResponsiveTable<CustomerInvite>
                   dataSource={items}
                   rowKey="id"
                   columns={columns}

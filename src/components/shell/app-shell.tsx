@@ -4,6 +4,7 @@ import { useCallback, useState, type ReactNode } from "react";
 import { Drawer, Typography } from "antd";
 import AccountSecurityDrawer from "@/components/account/account-security-drawer";
 import { surfaceColors } from "@/lib/theme/colors";
+import BottomTabBar from "./bottom-tab-bar";
 import EntryDrawer from "./entry-drawer";
 import NavBar from "./nav-bar";
 import NotificationCenter from "./notification-center";
@@ -38,6 +39,10 @@ interface AppShellProps {
  * The authenticated frame: nav bar on top, tab rail on the left, page content
  * on the right, and every drawer and overlay mounted here so they sit above
  * the whole window — the same arrangement as the consumer web app's shell.
+ *
+ * Below `lg` the rail moves to the bottom of the column as a scrolling tab
+ * bar and the nav bar sheds everything the avatar menu can carry instead; at
+ * `lg` and above the frame is exactly what it has always been.
  *
  * Overlay state lives at this level rather than in the nav bar because a drawer
  * raised from a quick action has to survive the popover that opened it, and
@@ -112,6 +117,11 @@ export default function AppShell({
             taller than the window: Overview, the stubs, a stack of cards. */}
         <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">{children}</main>
       </div>
+
+      {/* The compact layout's navigation, hidden at `lg` and above. A row of
+          the column rather than a fixed overlay, so it takes its height out of
+          `<main>` instead of covering the bottom of the page. */}
+      <BottomTabBar tabs={tabs} />
 
       {/* Learning Centre. Placeholder content, as in the consumer app. */}
       <Drawer
