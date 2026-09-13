@@ -76,9 +76,12 @@ export default function BottomTabBar({ tabs }: { tabs: readonly ShellTab[] }) {
 
   // Not state, so this is not the `setState`-in-an-effect the repo forbids:
   // it reads the DOM the render just produced and scrolls it. On desktop the
-  // bar is `display: none` and the call is a no-op.
+  // bar is `display: none`, which is what a null `offsetParent` means, and
+  // the call is skipped rather than made as a no-op on every navigation.
   useEffect(() => {
-    activeTabRef.current?.scrollIntoView({ inline: "center", block: "nearest" });
+    const tab = activeTabRef.current;
+    if (tab === null || tab.offsetParent === null) return;
+    tab.scrollIntoView({ inline: "center", block: "nearest" });
   }, [pathname]);
 
   return (

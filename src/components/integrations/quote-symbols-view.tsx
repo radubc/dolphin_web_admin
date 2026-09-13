@@ -478,7 +478,7 @@ export default function QuoteSymbolsView({
                   size="middle"
                   loading={store.refreshing}
                   scroll={{ x: 1320, y }}
-                  compact={{ title: (row) => renderSymbolCell(row) }}
+                  compact={{ title: (row) => renderSymbolCell(row), titleColumn: "canonical" }}
                   pagination={{
                     current: store.page,
                     pageSize: store.pageSize,
