@@ -29,6 +29,7 @@ import {
   Typography,
 } from "antd";
 import { DatabaseOutlined } from "@ant-design/icons";
+import { FormErrorSummary, useFormErrorSummary } from "@/components/form-error-summary";
 import FormSection from "@/components/form-section";
 import { constantsApi } from "@/lib/constants/client";
 import type {
@@ -163,7 +164,7 @@ function InstrumentFields({ withType }: { withType: boolean }) {
         label="Symbol"
         tooltip="The ticker as the exchange lists it, e.g. AAPL. Unique together with the exchange."
         normalize={upper}
-        rules={[{ required: true, whitespace: true, message: "Symbol is required" }]}
+        rules={[{ required: true, whitespace: true }]}
       >
         <Input placeholder="AAPL" maxLength={40} autoComplete="off" style={{ width: 180 }} />
       </Form.Item>
@@ -171,7 +172,7 @@ function InstrumentFields({ withType }: { withType: boolean }) {
       <Form.Item
         name="name"
         label="Name"
-        rules={[{ required: true, whitespace: true, message: "Name is required" }]}
+        rules={[{ required: true, whitespace: true }]}
       >
         <Input placeholder="e.g., Apple Inc." maxLength={200} autoComplete="off" />
       </Form.Item>
@@ -181,7 +182,7 @@ function InstrumentFields({ withType }: { withType: boolean }) {
         label="Currency"
         tooltip="The currency the instrument trades in, e.g. USD."
         normalize={upper}
-        rules={[{ required: true, whitespace: true, message: "Currency is required" }]}
+        rules={[{ required: true, whitespace: true }]}
       >
         <Input placeholder="USD" maxLength={12} autoComplete="off" style={{ width: 140 }} />
       </Form.Item>
@@ -190,7 +191,7 @@ function InstrumentFields({ withType }: { withType: boolean }) {
         name="exchange"
         label="Exchange"
         tooltip="The exchange's name as the feed writes it, e.g. NASDAQ."
-        rules={[{ required: true, whitespace: true, message: "Exchange is required" }]}
+        rules={[{ required: true, whitespace: true }]}
       >
         <Input placeholder="NASDAQ" maxLength={80} autoComplete="off" style={{ width: 260 }} />
       </Form.Item>
@@ -200,7 +201,7 @@ function InstrumentFields({ withType }: { withType: boolean }) {
         label="MIC"
         tooltip="The ISO 10383 code of the exchange, e.g. XNGS. It is what the Markets catalog keys on."
         normalize={upper}
-        rules={[{ required: true, whitespace: true, message: "MIC is required" }]}
+        rules={[{ required: true, whitespace: true }]}
       >
         <Input placeholder="XNGS" maxLength={12} autoComplete="off" style={{ width: 160 }} />
       </Form.Item>
@@ -209,7 +210,7 @@ function InstrumentFields({ withType }: { withType: boolean }) {
         name="country"
         label="Country"
         tooltip="The country as the feed names it, e.g. United States. A name, not a code."
-        rules={[{ required: true, whitespace: true, message: "Country is required" }]}
+        rules={[{ required: true, whitespace: true }]}
       >
         <Input placeholder="United States" maxLength={80} autoComplete="off" style={{ width: 260 }} />
       </Form.Item>
@@ -219,7 +220,7 @@ function InstrumentFields({ withType }: { withType: boolean }) {
           name="instrumentType"
           label="Type"
           tooltip="Free text from the feed, e.g. Common Stock or Depositary Receipt."
-          rules={[{ required: true, whitespace: true, message: "Type is required" }]}
+          rules={[{ required: true, whitespace: true }]}
         >
           <Input placeholder="Common Stock" maxLength={80} autoComplete="off" style={{ width: 260 }} />
         </Form.Item>
@@ -265,7 +266,6 @@ function FormBody({
   error,
   onDismissError,
   onSubmit,
-  onInvalid,
 }: {
   target: ConstantFormTarget;
   currencies: readonly CurrencyRow[];
@@ -285,10 +285,12 @@ function FormBody({
    * patch even though the Select cannot display that raw value.
    */
   onSubmit: (values: ConstantFormValues, touchedFields: ReadonlySet<string>) => void;
-  onInvalid: () => void;
 }) {
   const [form] = Form.useForm<ConstantFormValues>();
   const touchedFieldsRef = useRef<Set<string>>(new Set());
+  // Remounted per row (`key` on this body) and unmounted on close
+  // (`destroyOnHidden`), so the summary starts empty on every open.
+  const { errorSummary, onFinishFailed, reset } = useFormErrorSummary();
 
   const initialValues = useMemo<Partial<ConstantFormValues>>(() => {
     switch (target.kind) {
@@ -431,17 +433,20 @@ function FormBody({
       form={form}
       name={FORM_NAME}
       layout="vertical"
-      requiredMark
       disabled={busy}
       initialValues={initialValues}
       onValuesChange={(changedValues) => {
         for (const key of Object.keys(changedValues)) touchedFieldsRef.current.add(key);
       }}
-      onFinish={(values) => onSubmit(values, touchedFieldsRef.current)}
-      onFinishFailed={onInvalid}
-      scrollToFirstError
+      onFinish={(values) => {
+        reset();
+        onSubmit(values, touchedFieldsRef.current);
+      }}
+      onFinishFailed={onFinishFailed}
       className="flex flex-col gap-4"
     >
+      <FormErrorSummary summary={errorSummary} onClose={reset} />
+
       {error === null ? null : (
         <Alert type="error" showIcon title={error} closable={{ onClose: onDismissError }} />
       )}
@@ -456,7 +461,7 @@ function FormBody({
             <Form.Item
               name="name"
               label="Name"
-              rules={[{ required: true, whitespace: true, message: "Name is required" }]}
+              rules={[{ required: true, whitespace: true }]}
             >
               <Input placeholder="e.g., Canada" maxLength={120} autoComplete="off" />
             </Form.Item>
@@ -467,7 +472,7 @@ function FormBody({
               tooltip="The two-letter ISO 3166-1 code, e.g. CA."
               normalize={upper}
               rules={[
-                { required: true, whitespace: true, message: "Alpha-2 is required" },
+                { required: true, whitespace: true },
                 { pattern: /^[A-Z]{2}$/, message: "Two letters, e.g. CA" },
               ]}
             >
@@ -480,7 +485,7 @@ function FormBody({
               tooltip="The three-letter ISO 3166-1 code, e.g. CAN."
               normalize={upper}
               rules={[
-                { required: true, whitespace: true, message: "Alpha-3 is required" },
+                { required: true, whitespace: true },
                 { pattern: /^[A-Z]{3}$/, message: "Three letters, e.g. CAN" },
               ]}
             >
@@ -520,7 +525,7 @@ function FormBody({
               tooltip="The three-letter ISO 4217 code, e.g. CAD."
               normalize={upper}
               rules={[
-                { required: true, whitespace: true, message: "Code is required" },
+                { required: true, whitespace: true },
                 { pattern: /^[A-Z]{3}$/, message: "Three letters, e.g. CAD" },
               ]}
             >
@@ -530,7 +535,7 @@ function FormBody({
             <Form.Item
               name="name"
               label="Name"
-              rules={[{ required: true, whitespace: true, message: "Name is required" }]}
+              rules={[{ required: true, whitespace: true }]}
             >
               <Input placeholder="e.g., Canadian dollar" maxLength={120} autoComplete="off" />
             </Form.Item>
@@ -551,7 +556,7 @@ function FormBody({
             <Form.Item
               name="name"
               label="Name"
-              rules={[{ required: true, whitespace: true, message: "Name is required" }]}
+              rules={[{ required: true, whitespace: true }]}
             >
               <Input placeholder="e.g., Royal Bank of Canada" maxLength={160} autoComplete="off" />
             </Form.Item>
@@ -561,7 +566,7 @@ function FormBody({
               label="Institution number"
               tooltip="Digits only, as the clearing system writes it."
               rules={[
-                { required: true, whitespace: true, message: "Institution number is required" },
+                { required: true, whitespace: true },
                 { pattern: /^\d{1,10}$/, message: "Digits only" },
               ]}
             >
@@ -579,7 +584,7 @@ function FormBody({
               label="Type"
               className="mb-0"
               tooltip="Free text. The catalog already uses “bank” and “credit union”."
-              rules={[{ required: true, whitespace: true, message: "Type is required" }]}
+              rules={[{ required: true, whitespace: true }]}
             >
               <AutoComplete
                 options={typeOptions}
@@ -598,7 +603,7 @@ function FormBody({
             <Form.Item
               name="name"
               label="Name"
-              rules={[{ required: true, whitespace: true, message: "Name is required" }]}
+              rules={[{ required: true, whitespace: true }]}
             >
               <Input placeholder="e.g., Groceries" maxLength={120} autoComplete="off" />
             </Form.Item>
@@ -654,7 +659,7 @@ function FormBody({
             label="Name"
             className="mb-0"
             tooltip="The grouping account types sit in, e.g. Banking. Account types point at it by id."
-            rules={[{ required: true, whitespace: true, message: "Name is required" }]}
+            rules={[{ required: true, whitespace: true }]}
           >
             <Input placeholder="e.g., Banking" maxLength={120} autoComplete="off" />
           </Form.Item>
@@ -666,7 +671,7 @@ function FormBody({
               name="name"
               label="Name"
               tooltip="The machine name the main app matches on, e.g. Chequing. Unique among live account types."
-              rules={[{ required: true, whitespace: true, message: "Name is required" }]}
+              rules={[{ required: true, whitespace: true }]}
             >
               <Input placeholder="e.g., Chequing" maxLength={120} autoComplete="off" />
             </Form.Item>
@@ -675,7 +680,7 @@ function FormBody({
               name="displayName"
               label="Display name"
               tooltip="What the app shows a user. Often the same as the name."
-              rules={[{ required: true, whitespace: true, message: "Display name is required" }]}
+              rules={[{ required: true, whitespace: true }]}
             >
               <Input placeholder="e.g., Chequing" maxLength={120} autoComplete="off" />
             </Form.Item>
@@ -738,7 +743,7 @@ function FormBody({
               label="Symbol"
               tooltip="The pair as the market-data feed writes it, e.g. BTC/USD."
               normalize={upper}
-              rules={[{ required: true, whitespace: true, message: "Symbol is required" }]}
+              rules={[{ required: true, whitespace: true }]}
             >
               <Input placeholder="BTC/USD" maxLength={40} autoComplete="off" style={{ width: 220 }} />
             </Form.Item>
@@ -748,7 +753,7 @@ function FormBody({
               label="Base currency"
               tooltip="What is being bought, e.g. BTC."
               normalize={upper}
-              rules={[{ required: true, whitespace: true, message: "Base currency is required" }]}
+              rules={[{ required: true, whitespace: true }]}
             >
               <Input placeholder="BTC" maxLength={20} autoComplete="off" style={{ width: 180 }} />
             </Form.Item>
@@ -758,7 +763,7 @@ function FormBody({
               label="Quote currency"
               tooltip="What it is priced in, e.g. USD."
               normalize={upper}
-              rules={[{ required: true, whitespace: true, message: "Quote currency is required" }]}
+              rules={[{ required: true, whitespace: true }]}
             >
               <Input placeholder="USD" maxLength={20} autoComplete="off" style={{ width: 180 }} />
             </Form.Item>
@@ -791,7 +796,7 @@ function FormBody({
               label="MIC"
               tooltip="The ISO 10383 market identifier code, e.g. XNGS. Unique across markets."
               normalize={upper}
-              rules={[{ required: true, whitespace: true, message: "MIC is required" }]}
+              rules={[{ required: true, whitespace: true }]}
             >
               <Input placeholder="XNGS" maxLength={12} autoComplete="off" style={{ width: 160 }} />
             </Form.Item>
@@ -799,7 +804,7 @@ function FormBody({
             <Form.Item
               name="marketName"
               label="Name"
-              rules={[{ required: true, whitespace: true, message: "Name is required" }]}
+              rules={[{ required: true, whitespace: true }]}
             >
               <Input
                 placeholder="e.g., NASDAQ/NGS (GLOBAL SELECT MARKET)"
@@ -813,7 +818,7 @@ function FormBody({
               label="Operating MIC"
               tooltip="The venue this segment operates under. For an operating market itself it is the same as the MIC."
               normalize={upper}
-              rules={[{ required: true, whitespace: true, message: "Operating MIC is required" }]}
+              rules={[{ required: true, whitespace: true }]}
             >
               <Input placeholder="XNAS" maxLength={12} autoComplete="off" style={{ width: 160 }} />
             </Form.Item>
@@ -823,7 +828,7 @@ function FormBody({
               label="Country code"
               tooltip="The two-letter ISO 3166-1 code of the country the market sits in, e.g. US."
               normalize={upper}
-              rules={[{ required: true, whitespace: true, message: "Country code is required" }]}
+              rules={[{ required: true, whitespace: true }]}
             >
               <Input placeholder="US" maxLength={8} autoComplete="off" style={{ width: 140 }} />
             </Form.Item>
@@ -832,7 +837,7 @@ function FormBody({
               name="city"
               label="City"
               className="mb-0"
-              rules={[{ required: true, whitespace: true, message: "City is required" }]}
+              rules={[{ required: true, whitespace: true }]}
             >
               <Input placeholder="e.g., New York" maxLength={120} autoComplete="off" />
             </Form.Item>
@@ -1202,9 +1207,6 @@ export default function ConstantFormDrawer({
           onSubmit={(values, touchedFields) => {
             void handleSubmit(values, touchedFields);
           }}
-          onInvalid={() =>
-            setError("Some fields need attention. Check the highlighted ones and try again.")
-          }
         />
       )}
     </Drawer>

@@ -20,6 +20,10 @@ import {
 import { LockOutlined, MailOutlined, NumberOutlined } from "@ant-design/icons";
 import AuthLink from "@/components/auth-link";
 import {
+  FormErrorSummary,
+  useFormErrorSummary,
+} from "@/components/form-error-summary";
+import {
   confirmPasswordReset,
   requestPasswordReset,
   type ConfirmResetState,
@@ -166,6 +170,11 @@ export default function ForgotPasswordForm() {
   const emailEdits = useEditedFields();
   const resetEdits = useEditedFields();
 
+  // One summary per step, so what was missing on step one is not still on
+  // screen at step two.
+  const emailSummary = useFormErrorSummary();
+  const resetSummary = useFormErrorSummary();
+
   // Autofill that landed before hydration.
   useEffect(() => {
     syncEmailFromDom();
@@ -178,6 +187,7 @@ export default function ForgotPasswordForm() {
       email: values.email ?? "",
     });
     emailEdits.clear();
+    emailSummary.reset();
     startTransition(() => {
       requestAction(formData);
     });
@@ -194,6 +204,7 @@ export default function ForgotPasswordForm() {
     // it; either way the server re-validates the address.
     formData.set("email", email);
     resetEdits.clear();
+    resetSummary.reset();
     startTransition(() => {
       confirmAction(formData);
     });
@@ -212,6 +223,8 @@ export default function ForgotPasswordForm() {
     // still count against the errors of whatever is submitted next.
     resetEdits.clear();
     emailEdits.clear();
+    emailSummary.reset();
+    resetSummary.reset();
   }
 
   const pending = requestPending || confirmPending;
@@ -251,16 +264,22 @@ export default function ForgotPasswordForm() {
           ref={emailFormRef}
           layout="vertical"
           method="post"
-          requiredMark={false}
           initialValues={{ email }}
           // Capture phase: runs before rc-form's own onSubmit handler, so the
           // store is up to date before validation reads it.
           onSubmitCapture={syncEmailFromDom}
           onFinish={handleRequestFinish}
+          onFinishFailed={emailSummary.onFinishFailed}
           onValuesChange={emailEdits.handleValuesChange}
           disabled={pending}
           size="large"
         >
+          <FormErrorSummary
+            summary={emailSummary.errorSummary}
+            onClose={emailSummary.reset}
+            style={{ marginBottom: 20 }}
+          />
+
           {requestState.error ? (
             <Alert
               type="error"
@@ -278,7 +297,7 @@ export default function ForgotPasswordForm() {
             validateStatus={emailError ? "error" : undefined}
             help={emailError}
             rules={[
-              { required: true, message: "Enter your email address." },
+              { required: true },
               { type: "email", message: "Enter a valid email address." },
             ]}
           >
@@ -314,9 +333,9 @@ export default function ForgotPasswordForm() {
           ref={resetFormRef}
           layout="vertical"
           method="post"
-          requiredMark={false}
           onSubmitCapture={syncResetFromDom}
           onFinish={handleConfirmFinish}
+          onFinishFailed={resetSummary.onFinishFailed}
           onValuesChange={resetEdits.handleValuesChange}
           disabled={pending}
           size="large"
@@ -342,6 +361,12 @@ export default function ForgotPasswordForm() {
             readOnly
             tabIndex={-1}
             aria-hidden
+          />
+
+          <FormErrorSummary
+            summary={resetSummary.errorSummary}
+            onClose={resetSummary.reset}
+            style={{ marginBottom: 20 }}
           />
 
           {/*
@@ -376,9 +401,7 @@ export default function ForgotPasswordForm() {
             htmlFor="code"
             validateStatus={confirmFieldError("code") ? "error" : undefined}
             help={confirmFieldError("code")}
-            rules={[
-              { required: true, message: "Enter the code from the email." },
-            ]}
+            rules={[{ required: true }]}
           >
             <Input
               id="code"
@@ -401,7 +424,7 @@ export default function ForgotPasswordForm() {
             htmlFor="password"
             validateStatus={confirmFieldError("password") ? "error" : undefined}
             help={confirmFieldError("password")}
-            rules={[{ required: true, message: "Enter a new password." }]}
+            rules={[{ required: true }]}
           >
             <Input.Password
               id="password"
@@ -420,7 +443,7 @@ export default function ForgotPasswordForm() {
             validateStatus={confirmFieldError("confirm") ? "error" : undefined}
             help={confirmFieldError("confirm")}
             rules={[
-              { required: true, message: "Re-enter the new password." },
+              { required: true },
               ({ getFieldValue }) => ({
                 validator(_rule, value: string | undefined) {
                   if (!value || getFieldValue("password") === value) {

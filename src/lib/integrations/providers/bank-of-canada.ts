@@ -1,5 +1,6 @@
 /**
- * The Bank of Canada Valet API: one call a day for the whole FX group.
+ * The Bank of Canada Valet API: one call for the whole FX group, whether the
+ * caller wants the latest observation or a stretch of history.
  *
  * `GET {base}/observations/group/FX_RATES_DAILY/json?recent=1` answers
  *
@@ -19,6 +20,15 @@
  * sorted by date. The entry with the newest date is therefore the one to
  * read, and a currency missing from it is one the Bank no longer publishes.
  *
+ * `start_date` / `end_date` on the same URL answer a **range** instead: one
+ * `observations[]` entry per published business day, ascending, each carrying
+ * that day's series. A range with no business day in it (a weekend, a holiday)
+ * answers an empty array, which is data and not an error. A series the Bank
+ * discontinued simply stops appearing on the days after it ended. That is the
+ * shape `fetchFxObservations` returns, and it is what the historical half of
+ * `GET /api/v1/service/exchange-rates` is built on: one call however many days
+ * and however many pairs were asked for.
+ *
  * Fetch, parse and the arithmetic that turns the CAD series into an arbitrary
  * pair — all pure, no Prisma. The rules mirror the macOS
  * `BankOfCanadaService`:
@@ -34,7 +44,15 @@
  * yesterday's observation date. That is correct and is why the observation
  * date is stored beside the rate instead of being assumed.
  */
-import { isoDateFrom, todayIn, type IsoDate } from "../dates";
+import {
+  businessDayOnOrBefore,
+  isoDateFrom,
+  minIsoDate,
+  minutesOfDayIn,
+  shiftDays,
+  todayIn,
+  type IsoDate,
+} from "../dates";
 import { fetchJson, ProviderError, toNumber } from "./http";
 
 /** One request, one small payload; 30 s is generous. */
@@ -42,6 +60,32 @@ export const RATES_TIMEOUT_MS = 30_000;
 
 /** The currency every series is quoted against. */
 export const BASE_CURRENCY = "CAD";
+
+/** "typically published once each business day by 16:30 (ET)", minutes since midnight. */
+export const PUBLISHED_BY_MINUTE = 16 * 60 + 30;
+
+/**
+ * The newest day the Bank can possibly have published on or before `to`.
+ *
+ * Answers "is a cache that stops here as complete as it could be?", which is
+ * what keeps a lookup for a window ending today from calling the Bank on every
+ * request: before 16:30 Eastern there is no observation for today yet, so a
+ * cache ending on the previous business day is already complete. A holiday is
+ * not modelled and reads as a business day — the cost is one extra free call,
+ * never a wrong answer.
+ *
+ * Returns a day **before** `to` when nothing could have been published in the
+ * window at all (a Saturday-to-Sunday range), which the callers read as "there
+ * is nothing to fetch".
+ */
+export function publishedThrough(to: IsoDate): IsoDate {
+  const today = todayIn();
+  const day = businessDayOnOrBefore(minIsoDate(to, today));
+  if (day === today && minutesOfDayIn() < PUBLISHED_BY_MINUTE) {
+    return businessDayOnOrBefore(shiftDays(day, -1));
+  }
+  return day;
+}
 
 /** The published series for one observation day. */
 export interface FxObservation {
@@ -93,6 +137,49 @@ export async function fetchFxObservation(baseUrl: string): Promise<FxObservation
     throw new ProviderError("bad_response", `${url} answered no usable series.`);
   }
   return best;
+}
+
+/**
+ * Fetches every published observation between two calendar days, inclusive,
+ * oldest first.
+ *
+ * The counterpart of `fetchFxObservation` for the historical lookups. An empty
+ * array is a legitimate answer — the Bank publishes nothing on a weekend or a
+ * holiday — so, unlike the "latest" call, an empty `observations[]` is **not**
+ * an error here. A payload with no `observations` array at all still is: that
+ * is a broken response, not a quiet week.
+ *
+ * The Bank returns the days in order, but nothing in the contract promises it,
+ * so they are sorted here; every caller relies on "oldest first".
+ *
+ * @throws {ProviderError} the call failed or the payload was not the group
+ * document.
+ */
+export async function fetchFxObservations(
+  baseUrl: string,
+  from: IsoDate,
+  to: IsoDate,
+): Promise<FxObservation[]> {
+  const url =
+    `${baseUrl}/observations/group/FX_RATES_DAILY/json` +
+    `?start_date=${encodeURIComponent(from)}&end_date=${encodeURIComponent(to)}`;
+  const body = await fetchJson<unknown>(url, { timeoutMs: RATES_TIMEOUT_MS });
+  const observations = record(body)?.observations;
+  if (!Array.isArray(observations)) {
+    throw new ProviderError("bad_response", `${url} answered no observations array.`);
+  }
+  const parsed: FxObservation[] = [];
+  for (const entry of observations) {
+    const observation = parseObservation(record(entry));
+    // Only days inside the window: a defensive filter, not a correction. The
+    // Valet API honours the bounds; a day outside them would be a surprise
+    // that must not reach the database as a rate row.
+    if (observation && observation.date >= from && observation.date <= to) {
+      parsed.push(observation);
+    }
+  }
+  parsed.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  return parsed;
 }
 
 /** One `observations[]` entry as a dated series map; `null` when it holds no usable series. */

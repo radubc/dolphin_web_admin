@@ -9,6 +9,7 @@
 import { useMemo, useState } from "react";
 import { Alert, Button, Checkbox, Drawer, Form, Input, Space, Typography } from "antd";
 import { SafetyCertificateOutlined, TagsOutlined } from "@ant-design/icons";
+import { FormErrorSummary, useFormErrorSummary } from "@/components/form-error-summary";
 import FormSection from "@/components/form-section";
 import type {
   AdminAction,
@@ -75,9 +76,7 @@ function RoleFormBody({
   busy,
   error,
   onDismissError,
-  onDraftChange,
   onSubmit,
-  onInvalid,
 }: {
   role: AdminRole | null;
   actions: readonly AdminAction[];
@@ -85,11 +84,12 @@ function RoleFormBody({
   busy: boolean;
   error: string | null;
   onDismissError: () => void;
-  onDraftChange: (canSave: boolean) => void;
   onSubmit: (values: RoleFormValues) => void;
-  onInvalid: () => void;
 }) {
   const [form] = Form.useForm<RoleFormValues>();
+  // Remounted per role (`key` on this body) and unmounted on close
+  // (`destroyOnHidden`), so the summary starts empty on every open.
+  const { errorSummary, onFinishFailed, reset } = useFormErrorSummary();
   // The key follows the name until the person edits the key by hand.
   const [keyTouched, setKeyTouched] = useState(role !== null);
 
@@ -113,7 +113,6 @@ function RoleFormBody({
       else current.delete(key);
     }
     form.setFieldValue("actionKeys", [...current]);
-    onDraftChange((form.getFieldValue("name") ?? "").trim() !== "");
   };
 
   return (
@@ -121,21 +120,23 @@ function RoleFormBody({
       form={form}
       name={FORM_NAME}
       layout="vertical"
-      requiredMark
       disabled={busy || readOnly}
       initialValues={initialValues}
-      onValuesChange={(changed: Partial<RoleFormValues>, next: RoleFormValues) => {
+      onValuesChange={(changed: Partial<RoleFormValues>) => {
         if (changed.name !== undefined && role === null && !keyTouched) {
           form.setFieldValue("key", suggestKey(changed.name));
         }
         if (changed.key !== undefined) setKeyTouched(true);
-        onDraftChange((next.name ?? "").trim() !== "");
       }}
-      onFinish={onSubmit}
-      onFinishFailed={onInvalid}
-      scrollToFirstError
+      onFinish={(values) => {
+        reset();
+        onSubmit(values);
+      }}
+      onFinishFailed={onFinishFailed}
       className="flex flex-col gap-4"
     >
+      <FormErrorSummary summary={errorSummary} onClose={reset} />
+
       {error === null ? null : (
         <Alert type="error" showIcon title={error} closable={{ onClose: onDismissError }} />
       )}
@@ -147,7 +148,7 @@ function RoleFormBody({
         <Form.Item
           name="name"
           label="Name"
-          rules={[{ required: true, whitespace: true, message: "Role name is required" }]}
+          rules={[{ required: true, whitespace: true }]}
         >
           <Input placeholder="e.g., Billing support" maxLength={120} />
         </Form.Item>
@@ -160,7 +161,7 @@ function RoleFormBody({
               : "snake_case identifier used in code and the audit log. Suggested from the name."
           }
           rules={[
-            { required: true, whitespace: true, message: "Role key is required" },
+            { required: true, whitespace: true },
             {
               validator: (_rule, value: string) =>
                 !value || KEY_PATTERN.test(value)
@@ -249,11 +250,9 @@ export default function RoleFormDrawer({
 }: RoleFormDrawerProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [draft, setDraft] = useState<{ key: string; canSave: boolean } | null>(null);
 
   const isEdit = role !== null;
   const formKey = role?.id ?? "new-role";
-  const canSave = !readOnly && (draft !== null && draft.key === formKey ? draft.canSave : isEdit);
 
   const handleSubmit = async (values: RoleFormValues) => {
     setError(null);
@@ -299,7 +298,6 @@ export default function RoleFormDrawer({
       afterOpenChange={(opened) => {
         if (!opened) {
           setError(null);
-          setDraft(null);
         }
       }}
       styles={{ body: { background: surfaceColors.page } }}
@@ -314,7 +312,7 @@ export default function RoleFormDrawer({
                 type="primary"
                 htmlType="submit"
                 form={FORM_NAME}
-                disabled={!canSave || saving}
+                disabled={saving}
                 loading={saving}
               >
                 {isEdit ? "Save" : "Create role"}
@@ -332,13 +330,9 @@ export default function RoleFormDrawer({
         busy={saving}
         error={error}
         onDismissError={() => setError(null)}
-        onDraftChange={(next) => setDraft({ key: formKey, canSave: next })}
         onSubmit={(values) => {
           void handleSubmit(values);
         }}
-        onInvalid={() =>
-          setError("Some fields need attention. Check the highlighted ones and try again.")
-        }
       />
     </Drawer>
   );

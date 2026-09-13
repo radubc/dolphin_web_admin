@@ -10,6 +10,7 @@
 import { useMemo, useState } from "react";
 import { Alert, Button, Checkbox, Drawer, Form, Input, InputNumber, Space, Switch, Typography } from "antd";
 import { ApartmentOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
+import { FormErrorSummary, useFormErrorSummary } from "@/components/form-error-summary";
 import FormSection from "@/components/form-section";
 import { categoryLabel } from "@/components/user-management/access-meta";
 import type { RuleTarget } from "@/lib/admin-access/access-map-store";
@@ -57,7 +58,6 @@ function RuleFormBody({
   error,
   onDismissError,
   onSubmit,
-  onInvalid,
 }: {
   target: RuleTarget;
   actions: readonly AdminAction[];
@@ -66,9 +66,11 @@ function RuleFormBody({
   error: string | null;
   onDismissError: () => void;
   onSubmit: (values: RuleFormValues) => void;
-  onInvalid: () => void;
 }) {
   const [form] = Form.useForm<RuleFormValues>();
+  // Remounted per target (`key` on this body) and unmounted on close
+  // (`destroyOnHidden`), so the summary starts empty on every open.
+  const { errorSummary, onFinishFailed, reset } = useFormErrorSummary();
   const { rule } = target;
 
   const initialValues = useMemo<RuleFormValues>(
@@ -105,10 +107,15 @@ function RuleFormBody({
       layout="vertical"
       disabled={busy || readOnly}
       initialValues={initialValues}
-      onFinish={onSubmit}
-      onFinishFailed={onInvalid}
+      onFinish={(values) => {
+        reset();
+        onSubmit(values);
+      }}
+      onFinishFailed={onFinishFailed}
       className="flex flex-col gap-4"
     >
+      <FormErrorSummary summary={errorSummary} onClose={reset} />
+
       {error === null ? null : (
         <Alert type="error" showIcon title={error} closable={{ onClose: onDismissError }} />
       )}
@@ -190,7 +197,7 @@ function RuleFormBody({
       </FormSection>
 
       <FormSection title="Catalog" icon={<ApartmentOutlined />} color={ACCESS_MAP_COLOR}>
-        <Form.Item name="name" label="Name" rules={[{ required: true, whitespace: true, message: "Name is required" }]}>
+        <Form.Item name="name" label="Name" rules={[{ required: true, whitespace: true }]}>
           <Input maxLength={120} />
         </Form.Item>
         <Form.Item name="description" label="Description">
@@ -320,7 +327,6 @@ export default function RuleDrawer({ target, actions, readOnly, onClose, onSaveP
           onSubmit={(values) => {
             void handleSubmit(values);
           }}
-          onInvalid={() => setError("Some fields need attention.")}
         />
       )}
     </Drawer>

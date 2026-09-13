@@ -35,6 +35,10 @@ import {
 } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { ApiOutlined, ClockCircleOutlined, SettingOutlined } from "@ant-design/icons";
+import {
+  FormErrorSummary,
+  useFormErrorSummary,
+} from "@/components/form-error-summary";
 import FormSection from "@/components/form-section";
 import { ENTRY_DRAWER_WIDTH } from "@/components/shell/definitions";
 import { integrationsApi } from "@/lib/integrations/client";
@@ -142,16 +146,17 @@ function FormBody({
   error,
   onDismissError,
   onSubmit,
-  onInvalid,
 }: {
   integration: Integration;
   busy: boolean;
   error: string | null;
   onDismissError: () => void;
   onSubmit: (values: IntegrationFormValues) => void;
-  onInvalid: () => void;
 }) {
   const [form] = Form.useForm<IntegrationFormValues>();
+  // Remounted with the drawer (`key` on FormBody, `destroyOnHidden` on the
+  // Drawer), so the summary starts empty every time one is opened.
+  const { errorSummary, onFinishFailed, reset } = useFormErrorSummary();
   // The weekday and day-of-month fields only mean something for one frequency
   // each, so the form watches it rather than showing four dead controls.
   const frequency = Form.useWatch("frequency", form) ?? integration.schedule.frequency;
@@ -167,7 +172,6 @@ function FormBody({
       name={FORM_NAME}
       layout="vertical"
       disabled={busy}
-      requiredMark="optional"
       initialValues={{
         baseUrl: integration.baseUrl,
         isEnabled: integration.isEnabled,
@@ -193,10 +197,15 @@ function FormBody({
         months: settings.months ?? ALLOCATION_MONTHS_DEFAULT,
         fixedFloorShare: settings.fixedFloorShare ?? FIXED_FLOOR_SHARE_DEFAULT,
       }}
-      onFinish={onSubmit}
-      onFinishFailed={onInvalid}
+      onFinish={(values) => {
+        reset();
+        onSubmit(values);
+      }}
+      onFinishFailed={onFinishFailed}
       className="flex flex-col gap-4"
     >
+      <FormErrorSummary summary={errorSummary} onClose={reset} />
+
       {error !== null && (
         <Alert type="error" showIcon closable onClose={onDismissError} title={error} />
       )}
@@ -221,7 +230,7 @@ function FormBody({
             </span>
           }
           rules={[
-            { required: true, whitespace: true, message: "Base URL is required" },
+            { required: true, whitespace: true },
             {
               // The server refuses anything but https (see httpsUrl in
               // src/lib/integrations/schemas.ts); catching it here beats a
@@ -279,7 +288,7 @@ function FormBody({
             name="dayOfMonth"
             label="Day of the month"
             tooltip="1 to 28, so every month has the day."
-            rules={[{ required: true, message: "A day between 1 and 28 is required" }]}
+            rules={[{ required: true }]}
           >
             <InputNumber min={1} max={28} style={{ width: 120 }} />
           </Form.Item>
@@ -289,7 +298,7 @@ function FormBody({
           name="time"
           label="Time"
           tooltip="Wall-clock time in the timezone below."
-          rules={[{ required: true, message: "A time is required" }]}
+          rules={[{ required: true }]}
         >
           <TimePicker format="HH:mm" needConfirm={false} style={{ width: 140 }} />
         </Form.Item>
@@ -298,7 +307,7 @@ function FormBody({
           name="timezone"
           label="Timezone"
           tooltip="An IANA name. The list is a shortlist; any valid name can be typed."
-          rules={[{ required: true, whitespace: true, message: "A timezone is required" }]}
+          rules={[{ required: true, whitespace: true }]}
         >
           <AutoComplete
             style={{ width: 260 }}
@@ -324,7 +333,7 @@ function FormBody({
             name="catalogs"
             label="Lists to download"
             tooltip="Only rows the admin catalog does not have yet are inserted; nothing existing is changed or removed."
-            rules={[{ required: true, message: "Pick at least one catalog" }]}
+            rules={[{ required: true }]}
           >
             <Checkbox.Group
               options={CATALOG_TARGETS.map((value) => ({ value, label: CATALOG_LABELS[value] }))}
@@ -343,7 +352,7 @@ function FormBody({
             name="batchSize"
             label="Symbols per request"
             tooltip={`TwelveData accepts up to ${QUOTE_BATCH_SIZE_MAX} symbols per /quote call and charges one credit per symbol.`}
-            rules={[{ required: true, message: "A batch size is required" }]}
+            rules={[{ required: true }]}
           >
             <InputNumber min={1} max={QUOTE_BATCH_SIZE_MAX} style={{ width: 120 }} />
           </Form.Item>
@@ -352,7 +361,7 @@ function FormBody({
             name="creditsPerMinute"
             label="Credits per minute"
             tooltip="The plan's per-minute allowance. The run paces its batches to stay inside it."
-            rules={[{ required: true, message: "An allowance is required" }]}
+            rules={[{ required: true }]}
           >
             <InputNumber min={1} max={10_000} style={{ width: 120 }} />
           </Form.Item>
@@ -390,7 +399,7 @@ function FormBody({
             name="maxRequestsPerRun"
             label="Requests per run"
             tooltip="One symbol is one request: GLOBAL_QUOTE has no batch form."
-            rules={[{ required: true, message: "A cap is required" }]}
+            rules={[{ required: true }]}
           >
             <InputNumber min={1} max={ALPHA_VANTAGE_REQUESTS_PER_RUN_MAX} style={{ width: 120 }} />
           </Form.Item>
@@ -399,7 +408,7 @@ function FormBody({
             name="requestsPerMinute"
             label="Requests per minute"
             tooltip="The tier's per-minute allowance. The pass spaces its requests to stay inside it."
-            rules={[{ required: true, message: "An allowance is required" }]}
+            rules={[{ required: true }]}
           >
             <InputNumber
               min={1}
@@ -422,7 +431,7 @@ function FormBody({
             name="days"
             label="Days of history per run"
             tooltip={`How far back the daily fetch reaches, ending yesterday. The whole window is re-fetched and replaced every run, so a figure AWS revised late is corrected. At most ${COST_FETCH_DAYS_MAX} days: every page of the answer is a charged request.`}
-            rules={[{ required: true, message: "A window is required" }]}
+            rules={[{ required: true }]}
           >
             <InputNumber min={1} max={COST_FETCH_DAYS_MAX} style={{ width: 120 }} />
           </Form.Item>
@@ -432,7 +441,7 @@ function FormBody({
             label="Component tag"
             tooltip="The cost allocation tag the month's spend is split by. It must be activated once in the AWS Billing console before AWS will group by it, and activation is not retroactive."
             rules={[
-              { required: true, whitespace: true, message: "A tag key is required" },
+              { required: true, whitespace: true },
               { max: 128, message: "A tag key is at most 128 characters" },
             ]}
           >
@@ -463,7 +472,7 @@ function FormBody({
             name="metricsDays"
             label="Days of CloudWatch counters"
             tooltip={`How many days of the customer pool's sign-in and sign-up counters each run re-fetches, ending yesterday. At most ${POOL_METRICS_DAYS_MAX}, which is how long CloudWatch keeps a one-day period.`}
-            rules={[{ required: true, message: "A window is required" }]}
+            rules={[{ required: true }]}
           >
             <InputNumber min={1} max={POOL_METRICS_DAYS_MAX} style={{ width: 120 }} />
           </Form.Item>
@@ -482,7 +491,7 @@ function FormBody({
             name="months"
             label="Months recomputed per run"
             tooltip={`How many months each run divides up, ending with the current one. Every month in the window is recomputed from scratch, so a wider window only costs time — nothing here calls AWS. At most ${ALLOCATION_MONTHS_MAX}: Cost Explorer keeps about fourteen months, and a month further back has no cached bill to divide.`}
-            rules={[{ required: true, message: "A window is required" }]}
+            rules={[{ required: true }]}
           >
             <InputNumber min={1} max={ALLOCATION_MONTHS_MAX} style={{ width: 120 }} />
           </Form.Item>
@@ -498,7 +507,7 @@ function FormBody({
                 more than half the pool and measured activity always decides the rest.
               </span>
             }
-            rules={[{ required: true, message: "A share is required" }]}
+            rules={[{ required: true }]}
           >
             <InputNumber
               min={0}
@@ -722,9 +731,6 @@ export default function IntegrationDrawer({ integration, onClose, onSaved }: Int
           onSubmit={(values) => {
             void handleSubmit(values);
           }}
-          onInvalid={() =>
-            setError("Some fields need attention. Check the highlighted ones and try again.")
-          }
         />
       )}
     </Drawer>

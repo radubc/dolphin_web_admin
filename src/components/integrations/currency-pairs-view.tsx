@@ -14,6 +14,11 @@
  * pair with CAD on either side is read straight from its series and every other
  * pair is the ratio of two of them — which is what the `Derived` tag on a rate
  * means, and what the rail card says in words.
+ *
+ * Clicking a row opens the pair's download history: every rate stored for it,
+ * newest first. The two controls in the row — the active switch and the remove
+ * button — stop the click before it reaches the row, so operating on a pair
+ * never also opens a drawer over it.
  */
 
 import { useState } from "react";
@@ -31,6 +36,7 @@ import type { CurrencyPair } from "@/lib/integrations/types";
 import { errorMessage, formatDate, formatDateTimeOrDash, formatRelativeTimeOrNever, pluralise } from "@/lib/format";
 import { featureColors, surfaceColors } from "@/lib/theme/colors";
 import CurrencyPairDrawer from "./currency-pair-drawer";
+import CurrencyPairRatesDrawer from "./currency-pair-rates-drawer";
 import { ErrorCell, INTEGRATIONS_COLOR, isToday, RateSourceTag, SourceTag } from "./integrations-meta";
 import { useCurrencyPairsStore, WATCH_PAGE_SIZE_OPTIONS, type ActiveFilter } from "./use-watch-lists";
 
@@ -48,6 +54,8 @@ export default function CurrencyPairsView({
   const { message } = App.useApp();
   const store = useCurrencyPairsStore();
   const [adding, setAdding] = useState(false);
+  /** The pair whose download history is open; null closes the drawer. */
+  const [history, setHistory] = useState<CurrencyPair | null>(null);
   /** The row whose write is in flight, so only its switch spins. */
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -114,19 +122,22 @@ export default function CurrencyPairsView({
       width: 90,
       render: (_value, row) =>
         canWrite ? (
-          <Tooltip
-            title={row.isActive ? "Deactivate: kept, but skipped by the daily run" : "Activate it"}
-          >
-            <Switch
-              size="small"
-              checked={row.isActive}
-              loading={busyId === row.id}
-              onChange={(next) => {
-                void setActive(row, next);
-              }}
-              aria-label={`${row.isActive ? "Deactivate" : "Activate"} ${row.fromCurrency}/${row.toCurrency}`}
-            />
-          </Tooltip>
+          // The row opens the history drawer; operating the switch must not.
+          <span onClick={(event) => event.stopPropagation()}>
+            <Tooltip
+              title={row.isActive ? "Deactivate: kept, but skipped by the daily run" : "Activate it"}
+            >
+              <Switch
+                size="small"
+                checked={row.isActive}
+                loading={busyId === row.id}
+                onChange={(next) => {
+                  void setActive(row, next);
+                }}
+                aria-label={`${row.isActive ? "Deactivate" : "Activate"} ${row.fromCurrency}/${row.toCurrency}`}
+              />
+            </Tooltip>
+          </span>
         ) : (
           <span style={{ color: row.isActive ? featureColors.loan : surfaceColors.textTertiary }}>
             {row.isActive ? "Yes" : "No"}
@@ -182,26 +193,30 @@ export default function CurrencyPairsView({
       width: 60,
       align: "right",
       render: (_value, row) => (
-        <Popconfirm
-          title="Remove from the watch list"
-          description={`${row.fromCurrency}/${row.toCurrency} is removed from the watch list; rates already cached for it are kept. The consumer app can add it back by asking for it.`}
-          okText="Remove"
-          cancelText="Cancel"
-          onConfirm={() => {
-            void remove(row);
-          }}
-        >
-          <Tooltip title={`Remove ${row.fromCurrency}/${row.toCurrency}`}>
-            <Button
-              type="text"
-              size="small"
-              danger
-              aria-label={`Remove ${row.fromCurrency}/${row.toCurrency}`}
-              icon={<DeleteOutlined />}
-              disabled={busyId === row.id}
-            />
-          </Tooltip>
-        </Popconfirm>
+        // Same as the switch: the confirmation and its trigger belong to the
+        // row's controls, not to the row itself.
+        <span onClick={(event) => event.stopPropagation()}>
+          <Popconfirm
+            title="Remove from the watch list"
+            description={`${row.fromCurrency}/${row.toCurrency} is removed from the watch list; rates already cached for it are kept. The consumer app can add it back by asking for it.`}
+            okText="Remove"
+            cancelText="Cancel"
+            onConfirm={() => {
+              void remove(row);
+            }}
+          >
+            <Tooltip title={`Remove ${row.fromCurrency}/${row.toCurrency}`}>
+              <Button
+                type="text"
+                size="small"
+                danger
+                aria-label={`Remove ${row.fromCurrency}/${row.toCurrency}`}
+                icon={<DeleteOutlined />}
+                disabled={busyId === row.id}
+              />
+            </Tooltip>
+          </Popconfirm>
+        </span>
       ),
     });
   }
@@ -410,6 +425,10 @@ export default function CurrencyPairsView({
                   size="middle"
                   loading={store.refreshing}
                   scroll={{ x: 1050, y }}
+                  onRow={(row) => ({
+                    onClick: () => setHistory(row),
+                    style: { cursor: "pointer" },
+                  })}
                   pagination={{
                     current: store.page,
                     pageSize: store.pageSize,
@@ -449,6 +468,8 @@ export default function CurrencyPairsView({
         onClose={() => setAdding(false)}
         onSaved={(summary) => message.success(summary)}
       />
+
+      <CurrencyPairRatesDrawer pair={history} onClose={() => setHistory(null)} />
     </>
   );
 }

@@ -72,6 +72,15 @@ Default rules as seeded; all editable on the Access Map.
 | Key | Route | Purpose | Default rule |
 | --- | --- | --- | --- |
 | `admin.me` | `GET /api/v1/admin/me` | Caller's capabilities: id, email, super-admin flag, actions. | any operator |
+| `admin.me.password.change` | `POST /api/v1/admin/me/password` | Changes the caller's own password (Cognito `ChangePassword` with the caller's access token). Per-operator and per-IP `authReset` budget. | any operator |
+| `admin.me.mfa.get` | `GET /api/v1/admin/me/mfa` | Whether an authenticator app is on for the caller. | any operator |
+| `admin.me.mfa.totp.start` | `POST /api/v1/admin/me/mfa/totp` | Starts authenticator enrolment: the secret and `otpauth://` URI. 503 `mfa_not_enabled` until the pool allows software-token MFA. | any operator |
+| `admin.me.mfa.totp.verify` | `PUT /api/v1/admin/me/mfa/totp` | Verifies the first code and turns the authenticator on. | any operator |
+| `admin.me.mfa.totp.disable` | `DELETE /api/v1/admin/me/mfa/totp` | Turns the authenticator off. | any operator |
+| `admin.me.passkeys.list` | `GET /api/v1/admin/me/passkeys` | The caller's registered passkeys. 503 `passkeys_not_enabled` until the pool has a WebAuthn relying party. | any operator |
+| `admin.me.passkeys.start` | `POST /api/v1/admin/me/passkeys` | Starts a passkey registration: the WebAuthn creation options. | any operator |
+| `admin.me.passkeys.complete` | `PUT /api/v1/admin/me/passkeys` | Completes it with the authenticator's credential. | any operator |
+| `admin.me.passkeys.delete` | `DELETE /api/v1/admin/me/passkeys/[id]` | Removes one passkey. | any operator |
 | `admin.users.list` | `GET /api/v1/admin/users` | All admin users with role keys. | `can_manage_admin_users` |
 | `admin.users.create` | `POST /api/v1/admin/users` | Invite: `{ email, displayName?, roleKeys, isSuperAdmin }`. | super-admin |
 | `admin.users.get` | `GET /api/v1/admin/users/[id]` | One admin user. | `can_manage_admin_users` |
@@ -110,6 +119,7 @@ Default rules as seeded; all editable on the Access Map.
 | `admin.integrations.currency_pairs.create` | `POST /api/v1/admin/integrations/currency-pairs` | `{ fromCurrency, toCurrency }`, three letters each, must differ. 201; 409 on a duplicate. | `can_write_integrations` |
 | `admin.integrations.currency_pairs.update` | `PATCH /api/v1/admin/integrations/currency-pairs/[id]` | `{ isActive }`. | `can_write_integrations` |
 | `admin.integrations.currency_pairs.delete` | `DELETE /api/v1/admin/integrations/currency-pairs/[id]` | Removes the watch row; cached rates stay. 204. | `can_write_integrations` |
+| `admin.integrations.currency_pairs.rates` | `GET /api/v1/admin/integrations/currency-pairs/[id]/rates?page=&pageSize=` | One page of the pair's download history — `{ items: ExchangeRate[], total, page, pageSize }`, newest observation day first, then newest fetch. `pageSize` 1..200, default 30. Addressed by the watch row's id, so a pair removed from the watch list is a 404 even though its rates are still stored. | `can_read_integrations` or `can_write_integrations` |
 | `admin.customers.list` | `GET /api/v1/admin/customers?page=&pageSize=&q=&status=&includeDeleted=` | One page of the consumer app's users, each with tenants, `lastSeenAt` (the consumer app's sign-in stamp), `lastActiveAt` (the derived fallback), `accountCount`, `transactionCount`, the pool account and a derived `status`, plus header `counts` (now including `deleted`) and `cognitoAvailable`. `q` matches email and tenant name. `status=deleted` selects the soft-deleted rows and implies `includeDeleted`; **every other `status` value excludes them**, whatever `includeDeleted` says — see the note below. | `can_read_user_list`, `can_read_user_detail` or `can_invite_users` |
 | `admin.customers.get` | `GET /api/v1/admin/customers/[id]` | One customer by `users.id`. 404 when there is no such row. | `can_read_user_list`, `can_read_user_detail` or `can_invite_users` |
 | `admin.customers.invites.list` | `GET /api/v1/admin/customers/invites?page=&pageSize=&q=&status=` | Invitations, newest first, with `counts` per status, `canSend` and `unavailableReason`. | `can_read_user_list`, `can_read_user_detail` or `can_invite_users` |
@@ -186,7 +196,7 @@ and none consults the access map: the key is the credential.
 | Key | Route | Purpose |
 | --- | --- | --- |
 | `service.quotes.lookup` | `GET /api/v1/service/quotes?symbols=AAPL,SHOP:TSX,BTC/USD` | `{ quotes, missing }`. Newest cached quote per symbol; symbols with nothing from today are fetched from TwelveData, **at most one batch inline** (see below). Up to 100 symbols. |
-| `service.exchange_rates.lookup` | `GET /api/v1/service/exchange-rates?pairs=USD/CAD,EUR/USD` | `{ rates, missing }`. Newest cached rate per pair; fetches the Bank of Canada only when today's series are not cached, in one call for every pair. Up to 100 pairs. |
+| `service.exchange_rates.lookup` | `GET /api/v1/service/exchange-rates?pairs=USD/CAD,EUR/USD[&date=YYYY-MM-DD \| &from=YYYY-MM-DD&to=YYYY-MM-DD]` | `{ rates, missing }`. Up to 100 pairs, and one of three forms. **No date:** the newest rate per pair — the pair's own rate if it was fetched today, else the observation this process already fetched today (memoised in `jobs/rates.ts` — computed and written, no provider call), else one Bank of Canada call covering every pair. **`date`:** the closest observation on or before that day, looking back up to 10 calendar days; each rate's own `date` is the real observation day. **`from`+`to`:** every published observation in the window, so `rates` holds one entry per pair *and* day (window at most 400 days; `from ≤ to ≤ today`). `date` and `from`/`to` are mutually exclusive, and `from`/`to` come together — anything else is a 422. Both dated forms are answered from `admin_exchange_rates` when it already covers the window and otherwise by **one** ranged Valet call. Only the requested pairs are ever written. A pair with no observation in the window is `missing` with reason `not_found`. |
 | `service.defaults.categories` | `GET /api/v1/service/defaults/categories` | `{ categories: [{ id, name, type, parentId, isDiscretionary }] }`. Every live admin category (`deleted_at IS NULL`), ordered by `created_at` then `id`. No query string. |
 | `service.defaults.financial_institutions` | `GET /api/v1/service/defaults/financial-institutions` | `{ financialInstitutions: [{ id, name, institutionNumber, type }] }`. The whole admin catalog, ordered by `name` then `id`. No query string. |
 

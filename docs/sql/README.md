@@ -25,6 +25,9 @@ result afterwards.
 | 13 | [`013_aws_costs.sql`](./013_aws_costs.sql) | The Cost center's data: `admin_cost_daily` (AWS cost per day and service in `NUMERIC(14,6)`, and the split by the `Component` cost allocation tag) and `admin_cost_snapshots` (one row per job run: month to date, forecast, budget, free tier, anomalies). Seeds the `aws_costs` integration (daily, 09:00 Toronto, about $1 a month in Cost Explorer requests), widens `admin_integrations.provider` to allow `'aws'`, seeds the `can_read_costs` / `can_write_costs` actions (step 12 creates none) and links them to 012's `cost_center` page, and registers the two Cost center endpoints against those same two actions, named explicitly so neither endpoint can end up with no actions at all. **Needs PostgreSQL 15+** for `UNIQUE NULLS NOT DISTINCT`. | Once, after step 12. Re-running is safe. |
 | 14 | [`014_customer_statistics.sql`](./014_customer_statistics.sql) | The Customers page's Activity view: `admin_customer_snapshots` (one row per Cognito pool account per day the nightly job saw it, `partial` marking a day whose pool listing was cut short), `admin_customer_events` (the lifecycle log — invited, confirmed, disabled, enabled, deleted, reappeared, deleted_in_app) and `admin_pool_metrics_daily` (the pool's daily CloudWatch sign-in and sign-up counters). Seeds the `cognito_directory` integration (daily, 02:30 Toronto) and registers the two statistics endpoints with the same three actions 010 gave the Customers reads (`can_read_user_list`, `can_read_user_detail`, `can_invite_users`), named explicitly so neither endpoint can end up with no actions at all. Creates no actions of its own. Must run **after** 013, which is what first allowed `admin_integrations.provider = 'aws'`. | Once, after step 13. Re-running is safe. |
 | 15 | [`015_cost_allocation.sql`](./015_cost_allocation.sql) | Cost per client: `admin_tenant_cost_monthly` (one row per tenant and month — the four pool components of the allocated estimate, the total, the tenant's share of the bill, and the drivers the split was made from). Seeds the `allocate_costs` integration (daily, 03:30 Toronto — it calls nothing, so it is free) and registers the `admin.costs.per_client` endpoint with the two cost actions 013 seeded (`can_read_costs`, `can_write_costs`), named explicitly so the endpoint cannot end up with no actions at all. Creates no actions of its own. Must run **after** 013, whose cost rows it divides up. | Once, after step 14. Re-running is safe. |
+| 16 | [`016_stage_table_ownership.sql`](./016_stage_table_ownership.sql) | **Stage only.** Hands the six tables 013–015 created to the `fairsums_console` role, which is the role the console connects as on stage; they were created as the RDS master user, so the console got `permission denied for table admin_cost_daily`. Creates nothing and changes no data: it is `ALTER TABLE … OWNER TO` for exactly those six, skipping with a NOTICE any that is missing or already owned. Not needed locally, where the scripts and the app both run as `postgres`. | Once, after step 15, **as the current owner** (`fairsums_admin`). Re-running is safe. |
+| 17 | [`017_currency_pair_history.sql`](./017_currency_pair_history.sql) | Registers the currency pair download-history endpoint (`admin.integrations.currency_pairs.rates`, behind the drawer a row click opens) against the two integration actions 008 seeded, and **deletes the stray rate rows**: every `admin_exchange_rates` row whose pair is not on `admin_currency_pairs`. Those are what the retired series cache wrote — about 27 `X → CAD` rows a day for pairs nobody watches. The app no longer writes them (the fetched document is now memoised in process instead), so this only clears what is already there. Creates no table and no action. **Read the header before running: it holds the SELECT that shows what the DELETE would remove.** | Once, after step 16, **before** any pair is removed from the watch list: the DELETE cannot tell a stray series row from the history of a pair an operator has since removed (the app keeps that history on Remove), so a later run would delete it too. Run the header's SELECT first. |
+| 18 | [`018_account_security_endpoints.sql`](./018_account_security_endpoints.sql) | Registers the nine **Account & security** endpoints (`admin.me.password.change`, the three `admin.me.mfa.totp.*`, `admin.me.mfa.get` and the four `admin.me.passkeys.*`) behind the drawer the avatar menu opens. Creates no table and no action, and links **no** actions on purpose: each one acts on the caller's own Cognito account only — the access token names the subject and no request carries a user id — so a registered endpoint with an empty action list ("any enabled operator") is the correct rule, exactly as `admin.me` is registered in 002. The MFA and passkey routes work only once the admin user pool is reconfigured (see [../auth.md](../auth.md)); until then they answer 503 quoting Cognito. | Once, after step 17. Re-running is safe. |
 
 Until step 7 has run, the Constants list, compare, push and job endpoints
 answer 503 `admin_schema_missing`: the app does not fake a ledger it does not
@@ -85,6 +88,13 @@ both its inputs are already in the two databases — but it does need step 13's
 `aws_costs` job to have cached the month, and it says so when it has not. The
 model is [cost-allocation.md](../cost-allocation.md).
 
+Until step 17 has run, the currency pair **history** drawer works only for a
+super-admin: an endpoint with no `admin_endpoints` row is super-admin only, so
+every other operator gets a 403 when they click a row. Nothing else on the
+Integrations page is affected, and the stray rate rows the same file deletes
+are harmless while they sit there — nothing reads them, and the app has already
+stopped adding to them.
+
 The four market-data catalogs (`cryptocurrencies`, `etfs`, `stocks`,
 `markets`) needed **no file of their own**: their tables already exist in the
 admin database and were created with the unique constraints the app relies on
@@ -129,8 +139,8 @@ before the SQL has run).
 
 ## Adding a table or column later
 
-1. Write the change as a new numbered file here (`016_….sql`), transactional,
-   with comments saying what and why. (The next free number, always: 015 is
+1. Write the change as a new numbered file here (`018_….sql`), transactional,
+   with comments saying what and why. (The next free number, always: 017 is
    taken.)
 2. Run it in pgAdmin.
 3. `npx prisma db pull --config prisma-admin.config.ts`, then

@@ -26,10 +26,33 @@ import {
  * the `ConfigProvider` and therefore lose the theme. `component={false}` makes
  * it a context provider only: it emits no wrapper element, so the layout's
  * full-height flex chain is untouched.
+ *
+ * The `form` config is the app's forms convention, set once here so that no
+ * form can mark its mandatory fields differently from the next one:
+ *
+ * - `requiredMark: false` — the owner considers the red asterisk dated. No form
+ *   sets the prop itself; this is the only place it is decided.
+ * - `validateMessages` — one sentence for a mandatory field left empty, built
+ *   from the item's own `label` (`${label}` is antd's template variable, not a
+ *   JavaScript one, so the string is a plain quoted literal). `whitespace` says
+ *   the same thing, because a value of nothing but spaces is an empty field to
+ *   the person looking at it.
+ * - `scrollToFirstError` — the asterisk is gone, so a failed submit has to take
+ *   the person to the field it is about. `src/components/form-error-summary.tsx`
+ *   is the other half of that bargain: it names the fields at the top of the
+ *   form.
  */
 export default function Providers({ children }: { children: ReactNode }) {
   return (
     <ConfigProvider
+      form={{
+        requiredMark: false,
+        scrollToFirstError: { behavior: "smooth", block: "center" },
+        validateMessages: {
+          required: "${label} is required",
+          whitespace: "${label} is required",
+        },
+      }}
       theme={{
         algorithm: theme.defaultAlgorithm,
         token: {

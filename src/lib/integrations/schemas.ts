@@ -20,6 +20,7 @@ import {
   FIXED_FLOOR_SHARE_MAX,
 } from "@/lib/costs/types";
 import { POOL_METRICS_DAYS_MAX } from "@/lib/customers/types";
+import { daysBetween, isValidIsoDate, todayIn } from "./dates";
 import {
   ALPHA_VANTAGE_REQUESTS_PER_MINUTE_MAX,
   ALPHA_VANTAGE_REQUESTS_PER_RUN_MAX,
@@ -28,14 +29,18 @@ import {
   type IntegrationProvider,
   QUOTE_BATCH_SIZE_MAX,
   QUOTE_KINDS,
+  RATE_HISTORY_PAGE_SIZE_DEFAULT,
+  RATE_RANGE_DAYS_MAX,
   SCHEDULE_FREQUENCIES,
   WATCH_PAGE_SIZE_DEFAULT,
   WATCH_PAGE_SIZE_MAX,
   type CurrencyPairInput,
   type CurrencyPairPatch,
+  type ExchangeRateLookupQuery,
   type IntegrationPatch,
   type QuoteSymbolInput,
   type QuoteSymbolPatch,
+  type RateHistoryQuery,
   type RunRequest,
   type WatchListQuery,
 } from "./types";
@@ -330,6 +335,23 @@ export const currencyPairPatchSchema: z.ZodType<CurrencyPairPatch> = z
   .partial()
   .refine((value) => Object.keys(value).length > 0, "Nothing to change.");
 
+/**
+ * `GET /api/v1/admin/integrations/currency-pairs/[id]/rates?page=&pageSize=`.
+ *
+ * The same page-size ceiling as the watch lists: one pair's history is far
+ * smaller than either of them, and one rule for "how big may a page be" is
+ * easier to reason about than two.
+ */
+export const rateHistoryQuerySchema: z.ZodType<RateHistoryQuery> = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(WATCH_PAGE_SIZE_MAX)
+    .default(RATE_HISTORY_PAGE_SIZE_DEFAULT),
+});
+
 /* -------------------------------------------------------------------------- */
 /*                            Service (API key) lookups                       */
 /* -------------------------------------------------------------------------- */
@@ -366,10 +388,63 @@ export const quoteLookupQuerySchema = z.object({
   ),
 });
 
-/** `GET /api/v1/service/exchange-rates?pairs=USD/CAD,EUR/USD`. */
-export const exchangeRateLookupQuerySchema = z.object({
-  pairs: commaList(7).refine(
-    (items) => items.every((item) => /^[A-Z]{3}\/[A-Z]{3}$/.test(item)),
-    "A pair looks like USD/CAD.",
-  ),
-});
+/** A calendar day the caller named: `YYYY-MM-DD`, and a day that exists. */
+const isoDateParam = z
+  .string()
+  .trim()
+  .refine((value) => isValidIsoDate(value), "Use a real date, as YYYY-MM-DD.");
+
+/**
+ * `GET /api/v1/service/exchange-rates?pairs=USD/CAD,EUR/USD[&date=…|&from=…&to=…]`.
+ *
+ * The three forms are settled here so the lookup never has to wonder which one
+ * it is in: `date` and `from`/`to` cannot be combined, `from` and `to` arrive
+ * together or not at all, neither may be in the future, and the window is
+ * bounded so one request cannot ask for a decade of daily observations for a
+ * hundred pairs.
+ *
+ * "Today" is Toronto's — the same wall clock the rest of the feature uses, and
+ * the timezone the Bank of Canada publishes on. A caller a few hours ahead
+ * asking for its own "tomorrow" gets a 422, which is a more useful answer than
+ * an empty list.
+ */
+export const exchangeRateLookupQuerySchema: z.ZodType<ExchangeRateLookupQuery> = z
+  .object({
+    pairs: commaList(7).refine(
+      (items) => items.every((item) => /^[A-Z]{3}\/[A-Z]{3}$/.test(item)),
+      "A pair looks like USD/CAD.",
+    ),
+    date: isoDateParam.optional(),
+    from: isoDateParam.optional(),
+    to: isoDateParam.optional(),
+  })
+  .refine(
+    (value) => value.date === undefined || (value.from === undefined && value.to === undefined),
+    { message: "Name either date, or from and to — not both.", path: ["date"] },
+  )
+  .refine((value) => (value.from === undefined) === (value.to === undefined), {
+    message: "A range needs both from and to.",
+    path: ["to"],
+  })
+  .refine((value) => value.date === undefined || value.date <= todayIn(), {
+    message: "date cannot be in the future.",
+    path: ["date"],
+  })
+  .refine((value) => value.to === undefined || value.to <= todayIn(), {
+    message: "to cannot be in the future.",
+    path: ["to"],
+  })
+  .refine((value) => value.from === undefined || value.to === undefined || value.from <= value.to, {
+    message: "from must be on or before to.",
+    path: ["from"],
+  })
+  .refine(
+    (value) =>
+      value.from === undefined ||
+      value.to === undefined ||
+      daysBetween(value.from, value.to) < RATE_RANGE_DAYS_MAX,
+    {
+      message: `A range may span at most ${RATE_RANGE_DAYS_MAX} days.`,
+      path: ["to"],
+    },
+  );

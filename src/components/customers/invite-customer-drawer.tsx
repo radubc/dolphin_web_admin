@@ -34,6 +34,10 @@
 import { useEffect, useState } from "react";
 import { Alert, App, Button, Drawer, Form, Input, Select, Space, Typography } from "antd";
 import { MailOutlined, UserAddOutlined } from "@ant-design/icons";
+import {
+  FormErrorSummary,
+  useFormErrorSummary,
+} from "@/components/form-error-summary";
 import FormSection from "@/components/form-section";
 import { ENTRY_DRAWER_WIDTH } from "@/components/shell/definitions";
 import { customersApi } from "@/lib/customers/client";
@@ -91,6 +95,7 @@ export default function InviteCustomerDrawer({
   const [form] = Form.useForm<InviteFormValues>();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { errorSummary, onFinishFailed, reset } = useFormErrorSummary();
   // Only used when the caller has not told us; a caller with a live list
   // (the Customers page) always wins.
   const [fetchedCanSend, setFetchedCanSend] = useState<{
@@ -122,6 +127,7 @@ export default function InviteCustomerDrawer({
 
   const handleSubmit = async (values: InviteFormValues) => {
     setError(null);
+    reset();
     // Cognito treats the username case-sensitively, so the address is settled
     // here rather than leaving two spellings of one person in the log.
     const email = values.email.trim().toLowerCase();
@@ -150,6 +156,7 @@ export default function InviteCustomerDrawer({
         if (!opened) {
           form.resetFields();
           setError(null);
+          reset();
           setFetchedCanSend(null);
         }
       }}
@@ -187,16 +194,15 @@ export default function InviteCustomerDrawer({
         name={FORM_NAME}
         layout="vertical"
         disabled={saving || !canSend}
-        requiredMark="optional"
         initialValues={{ email: "", name: "", locale: "en-US", note: "" }}
         onFinish={(values) => {
           void handleSubmit(values);
         }}
-        onFinishFailed={() =>
-          setError("Some fields need attention. Check the highlighted ones and try again.")
-        }
+        onFinishFailed={onFinishFailed}
         className="flex flex-col gap-4"
       >
+        <FormErrorSummary summary={errorSummary} onClose={reset} />
+
         {!canSend && (
           <Alert
             type="warning"
@@ -216,7 +222,7 @@ export default function InviteCustomerDrawer({
             label="Email"
             tooltip="Cognito sends the temporary password here, and this becomes their sign-in name."
             rules={[
-              { required: true, whitespace: true, message: "An email address is required" },
+              { required: true, whitespace: true },
               { type: "email", message: "That does not look like an email address" },
             ]}
           >

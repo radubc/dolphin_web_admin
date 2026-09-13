@@ -28,7 +28,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   return (
     <AuthShell
       heading="Sign in to your account"
-      description="Use your Penny Squeeze admin email and password to continue."
+      description="Use your Penny Squeeze admin email and password, or a passkey, to continue."
     >
       {passwordWasReset ? (
         <Alert

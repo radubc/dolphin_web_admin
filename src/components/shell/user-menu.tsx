@@ -9,13 +9,15 @@ import { accentBlue, accentTints } from "@/lib/theme/colors";
 interface UserMenuProps {
   /** From the verified session; null when the id token carried no email. */
   email: string | null;
+  /** Opens the Account & security drawer, which the shell owns. */
+  onOpenAccount: () => void;
 }
 
 /**
  * Avatar dropdown at the right end of the nav bar: who is signed in, Account
- * (not built yet), and Sign out.
+ * & security, and Sign out.
  */
-export default function UserMenu({ email }: UserMenuProps) {
+export default function UserMenu({ email, onOpenAccount }: UserMenuProps) {
   const signOutFormRef = useRef<HTMLFormElement>(null);
 
   return (
@@ -73,11 +75,12 @@ export default function UserMenu({ email }: UserMenuProps) {
             { type: "divider" as const },
             {
               key: "account",
-              label: "Account",
+              label: "Account & security",
               icon: <UserOutlined />,
-              // No account page yet; the item is here so the menu matches the
-              // native one and has somewhere to hang the route later.
-              onClick: () => {},
+              // A drawer, not a page: these are the operator's own Cognito
+              // settings (password, authenticator app, passkeys), not
+              // something the access map should have to grant.
+              onClick: onOpenAccount,
             },
             {
               key: "sign-out",

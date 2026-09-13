@@ -15,6 +15,7 @@ import type {
   CurrencyPairInput,
   CurrencyPairListResponse,
   CurrencyPairPatch,
+  ExchangeRateListResponse,
   Integration,
   IntegrationKey,
   IntegrationListResponse,
@@ -24,6 +25,7 @@ import type {
   QuoteSymbolInput,
   QuoteSymbolListResponse,
   QuoteSymbolPatch,
+  RateHistoryQuery,
   RunRequest,
   WatchListQuery,
 } from "./types";
@@ -62,6 +64,15 @@ function watchSearch(query: WatchListQuery): string {
   if (query.q !== undefined && query.q.trim() !== "") params.set("q", query.q.trim());
   if (query.kind !== undefined) params.set("kind", query.kind);
   if (query.active !== undefined && query.active !== "all") params.set("active", query.active);
+  const text = params.toString();
+  return text === "" ? "" : `?${text}`;
+}
+
+/** Paging alone, as the pair history endpoint accepts it. */
+function historySearch(query: RateHistoryQuery): string {
+  const params = new URLSearchParams();
+  if (query.page !== undefined) params.set("page", String(query.page));
+  if (query.pageSize !== undefined) params.set("pageSize", String(query.pageSize));
   const text = params.toString();
   return text === "" ? "" : `?${text}`;
 }
@@ -150,5 +161,11 @@ export const integrationsApi = {
       await apiFetch<void>(`${currencyPairsPath}/${encodeURIComponent(id)}`, { method: "DELETE" });
       notifyIntegrationsChanged("currency_pairs");
     },
+
+    /** One page of what has been downloaded for the pair, newest first. */
+    rates: (id: string, query: RateHistoryQuery = {}) =>
+      apiFetch<ExchangeRateListResponse>(
+        `${currencyPairsPath}/${encodeURIComponent(id)}/rates${historySearch(query)}`,
+      ),
   },
 };

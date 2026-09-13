@@ -22,7 +22,7 @@ database.
 | --- | --- | --- | --- | --- |
 | `twelvedata_catalogs` | TwelveData `https://api.twelvedata.com` | no | Downloads `/stocks`, `/etfs` and `/cryptocurrencies` and **inserts the rows the admin catalogs do not have yet** into `stocks`, `etfs` and `cryptocurrencies`. Existing rows are never changed or removed. New rows land in the Constants sync ledger as *new*, so the Constants page can push them to the main database. | daily 02:00 |
 | `twelvedata_quotes` | TwelveData `/quote` | **yes**: `TWELVEDATA_API_KEY` | Fetches the end-of-day quote for every active symbol on the quote watch list and caches it in `admin_quotes`, one row per symbol and trading day. Symbols already fetched today are skipped unless the run is forced. | daily 01:00 |
-| `bank_of_canada_rates` | Bank of Canada Valet `https://www.bankofcanada.ca/valet` | no | Reads the `FX_RATES_DAILY` group (about 27 currencies, each as CAD per one unit) and writes a rate for every active currency pair into `admin_exchange_rates`, one row per pair and day. | daily 01:30 |
+| `bank_of_canada_rates` | Bank of Canada Valet `https://www.bankofcanada.ca/valet` | no | Reads the `FX_RATES_DAILY` group (about 27 currencies, each as CAD per one unit) and writes a rate for **every active currency pair and nothing else** into `admin_exchange_rates`, one row per pair and day. The rest of the document is remembered in process for the day, never stored. | daily 01:30 |
 | `iso_mic_markets` | ISO 20022 `https://www.iso20022.org` | no | Downloads the ISO 10383 MIC register (one CSV) and **inserts the markets `markets` does not have yet**, matched on `mic_code`. Existing rows are never changed or removed. New rows land in the Constants sync ledger as *new*. | weekly, Monday 02:30 |
 | `alpha_vantage_quotes` | Alpha Vantage `https://www.alphavantage.co` | **yes**: `ALPHA_VANTAGE_API_KEY` | The **fallback** for symbols TwelveData does not serve. Runs inside the `twelvedata_quotes` run, one symbol per request. **Run now** refreshes the symbols it already owns. | off (it is a fallback) |
 | `aws_costs` | AWS (Cost Explorer, Budgets, Free Tier) | no — the **ECS task role**, from the SDK's default credential chain | Asks AWS what the account spent per day and service, how that compares with the budget and how much free-tier credit is left, and caches it in `admin_cost_daily` / `admin_cost_snapshots` for the Cost center page. About four Cost Explorer requests a run at $0.01 each. See [costs.md](./costs.md). | daily 09:00 |
@@ -139,6 +139,16 @@ pair with CAD on neither side is the ratio of the two CAD series and is stored
 with `source = derived`. A currency the Bank does not publish (the list is on
 the page's rail card) cannot be rated; the pair keeps a `last_error` saying so.
 
+The watch list is the **only** thing `admin_exchange_rates` holds rows for. An
+earlier version also stored each published `X → CAD` series as a rate row of
+its own — a database cache, so that a lookup for an unwatched pair could be
+derived without a second provider call — and that filled the table with pairs
+nobody watches. The document is now remembered in process instead (below), and
+`docs/sql/017_currency_pair_history.sql` deletes the rows the old behaviour
+left. Clicking a pair on the page opens its **download history**: every rate
+stored for it, newest observation day first, with the source and the fetch
+time.
+
 Rows enter either list in two ways, recorded in `source`:
 
 - **manual** — an operator adds it on the page;
@@ -238,6 +248,8 @@ Two endpoints for machine callers, authenticated with an `API_KEYS` entry
 ```
 GET /api/v1/service/quotes?symbols=AAPL,SHOP:TSX,BTC/USD
 GET /api/v1/service/exchange-rates?pairs=USD/CAD,EUR/USD
+GET /api/v1/service/exchange-rates?pairs=USD/CAD&date=2026-03-14
+GET /api/v1/service/exchange-rates?pairs=USD/CAD&from=2026-01-01&to=2026-03-31
 ```
 
 Each answers with the newest cached row per item and a `missing` list. The
@@ -250,6 +262,62 @@ rule for every item is the same:
    newest cached row if there is one (the reply says how old it is), otherwise
    report the item under `missing` with a reason (`not_found`,
    `provider_error`, `unavailable`).
+
+Rates have a stop between 1 and 2 — for the undated form; the two dated forms
+are described below. One Valet call returns every published series at once, so
+the document is kept **in this process** with the instant it was fetched (the
+memo in `src/lib/integrations/jobs/rates.ts`); while it is today's, a pair with
+no rate of its own is computed from it — a series, its
+reciprocal, or the ratio of two — written, and answered without any provider
+call. That is what keeps the feature to one Bank of Canada call a day while
+`admin_exchange_rates` still only ever gains a row for a pair that was actually
+asked for. The memo is per process, so N app instances make up to N calls a day
+between them and a restart costs one more; the Valet API is free and needs no
+key, so that is a fair trade for not writing 27 rows a day nobody reads. A pair
+whose currency the Bank does not publish still fails cleanly as `not_found` and
+is **not** added to the watch list.
+
+### Asking for a past date
+
+The rate endpoint takes an optional date, in one of two forms; the quote
+endpoint has no equivalent yet.
+
+- **`date=YYYY-MM-DD`** — the rate that was published **on or before** that
+  day. The Bank publishes on business days only, so a Sunday, a holiday or a
+  day someone typed in has no observation of its own; the answer is then the
+  closest earlier one, up to **ten calendar days** back, and the `date` on the
+  rate says which day it really is. Past ten days the pair is `not_found`
+  rather than a rate from a fortnight away pretending to be the day's.
+- **`from=…&to=…`** — every published observation in the window, so `rates`
+  holds one entry per pair *and* day, oldest first. `from ≤ to ≤ today` and at
+  most **400 days**; a longer window, a `to` in the future or `date` combined
+  with `from`/`to` is a 422.
+
+Both are **cache-first**, because `admin_exchange_rates` is the history:
+
+- for `from`/`to`, the table answers on its own when it holds at least one day
+  per week of the window, its oldest day is within a week of `from`, and its
+  newest day is at least the last day the Bank can have published on or before
+  `to` (before 16:30 ET, that is the previous business day — otherwise a
+  request for "the last 30 days" would call the Bank every time);
+- for `date`, any stored row inside the ten-day window answers, newest first.
+
+When that test fails, **one** ranged Valet call
+(`?start_date=…&end_date=…`, one entry per business day) fetches the window for
+every pair at once and the days the table did not have are inserted — again,
+only for the pairs that were asked for. The call is recorded as an `on_demand`
+run like any other. Unlike the "latest" form, a historical answer never falls
+back to a rate from **outside** the window: the caller asked what the rate was
+on those days, and a value from another day would be a wrong number rather
+than a stale one.
+
+Two things a historical write deliberately does **not** do: it does not stamp
+`last_rated_at` on the watch row (a rate from 2019 does not make the pair
+current, and claiming it would let that night's run skip the pair), and it does
+not set `last_error` when the Bank did not publish a currency back then (that
+says nothing about the pair today). A pair the request put on the watch list
+for the first time is therefore created without a `last_rated_at`, and the
+nightly run picks it up.
 
 A quote lookup asks TwelveData for at most one batch (`batchSize` symbols)
 inside the request, and Alpha Vantage for at most **three** symbols (the whole
@@ -302,7 +370,7 @@ All in the admin database, created by `008_integrations.sql`:
 | `admin_quote_symbols` | instrument on the quote watch list (`provider` says which provider last served it) |
 | `admin_quotes` | symbol × trading day |
 | `admin_currency_pairs` | currency pair on the rate watch list |
-| `admin_exchange_rates` | pair × observation day |
+| `admin_exchange_rates` | pair × observation day, **for watched pairs only** |
 
 Prices are `NUMERIC(20,8)` and rates `NUMERIC(20,10)`: wider than the macOS
 and main-database columns on purpose, so a small-cap crypto price or a rate
@@ -318,4 +386,7 @@ above 1 is stored as published.
 - It does not update or delete a market once the MIC register has been read
   once. A venue that changed its published name upstream keeps the row the
   catalog already has; the Constants page is where a row is changed by hand.
-- It does not delete catalog rows, quotes or rates, ever.
+- It does not delete catalog rows, quotes or rates, ever. (The one deletion
+  in this feature's history is a hand-run script, not the app:
+  `docs/sql/017_currency_pair_history.sql` clears the rate rows the retired
+  series cache wrote for pairs that are not on the watch list.)

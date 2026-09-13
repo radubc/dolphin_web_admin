@@ -19,6 +19,29 @@ export const MAX_EMAIL_LENGTH = 320;
 export const MAX_PASSWORD_LENGTH = 256;
 
 /**
+ * Cognito's own floor for a user pool password policy: no pool can accept
+ * anything shorter, so rejecting it here saves a round trip. Only a floor —
+ * the pool's real policy (length, character classes) is Cognito's to enforce,
+ * and its message is the one the person is shown.
+ */
+export const MIN_PASSWORD_LENGTH = 8;
+
+/**
+ * A one-time code from an authenticator app: always six digits. Shared by the
+ * sign-in MFA step and the enrolment form so the two cannot disagree.
+ */
+export const TOTP_CODE_PATTERN = /^\d{6}$/;
+
+/**
+ * Ceiling on the WebAuthn `AuthenticationResponseJSON` a passkey sign-in posts
+ * back. A real assertion is well under a kilobyte — signature, authenticator
+ * data and client data, all base64url — so 8 KB is generous and still caps what
+ * an unauthenticated caller can make this server forward to Cognito. Size only:
+ * the contents are Cognito's to verify, since it is the relying party.
+ */
+export const MAX_PASSKEY_CREDENTIAL_LENGTH = 8192;
+
+/**
  * Narrows a `FormData` entry to a string. A `File` (or a missing field) is
  * treated as an empty value, which the callers then reject as required.
  */

@@ -2,6 +2,7 @@
 
 import { useCallback, useState, type ReactNode } from "react";
 import { Drawer, Typography } from "antd";
+import AccountSecurityDrawer from "@/components/account/account-security-drawer";
 import { surfaceColors } from "@/lib/theme/colors";
 import EntryDrawer from "./entry-drawer";
 import NavBar from "./nav-bar";
@@ -54,6 +55,8 @@ export default function AppShell({
 }: AppShellProps) {
   const [entryKind, setEntryKind] = useState<QuickActionKind | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  // The operator's own Cognito settings, raised from the avatar menu.
+  const [accountOpen, setAccountOpen] = useState(false);
   const [notificationCenterOpen, setNotificationCenterOpen] = useState(false);
   // Empty until the admin notifications API exists; see ./notifications.
   const [notifications, setNotifications] = useState<ShellNotification[]>(
@@ -92,6 +95,7 @@ export default function AppShell({
         settingsEntries={settingsEntries}
         onQuickAction={setEntryKind}
         onOpenHelp={() => setHelpOpen(true)}
+        onOpenAccount={() => setAccountOpen(true)}
         onOpenNotificationCenter={() => setNotificationCenterOpen(true)}
         onMarkNotificationRead={markRead}
         onMarkNotificationUnread={markUnread}
@@ -121,6 +125,12 @@ export default function AppShell({
           Learning Centre…
         </Typography.Paragraph>
       </Drawer>
+
+      <AccountSecurityDrawer
+        open={accountOpen}
+        onClose={() => setAccountOpen(false)}
+        email={email}
+      />
 
       <EntryDrawer
         kind={entryKind}

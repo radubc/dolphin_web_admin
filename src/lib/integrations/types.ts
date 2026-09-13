@@ -19,7 +19,8 @@
  * - `bank_of_canada_rates` — daily exchange rates from the Bank of Canada
  *   Valet API (no key needed) for every active currency pair
  *   (`admin_currency_pairs`), cached in `admin_exchange_rates` one row per
- *   pair and day. Pairs enter the list the same two ways.
+ *   pair and day — for watched pairs only, never for the rest of the
+ *   published document. Pairs enter the list the same two ways.
  * - `iso_mic_markets` — downloads the ISO 10383 MIC list published by
  *   ISO 20022 (a CSV, no key needed) and inserts the markets the admin
  *   `markets` catalog does not have yet, matched on `mic_code`. Insert-only
@@ -551,6 +552,24 @@ export interface WatchListPage<T> {
 export type QuoteSymbolListResponse = WatchListPage<QuoteSymbol>;
 export type CurrencyPairListResponse = WatchListPage<CurrencyPair>;
 
+/**
+ * How many days of one pair's download history a page holds by default. A
+ * month of business days, which is what the drawer opens on.
+ */
+export const RATE_HISTORY_PAGE_SIZE_DEFAULT = 30;
+
+/** Paging for one pair's rate history. Nothing to search or filter: it is one pair. */
+export interface RateHistoryQuery {
+  page?: number;
+  pageSize?: number;
+}
+
+/**
+ * `GET /api/v1/admin/integrations/currency-pairs/[id]/rates` — everything
+ * stored for one pair, newest observation day first.
+ */
+export type ExchangeRateListResponse = WatchListPage<ExchangeRate>;
+
 /* -------------------------------------------------------------------------- */
 /*                         Service endpoints (consumer app)                   */
 /* -------------------------------------------------------------------------- */
@@ -594,10 +613,61 @@ export interface QuoteLookupResponse {
 }
 
 /**
- * `GET /api/v1/service/exchange-rates?pairs=USD/CAD,EUR/USD` — the newest
- * cached rate per pair, fetching first for any pair with no rate from today
- * (one provider call covers every pair). A pair a rate was computed for and
- * the cache did not know is added to the watch list.
+ * The longest window `from`/`to` may span, counted inclusively. Long enough
+ * for a year of history in one call, short enough that the answer stays a
+ * response rather than a download: the ceiling is
+ * `LOOKUP_ITEMS_MAX × RATE_RANGE_DAYS_MAX` rates.
+ */
+export const RATE_RANGE_DAYS_MAX = 400;
+
+/**
+ * How far back the `date` form looks for the closest published observation.
+ *
+ * Ten calendar days covers a weekend plus the longest run of statutory
+ * holidays either country takes, with room to spare. Past that the honest
+ * answer is that the Bank published nothing for that pair, not a rate from a
+ * fortnight away presented as if it were the day's.
+ */
+export const RATE_BACKFILL_DAYS = 10;
+
+/**
+ * What `GET /api/v1/service/exchange-rates` accepts.
+ *
+ * Three mutually exclusive forms, all sharing `pairs`:
+ *
+ * - **neither `date` nor `from`/`to`** — the newest rate per pair, fetching
+ *   when nothing was fetched today. One rate per pair.
+ * - **`date`** — the closest observation **on or before** that day, looking
+ *   back at most `RATE_BACKFILL_DAYS`; the answer's own `date` says which day
+ *   it really is. One rate per pair.
+ * - **`from` and `to`** — every published observation in the window, at most
+ *   `RATE_RANGE_DAYS_MAX` days. Many rates per pair.
+ */
+export interface ExchangeRateLookupQuery {
+  /** `FROM/TO` spellings, as the caller wrote them. */
+  pairs: string[];
+  /** `YYYY-MM-DD`, not in the future. Never set together with `from`/`to`. */
+  date?: string;
+  /** `YYYY-MM-DD`. Set with `to` or not at all. */
+  from?: string;
+  /** `YYYY-MM-DD`, not in the future and not before `from`. */
+  to?: string;
+}
+
+/**
+ * `GET /api/v1/service/exchange-rates?pairs=USD/CAD,EUR/USD` — rates for the
+ * requested pairs, and a `missing` entry for every pair that has none.
+ *
+ * Without a date, the newest rate per pair, fetching first for any pair with
+ * no rate from today (one provider call covers every pair). With `date` or
+ * `from`/`to`, the observations in that window — served from
+ * `admin_exchange_rates` when it already covers the window, otherwise from one
+ * ranged Bank of Canada call whose rows are then stored. A pair a rate was
+ * computed for and the cache did not know is added to the watch list.
+ *
+ * `rates` is flat: in the `from`/`to` form it holds one entry per pair **and
+ * observation day**, in the requested pair order, oldest day first. A caller
+ * matches on `fromCurrency`, `toCurrency` and `date`.
  */
 export interface ExchangeRateLookupResponse {
   rates: ExchangeRate[];

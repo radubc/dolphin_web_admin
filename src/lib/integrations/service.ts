@@ -47,6 +47,7 @@ import {
   findCurrencyPair,
   findCurrencyPairById,
   findCurrencyPairPage,
+  findExchangeRatePage,
   findIntegrationRow,
   findQuoteSymbolByCanonical,
   findQuoteSymbolById,
@@ -59,6 +60,7 @@ import {
   quoteSettings,
   settingsOf,
   toCurrencyPair,
+  toExchangeRate,
   toIntegration,
   toQuoteSymbol,
   updateCurrencyPair,
@@ -69,6 +71,7 @@ import { baseUrlDomainMessage, isAllowedBaseUrl } from "./schemas";
 import { beginRun, getRun, latestRuns, listRuns, type RunWork } from "./runs";
 import { isSchedulerActive } from "./scheduler-state";
 import {
+  RATE_HISTORY_PAGE_SIZE_DEFAULT,
   INTEGRATION_KEYS,
   isIntegrationKey,
   WATCH_PAGE_SIZE_DEFAULT,
@@ -77,6 +80,7 @@ import {
   type CurrencyPairInput,
   type CurrencyPairListResponse,
   type CurrencyPairPatch,
+  type ExchangeRateListResponse,
   type Integration,
   type IntegrationKey,
   type IntegrationListResponse,
@@ -87,6 +91,7 @@ import {
   type QuoteSymbolListResponse,
   type IntegrationProvider,
   type QuoteSymbolPatch,
+  type RateHistoryQuery,
   type RunRequest,
   type RunTrigger,
   type WatchListQuery,
@@ -521,4 +526,32 @@ export async function removeCurrencyPair(id: string): Promise<void> {
     conflict: `${existing.from_currency}/${existing.to_currency} is already on the watch list.`,
     notFound: "That currency pair is not on the watch list.",
   });
+}
+
+/**
+ * One page of what has been downloaded for a pair, newest observation day
+ * first: the rate, where it came from (read from the Bank's own series, or
+ * derived from two of them) and when it was fetched.
+ *
+ * Addressed by the watch row's id rather than by the two codes, so the drawer
+ * asks with what the list already gave it, and a pair that has been removed
+ * from the watch list is a 404 even though its rates are still stored — the
+ * history is a view of a watched pair, not a query over the rate table.
+ */
+export async function listCurrencyPairRates(
+  id: string,
+  query: RateHistoryQuery,
+): Promise<ExchangeRateListResponse> {
+  requireUuid(id, "currency pair");
+  const pair = await findCurrencyPairById(id);
+  if (!pair) throw new NotFoundError("That currency pair is not on the watch list.");
+  const { page, pageSize, skip } = paging({
+    ...query,
+    pageSize: query.pageSize ?? RATE_HISTORY_PAGE_SIZE_DEFAULT,
+  });
+  const { rows, total } = await findExchangeRatePage(pair.from_currency, pair.to_currency, {
+    skip,
+    take: pageSize,
+  });
+  return { items: rows.map(toExchangeRate), total, page, pageSize };
 }

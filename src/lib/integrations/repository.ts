@@ -893,6 +893,74 @@ export async function upsertExchangeRate(input: RateUpsert): Promise<WriteOutcom
 }
 
 /**
+ * Inserts rates that are not stored yet, in one statement per chunk.
+ *
+ * The historical lookups write a whole range at once — hundreds of days times
+ * however many pairs were asked for — and the per-row `upsertExchangeRate`
+ * (two statements each) would turn that into thousands of round trips inside
+ * one request. The caller has already read what is stored for the window, so
+ * it knows which rows are new; `skipDuplicates` covers the race with a
+ * concurrent writer of the same day.
+ *
+ * @returns how many rows were actually inserted.
+ */
+export async function insertExchangeRates(rows: readonly RateUpsert[]): Promise<number> {
+  if (rows.length === 0) return 0;
+  const CHUNK = 1_000;
+  let created = 0;
+  for (let index = 0; index < rows.length; index += CHUNK) {
+    const result = await prismaAdmin.admin_exchange_rates.createMany({
+      data: rows.slice(index, index + CHUNK).map((row) => ({
+        from_currency: row.fromCurrency,
+        to_currency: row.toCurrency,
+        date: fromIsoDate(row.date),
+        rate: row.rate,
+        source: row.source,
+        fetched_at: row.fetchedAt,
+      })),
+      skipDuplicates: true,
+    });
+    created += result.count;
+  }
+  return created;
+}
+
+/**
+ * Every stored rate for each pair with `from <= date <= to`, keyed `FROM/TO`
+ * and oldest observation day first.
+ *
+ * This is what makes the historical lookups cache-first: one query answers
+ * "what do we already have for this window?" for every requested pair at once,
+ * and its result is reused as both the answer and the "which rows are new"
+ * test for `insertExchangeRates`.
+ *
+ * Bounded by the caller: at most `LOOKUP_ITEMS_MAX` pairs over a window the
+ * query schema caps at `RATE_RANGE_DAYS_MAX` days.
+ */
+export async function ratesInRange(
+  pairs: readonly { from: string; to: string }[],
+  from: IsoDate,
+  to: IsoDate,
+): Promise<Map<string, ExchangeRate[]>> {
+  const byPair = new Map<string, ExchangeRate[]>();
+  if (pairs.length === 0) return byPair;
+  const rows = await prismaAdmin.admin_exchange_rates.findMany({
+    where: {
+      date: { gte: fromIsoDate(from), lte: fromIsoDate(to) },
+      OR: pairs.map((pair) => ({ from_currency: pair.from, to_currency: pair.to })),
+    },
+    orderBy: [{ from_currency: "asc" }, { to_currency: "asc" }, { date: "asc" }],
+  });
+  for (const row of rows) {
+    const key = `${row.from_currency}/${row.to_currency}`;
+    const list = byPair.get(key);
+    if (list) list.push(toExchangeRate(row));
+    else byPair.set(key, [toExchangeRate(row)]);
+  }
+  return byPair;
+}
+
+/**
  * The newest cached rate for each `FROM/TO` pair, keyed by that spelling.
  *
  * Bounded the same way as `latestQuotesFor`: a two-week window first, then one
@@ -936,39 +1004,29 @@ export async function latestRatesFor(
 }
 
 /**
- * Every `X → CAD` series cached for `date`, as the map the rate arithmetic
- * takes. This is what lets an on-demand lookup answer a brand-new pair
- * without calling the Bank of Canada again: the run caches all ~27 published
- * series each day, and any pair is a ratio of two of them.
+ * One page of everything ever stored for a pair, newest observation day
+ * first, then newest fetch. This is the download history behind a row on the
+ * currency pair list.
+ *
+ * Only rows for this exact `from → to` spelling: `USD/CAD` and `CAD/USD` are
+ * two watch rows with two histories, and the page shows each on its own.
  */
-export async function cachedSeriesFor(date: IsoDate): Promise<Map<string, number>> {
-  const rows = await prismaAdmin.admin_exchange_rates.findMany({
-    where: { to_currency: "CAD", date: fromIsoDate(date), source: "boc" },
-    select: { from_currency: true, rate: true },
-  });
-  const series = new Map<string, number>();
-  for (const row of rows) series.set(row.from_currency, Number(row.rate));
-  return series;
-}
-
-/** The newest observation date any cached `X → CAD` series carries. */
-export async function newestSeriesDate(): Promise<IsoDate | null> {
-  const row = await prismaAdmin.admin_exchange_rates.findFirst({
-    where: { to_currency: "CAD", source: "boc" },
-    orderBy: { date: "desc" },
-    select: { date: true, fetched_at: true },
-  });
-  return row ? toIsoDate(row.date) : null;
-}
-
-/** When the newest cached series was fetched, for the "already today" test. */
-export async function newestSeriesFetchedAt(): Promise<Date | null> {
-  const row = await prismaAdmin.admin_exchange_rates.findFirst({
-    where: { to_currency: "CAD", source: "boc" },
-    orderBy: { fetched_at: "desc" },
-    select: { fetched_at: true },
-  });
-  return row?.fetched_at ?? null;
+export async function findExchangeRatePage(
+  from: string,
+  to: string,
+  page: { skip: number; take: number },
+): Promise<{ rows: ExchangeRateRow[]; total: number }> {
+  const where = { from_currency: from, to_currency: to };
+  const [rows, total] = await Promise.all([
+    prismaAdmin.admin_exchange_rates.findMany({
+      where,
+      orderBy: [{ date: "desc" }, { fetched_at: "desc" }],
+      skip: page.skip,
+      take: page.take,
+    }),
+    prismaAdmin.admin_exchange_rates.count({ where }),
+  ]);
+  return { rows, total };
 }
 
 /* -------------------------------------------------------------------------- */

@@ -19,6 +19,10 @@
 import { useEffect, useState } from "react";
 import { Alert, AutoComplete, Button, Drawer, Form, Input, Radio, Space, Typography } from "antd";
 import { SearchOutlined, StockOutlined } from "@ant-design/icons";
+import {
+  FormErrorSummary,
+  useFormErrorSummary,
+} from "@/components/form-error-summary";
 import FormSection from "@/components/form-section";
 import { ENTRY_DRAWER_WIDTH } from "@/components/shell/definitions";
 import { constantsApi } from "@/lib/constants/client";
@@ -99,6 +103,7 @@ export default function QuoteSymbolDrawer({
   const [form] = Form.useForm<QuoteSymbolFormValues>();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { errorSummary, onFinishFailed, reset } = useFormErrorSummary();
 
   // The kind decides which catalog is searched and whether an exchange is asked
   // for at all, so the form watches it.
@@ -153,6 +158,7 @@ export default function QuoteSymbolDrawer({
 
   const handleSubmit = async (values: QuoteSymbolFormValues) => {
     setError(null);
+    reset();
     setSaving(true);
     const input: QuoteSymbolInput = {
       kind: values.kind,
@@ -180,6 +186,7 @@ export default function QuoteSymbolDrawer({
         if (!opened) {
           form.resetFields();
           setError(null);
+          reset();
           setSearch("");
           setQuery("");
           setSuggestions([]);
@@ -214,16 +221,15 @@ export default function QuoteSymbolDrawer({
         name={FORM_NAME}
         layout="vertical"
         disabled={saving}
-        requiredMark="optional"
         initialValues={{ kind: "stock", symbol: "", exchange: "" }}
         onFinish={(values) => {
           void handleSubmit(values);
         }}
-        onFinishFailed={() =>
-          setError("Some fields need attention. Check the highlighted ones and try again.")
-        }
+        onFinishFailed={onFinishFailed}
         className="flex flex-col gap-4"
       >
+        <FormErrorSummary summary={errorSummary} onClose={reset} />
+
         {error !== null && (
           <Alert type="error" showIcon closable onClose={() => setError(null)} title={error} />
         )}
@@ -283,7 +289,7 @@ export default function QuoteSymbolDrawer({
             }
             normalize={(value: unknown) => (typeof value === "string" ? value.toUpperCase() : value)}
             rules={[
-              { required: true, whitespace: true, message: "Symbol is required" },
+              { required: true, whitespace: true },
               ...(kind === "crypto"
                 ? [
                     {
@@ -307,7 +313,7 @@ export default function QuoteSymbolDrawer({
               name="exchange"
               label="Exchange"
               tooltip="As the catalog spells it, e.g. NASDAQ, TSX."
-              rules={[{ required: true, whitespace: true, message: "Exchange is required" }]}
+              rules={[{ required: true, whitespace: true }]}
             >
               <Input placeholder="NASDAQ" maxLength={80} autoComplete="off" style={{ width: 260 }} />
             </Form.Item>

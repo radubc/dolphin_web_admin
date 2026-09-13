@@ -15,6 +15,10 @@
 import { useEffect, useState } from "react";
 import { Alert, Button, Drawer, Form, Input, Select, Space, Typography } from "antd";
 import { SwapOutlined } from "@ant-design/icons";
+import {
+  FormErrorSummary,
+  useFormErrorSummary,
+} from "@/components/form-error-summary";
 import FormSection from "@/components/form-section";
 import { ENTRY_DRAWER_WIDTH } from "@/components/shell/definitions";
 import { constantsApi } from "@/lib/constants/client";
@@ -68,6 +72,7 @@ export default function CurrencyPairDrawer({
   const [form] = Form.useForm<CurrencyPairFormValues>();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { errorSummary, onFinishFailed, reset } = useFormErrorSummary();
   const [currencies, setCurrencies] = useState<CurrencyOption[]>([]);
   /** A failed catalog read is soft: the fields fall back to plain inputs. */
   const [currenciesFailed, setCurrenciesFailed] = useState(false);
@@ -98,6 +103,7 @@ export default function CurrencyPairDrawer({
 
   const handleSubmit = async (values: CurrencyPairFormValues) => {
     setError(null);
+    reset();
     const input: CurrencyPairInput = {
       fromCurrency: values.fromCurrency.trim().toUpperCase(),
       toCurrency: values.toCurrency.trim().toUpperCase(),
@@ -137,6 +143,7 @@ export default function CurrencyPairDrawer({
         if (!opened) {
           form.resetFields();
           setError(null);
+          reset();
         }
       }}
       placement="right"
@@ -167,16 +174,15 @@ export default function CurrencyPairDrawer({
         name={FORM_NAME}
         layout="vertical"
         disabled={saving}
-        requiredMark="optional"
         initialValues={{ fromCurrency: "", toCurrency: "" }}
         onFinish={(values) => {
           void handleSubmit(values);
         }}
-        onFinishFailed={() =>
-          setError("Some fields need attention. Check the highlighted ones and try again.")
-        }
+        onFinishFailed={onFinishFailed}
         className="flex flex-col gap-4"
       >
+        <FormErrorSummary summary={errorSummary} onClose={reset} />
+
         {error !== null && (
           <Alert type="error" showIcon closable onClose={() => setError(null)} title={error} />
         )}
@@ -188,7 +194,7 @@ export default function CurrencyPairDrawer({
             tooltip="The currency being converted, e.g. USD in USD → CAD."
             normalize={picker ? undefined : upper}
             rules={[
-              { required: true, whitespace: true, message: "A currency is required" },
+              { required: true, whitespace: true },
               { pattern: CODE_PATTERN, message: "A three-letter ISO code, e.g. USD" },
               differentFrom("toCurrency"),
             ]}
@@ -212,7 +218,7 @@ export default function CurrencyPairDrawer({
             tooltip="The currency being converted into, e.g. CAD in USD → CAD."
             normalize={picker ? undefined : upper}
             rules={[
-              { required: true, whitespace: true, message: "A currency is required" },
+              { required: true, whitespace: true },
               { pattern: CODE_PATTERN, message: "A three-letter ISO code, e.g. CAD" },
               differentFrom("fromCurrency"),
             ]}

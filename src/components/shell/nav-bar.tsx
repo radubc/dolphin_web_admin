@@ -43,6 +43,7 @@ interface NavBarProps {
   settingsEntries: readonly ShellSettingsEntry[];
   onQuickAction: (kind: QuickActionKind) => void;
   onOpenHelp: () => void;
+  onOpenAccount: () => void;
   onOpenNotificationCenter: () => void;
   onMarkNotificationRead: (id: string) => void;
   onMarkNotificationUnread: (id: string) => void;
@@ -85,6 +86,7 @@ export default function NavBar({
   settingsEntries,
   onQuickAction,
   onOpenHelp,
+  onOpenAccount,
   onOpenNotificationCenter,
   onMarkNotificationRead,
   onMarkNotificationUnread,
@@ -228,7 +230,7 @@ export default function NavBar({
           />
         </Popover>
 
-        <UserMenu email={email} />
+        <UserMenu email={email} onOpenAccount={onOpenAccount} />
       </div>
     </header>
   );

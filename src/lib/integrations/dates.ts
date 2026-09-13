@@ -63,6 +63,41 @@ export function weekdayOf(date: IsoDate): number {
   return dayjs.utc(date).day();
 }
 
+/** Whole calendar days from `from` to `to`; negative when `to` is the earlier one. */
+export function daysBetween(from: IsoDate, to: IsoDate): number {
+  return dayjs.utc(to).diff(dayjs.utc(from), "day");
+}
+
+/** The earlier of two calendar days. */
+export function minIsoDate(a: IsoDate, b: IsoDate): IsoDate {
+  return a <= b ? a : b;
+}
+
+/**
+ * True when `value` is a real calendar day. The shape test alone accepts
+ * `2026-02-31`; the parse rejects it (an ISO date-only string with an
+ * out-of-range day is an Invalid Date, not a rolled-over one).
+ */
+export function isValidIsoDate(value: string): boolean {
+  return ISO_DATE.test(value) && dayjs.utc(value).isValid();
+}
+
+/**
+ * `date` itself when it is a weekday, otherwise the Friday before it.
+ *
+ * Public holidays are not modelled — see `previousTradingDay`. This answers
+ * "could the Bank possibly have published anything newer than the cache holds
+ * for this window?", where treating a holiday as a business day costs one
+ * extra (free) provider call and never a wrong answer.
+ */
+export function businessDayOnOrBefore(date: IsoDate): IsoDate {
+  let candidate = date;
+  while (weekdayOf(candidate) === 0 || weekdayOf(candidate) === 6) {
+    candidate = shiftDays(candidate, -1);
+  }
+  return candidate;
+}
+
 /**
  * The trading day before `date`: one day back, then back again over Saturday
  * and Sunday. Public holidays are not modelled — the provider's own
@@ -80,6 +115,12 @@ export function previousTradingDay(date: IsoDate): IsoDate {
 /** Today's calendar day in `timezone` (market time, not UTC). */
 export function todayIn(timezone: string = DEFAULT_TIMEZONE): IsoDate {
   return dayjs().tz(timezone).format("YYYY-MM-DD");
+}
+
+/** Minutes since midnight, right now, in `timezone` (13:30 is 810). */
+export function minutesOfDayIn(timezone: string = DEFAULT_TIMEZONE): number {
+  const now = dayjs().tz(timezone);
+  return now.hour() * 60 + now.minute();
 }
 
 /** The instant midnight local time in `timezone` began, for a `>=` comparison. */

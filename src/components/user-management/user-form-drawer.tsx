@@ -18,6 +18,7 @@
 import { useMemo, useState } from "react";
 import { Alert, Button, Drawer, Form, Input, Popconfirm, Select, Space, Switch, Typography } from "antd";
 import { CheckCircleOutlined, StopOutlined, UserAddOutlined, UserOutlined } from "@ant-design/icons";
+import { FormErrorSummary, useFormErrorSummary } from "@/components/form-error-summary";
 import FormSection from "@/components/form-section";
 import type {
   AdminCapabilities,
@@ -63,9 +64,7 @@ function UserFormBody({
   busy,
   error,
   onDismissError,
-  onDraftChange,
   onSubmit,
-  onInvalid,
 }: {
   user: AdminUser | null;
   roles: readonly AdminRole[];
@@ -74,11 +73,12 @@ function UserFormBody({
   busy: boolean;
   error: string | null;
   onDismissError: () => void;
-  onDraftChange: (canSave: boolean) => void;
   onSubmit: (values: UserFormValues) => void;
-  onInvalid: () => void;
 }) {
   const [form] = Form.useForm<UserFormValues>();
+  // Remounted per user (`key` on this body) and unmounted on close
+  // (`destroyOnHidden`), so the summary starts empty on every open.
+  const { errorSummary, onFinishFailed, reset } = useFormErrorSummary();
 
   const initialValues = useMemo<UserFormValues>(
     () => ({
@@ -107,17 +107,17 @@ function UserFormBody({
       form={form}
       name={FORM_NAME}
       layout="vertical"
-      requiredMark
       disabled={busy || readOnly}
       initialValues={initialValues}
-      onValuesChange={(_changed, next: UserFormValues) => {
-        onDraftChange((next.email ?? "").trim() !== "");
+      onFinish={(values) => {
+        reset();
+        onSubmit(values);
       }}
-      onFinish={onSubmit}
-      onFinishFailed={onInvalid}
-      scrollToFirstError
+      onFinishFailed={onFinishFailed}
       className="flex flex-col gap-4"
     >
+      <FormErrorSummary summary={errorSummary} onClose={reset} />
+
       {error === null ? null : (
         <Alert type="error" showIcon title={error} closable={{ onClose: onDismissError }} />
       )}
@@ -140,7 +140,7 @@ function UserFormBody({
               : "The address the invitation goes to. It becomes their sign-in."
           }
           rules={[
-            { required: true, whitespace: true, message: "Email is required" },
+            { required: true, whitespace: true },
             {
               validator: (_rule, value: string) =>
                 !value || EMAIL_PATTERN.test(value.trim())
@@ -221,14 +221,12 @@ export default function UserFormDrawer({
   const [saving, setSaving] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [draft, setDraft] = useState<{ key: string; canSave: boolean } | null>(null);
 
   const isEdit = user !== null;
   const isSelf = user?.id === capabilities.userId;
   const readOnly = !capabilities.isSuperAdmin;
   const formKey = user?.id ?? "invite";
   const busy = saving || toggling;
-  const canSave = !readOnly && (draft !== null && draft.key === formKey ? draft.canSave : isEdit);
   const disabled = user?.disabledAt !== null && user !== null;
 
   const handleSubmit = async (values: UserFormValues) => {
@@ -297,7 +295,6 @@ export default function UserFormDrawer({
       afterOpenChange={(opened) => {
         if (!opened) {
           setError(null);
-          setDraft(null);
         }
       }}
       styles={{ body: { background: surfaceColors.page } }}
@@ -341,7 +338,7 @@ export default function UserFormDrawer({
                 type="primary"
                 htmlType="submit"
                 form={FORM_NAME}
-                disabled={!canSave || busy}
+                disabled={busy}
                 loading={saving}
               >
                 {isEdit ? "Save" : "Send invitation"}
@@ -360,13 +357,9 @@ export default function UserFormDrawer({
         busy={busy}
         error={error}
         onDismissError={() => setError(null)}
-        onDraftChange={(next) => setDraft({ key: formKey, canSave: next })}
         onSubmit={(values) => {
           void handleSubmit(values);
         }}
-        onInvalid={() =>
-          setError("Some fields need attention. Check the highlighted ones and try again.")
-        }
       />
     </Drawer>
   );

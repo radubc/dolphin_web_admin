@@ -94,6 +94,14 @@ export const RATE_LIMITS = {
   authReset: { name: "auth_reset", limit: 5, windowMs: 15 * 60_000 },
 
   /**
+   * The second leg of a passkey sign-in (the assertion answered to Cognito),
+   * keyed `passkey:email:<pool username>`. Its own budget, so an honest
+   * passkey sign-in — two calls — does not spend two of `authLoginAccount`'s
+   * five attempts; the first leg still charges the login budget.
+   */
+  authPasskey: { name: "auth_passkey", limit: 10, windowMs: 15 * 60_000 },
+
+  /**
    * Token refresh. Higher than sign-in because a legitimate multi-tab session
    * refreshes on its own schedule, still low enough to make a stolen refresh
    * token a poor oracle.

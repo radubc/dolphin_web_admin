@@ -18,9 +18,15 @@ import "server-only";
  *    anyway). Rates need no such rule: one Bank of Canada call covers every
  *    pair at once.
  * 3. **Never spend a credit twice.** An item that was already fetched today
- *    is answered from the cache. Rates go further: because one Bank of Canada
- *    call caches every published series, a pair nobody has ever asked for can
- *    still be derived from today's cache without touching the provider.
+ *    is answered from the cache. Rates go further: the document one Bank of
+ *    Canada call returns is remembered in process for the day (the memo in
+ *    `jobs/rates.ts`), so a pair nobody has ever asked for is computed from
+ *    it without touching the provider. Only the pair that was asked for is
+ *    written — `admin_exchange_rates` never holds a pair the watch list does
+ *    not have. The dated rate forms (`date`, or `from`/`to`) apply the same
+ *    rule to history: the table is asked first and the Bank only for the
+ *    window it does not already cover, in one ranged call for every pair at
+ *    once.
  * 4. **Learn from the request, but only from a real one.** A symbol or pair
  *    the watch list did not have joins it (`source: "request"`) **after** the
  *    provider answered for it, never before: a watch row costs a credit every
@@ -33,17 +39,24 @@ import "server-only";
  *    cache hits.
  */
 import { ConflictError } from "@/lib/api/errors";
-import { isToday } from "./dates";
+import { isToday, minIsoDate, shiftDays, type IsoDate } from "./dates";
 import { alphaVantageContext, runAlphaVantagePass } from "./jobs/alpha-vantage";
 import { fetchQuotesInto, runQuoteFallback } from "./jobs/quotes";
 import {
-  cachedSeriesIfCurrent,
-  fetchAndCacheSeries,
+  currentObservation,
+  fetchObservation,
+  fetchObservations,
   unpublishedMessage,
+  writeHistoricalRates,
   writePairRates,
   type PairRequest,
 } from "./jobs/rates";
-import { unpublishedCurrency } from "./providers/bank-of-canada";
+import {
+  publishedThrough,
+  rateFor,
+  unpublishedCurrency,
+  type FxObservation,
+} from "./providers/bank-of-canada";
 import { isProviderError } from "./providers/http";
 import {
   apiKeyOf,
@@ -59,11 +72,12 @@ import {
   markCurrencyPair,
   markQuoteSymbol,
   quoteSettings,
+  ratesInRange,
   settingsOf,
   splitCanonical,
 } from "./repository";
 import { beginRun, messageOf, type RunWork } from "./runs";
-import { LOOKUP_ALPHA_VANTAGE_MAX } from "./types";
+import { LOOKUP_ALPHA_VANTAGE_MAX, RATE_BACKFILL_DAYS } from "./types";
 import type {
   ExchangeRate,
   ExchangeRateLookupResponse,
@@ -506,7 +520,7 @@ const pairKey = (pair: PairRequest): string => `${pair.from}/${pair.to}`;
  */
 async function ensurePairsWatched(
   pairs: readonly PairRequest[],
-  ratedAt: Date,
+  ratedAt: Date | null,
 ): Promise<void> {
   const candidates = pairs.filter((pair) => pair.from !== pair.to);
   if (candidates.length === 0) return;
@@ -525,6 +539,8 @@ async function ensurePairsWatched(
         createdBy: null,
       });
       // Same as the quote path: the rate was written before the row existed.
+      // `ratedAt` is null for a historical write — the row is new and has no
+      // rate for *today*, so the nightly run must still fetch one.
       await markCurrencyPair(pair.from, pair.to, { ratedAt, error: null });
     } catch (error) {
       console.warn(
@@ -553,16 +569,38 @@ async function writeAndWatch(
 }
 
 /**
- * The newest cached rate per pair, fetching only when today's Bank of Canada
- * series are not cached yet.
- *
- * One provider call covers every pair, so there is no batching rule here: a
- * lookup either finds today's series in the cache, or makes that one call.
+ * The three forms of `GET /api/v1/service/exchange-rates`, dispatched on what
+ * the query string held (the schema has already ruled out the combinations
+ * that make no sense).
  *
  * `requested` spellings are kept exactly as they arrived (`USD/CAD`), because
  * that is what the caller matches its own request against.
  */
 export async function lookupExchangeRates(
+  requested: readonly string[],
+  window: { date?: IsoDate; from?: IsoDate; to?: IsoDate } = {},
+): Promise<ExchangeRateLookupResponse> {
+  if (window.from !== undefined && window.to !== undefined) {
+    return lookupRatesInRange(requested, window.from, window.to);
+  }
+  if (window.date !== undefined) return lookupRatesOn(requested, window.date);
+  return lookupLatestRates(requested);
+}
+
+/**
+ * The newest cached rate per pair, in three stops:
+ *
+ * 1. the pair's own row in `admin_exchange_rates`, if it was fetched today;
+ * 2. otherwise the observation this process fetched today, if there is one —
+ *    the pair is computed from it and written, and no provider is called;
+ * 3. otherwise one Bank of Canada call (recorded as an `on_demand` run), which
+ *    is memoised for the rest of the day and then used the same way.
+ *
+ * One provider call covers every pair, so there is no batching rule here.
+ * Whichever stop answers, only the requested pairs are written and a pair the
+ * watch list did not have joins it afterwards (`writeAndWatch`).
+ */
+async function lookupLatestRates(
   requested: readonly string[],
 ): Promise<ExchangeRateLookupResponse> {
   const pairs = requested.map(parsePair);
@@ -592,11 +630,19 @@ export async function lookupExchangeRates(
     return answerRates(requested, cached, new Map(), reasons, "provider_error");
   }
 
-  // One call a day caches every published series, so a pair that has never
-  // been asked for can still be derived without touching the provider.
-  const current = await cachedSeriesIfCurrent();
+  // Today's document, if this process already has it. Every pair is a series
+  // in it, a reciprocal, or the ratio of two, so a pair that has never been
+  // asked for is answered without touching the provider. `fetchedAt` is the
+  // memo's own — the instant the Bank really was read — so the row records
+  // when the figure came from the Bank rather than when it was copied.
+  const current = currentObservation();
   if (current) {
-    const written = await writeAndWatch(fetchable, current.series, current.date, new Date());
+    const written = await writeAndWatch(
+      fetchable,
+      current.observation.rates,
+      current.observation.date,
+      current.fetchedAt,
+    );
     return answerRates(requested, cached, written.rates, reasons, "provider_error", written.errors);
   }
 
@@ -618,7 +664,7 @@ export async function lookupExchangeRates(
       total: fetchable.length,
       inline: true,
       work: async (report) => {
-        const { observation, fetchedAt } = await fetchAndCacheSeries(row.base_url);
+        const { observation, fetchedAt } = await fetchObservation(row.base_url);
         const written = await writeAndWatch(
           fetchable,
           observation.rates,
@@ -670,6 +716,445 @@ function answerRates(
     missing.push({ requested: pair, reason });
   }
   return { rates, missing };
+}
+
+/* -------------------------------------------------------------------------- */
+/*                          Exchange rates: history                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What both historical forms need before they can decide anything: what the
+ * table already holds for the window, and which pairs an operator switched
+ * off.
+ *
+ * Two queries for the whole request, however many pairs it names. A pair of
+ * one currency with itself is left out of the rate query on purpose — it is
+ * never stored (see `writePairRates`) and asking for it would only widen the
+ * `OR` list.
+ */
+async function historyContext(
+  pairs: readonly PairRequest[],
+  from: IsoDate,
+  to: IsoDate,
+): Promise<{ stored: Map<string, ExchangeRate[]>; frozen: Set<string> }> {
+  const storable = pairs.filter((pair) => pair.from !== pair.to);
+  const [stored, watched] = await Promise.all([
+    ratesInRange(storable, from, to),
+    findCurrencyPairsFor(pairs),
+  ]);
+  const frozen = new Set(
+    watched
+      .filter((row) => !row.is_active)
+      .map((row) => pairKey({ from: row.from_currency, to: row.to_currency })),
+  );
+  return { stored, frozen };
+}
+
+/**
+ * Is what the table holds for this pair a complete answer for the window?
+ *
+ * There is no way to know the Bank's publishing calendar without asking it, so
+ * this is a practical test rather than a proof:
+ *
+ * - the oldest stored day is no more than a week after `from`, so the window
+ *   does not start with a gap;
+ * - the newest stored day is at least `publishedThrough(to)` — the last day
+ *   the Bank can have published in the window — so it does not end with one;
+ * - every seven-day slice of the window that contains a business day holds at
+ *   least one stored day, so there is no gap in the middle either.
+ *
+ * A holiday week (or a currency the Bank publishes less than weekly) fails the
+ * middle test and costs one extra call, which then stores those days and makes
+ * the next request a cache hit. The opposite mistake — answering a window that
+ * is missing days as if it were complete — is the one that would be silent, so
+ * the test errs towards fetching.
+ */
+function windowCovered(
+  rows: readonly ExchangeRate[] | undefined,
+  from: IsoDate,
+  to: IsoDate,
+): boolean {
+  if (!rows || rows.length === 0) return false;
+  const dates = rows.map((row) => row.date);
+  if (dates[0] > shiftDays(from, 7)) return false;
+  if (dates[dates.length - 1] < publishedThrough(to)) return false;
+  for (let start = from; start <= to; start = shiftDays(start, 7)) {
+    const end = minIsoDate(shiftDays(start, 6), to);
+    // A slice the Bank cannot have published in (a weekend tail, or the days
+    // after the last publication) is not a gap.
+    if (publishedThrough(end) < start) continue;
+    if (!dates.some((date) => date >= start && date <= end)) return false;
+  }
+  return true;
+}
+
+/** Cached rows and freshly computed ones for one pair, newest day last. */
+function mergeRates(
+  stored: readonly ExchangeRate[] = [],
+  computed: readonly ExchangeRate[] = [],
+): ExchangeRate[] {
+  if (computed.length === 0) return [...stored];
+  const byDate = new Map(stored.map((rate) => [rate.date, rate] as const));
+  for (const rate of computed) byDate.set(rate.date, rate);
+  return [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
+/** A currency against itself, on the days the request found. */
+function sameCurrencyRates(
+  pair: PairRequest,
+  dates: readonly IsoDate[],
+  fetchedAt: string,
+): ExchangeRate[] {
+  return dates.map((date) => ({
+    fromCurrency: pair.from,
+    toCurrency: pair.to,
+    date,
+    rate: 1,
+    source: "boc" as const,
+    fetchedAt,
+  }));
+}
+
+/**
+ * Assembles a historical answer: the pairs in the order they were requested,
+ * each pair's days oldest first, and a `missing` entry for every pair the
+ * window produced nothing for.
+ *
+ * Unlike the "latest" form, a cached rate from **outside** the window is never
+ * substituted. The caller asked what the rate was on those days; a value from
+ * another day dressed up as the answer would be a wrong number, not a stale
+ * one.
+ */
+function answerHistory(
+  requested: readonly string[],
+  rates: ReadonlyMap<string, readonly ExchangeRate[]>,
+  reasons: ReadonlyMap<string, LookupMissReason>,
+  fallback: LookupMissReason,
+): ExchangeRateLookupResponse {
+  const answered: ExchangeRate[] = [];
+  const missing: LookupMiss[] = [];
+  for (const pair of requested) {
+    const rows = rates.get(pair);
+    if (rows && rows.length > 0) {
+      answered.push(...rows);
+      continue;
+    }
+    missing.push({ requested: pair, reason: reasons.get(pair) ?? fallback });
+  }
+  return { rates: answered, missing };
+}
+
+/** The integration row, or `null` when the Bank must not be called right now. */
+async function ratesIntegration(): Promise<Awaited<ReturnType<typeof findIntegrationRow>>> {
+  const row = await findIntegrationRow("bank_of_canada_rates");
+  return row && row.is_enabled ? row : null;
+}
+
+/**
+ * Every published observation for each pair between `from` and `to`,
+ * inclusive.
+ *
+ * Cache-first: a pair the table already covers for the whole window
+ * (`windowCovered`) is answered from those rows and costs nothing. If any pair
+ * is short, **one** ranged Bank of Canada call fetches the window for all of
+ * them at once — the Valet API returns every series for every business day in
+ * one document, so the call is the same size whether one pair needs it or
+ * fifty — and the rows the table did not have are inserted.
+ *
+ * A pair with no observation at all in the window is `not_found`. Nothing is
+ * ever answered from outside the window.
+ */
+async function lookupRatesInRange(
+  requested: readonly string[],
+  from: IsoDate,
+  to: IsoDate,
+): Promise<ExchangeRateLookupResponse> {
+  const pairs = requested.map(parsePair);
+  const reasons = new Map<string, LookupMissReason>();
+
+  // Nothing can have been published in this window (a weekend, or a range
+  // ending today before 16:30 with no earlier day in it). No call, no rows.
+  if (publishedThrough(to) < from) {
+    return answerHistory(requested, new Map(), reasons, "not_found");
+  }
+
+  const { stored, frozen } = await historyContext(pairs, from, to);
+  const fetchable: PairRequest[] = [];
+  const covered: PairRequest[] = [];
+  const sameCurrency: PairRequest[] = [];
+
+  for (const pair of pairs) {
+    const key = pairKey(pair);
+    if (pair.from === pair.to) {
+      sameCurrency.push(pair);
+      continue;
+    }
+    if (frozen.has(key)) {
+      // Deactivated by an operator: whatever is cached, and nothing fetched.
+      if (!stored.get(key)?.length) reasons.set(key, "unavailable");
+      continue;
+    }
+    if (windowCovered(stored.get(key), from, to)) covered.push(pair);
+    else fetchable.push(pair);
+  }
+
+  // A currency against itself has no stored rows to be covered by, so it
+  // borrows the observation days another pair already established. Only when
+  // none did does it justify a call of its own.
+  const cachedDays = [
+    ...new Set(covered.flatMap((pair) => stored.get(pairKey(pair))?.map((row) => row.date) ?? [])),
+  ].sort();
+  if (sameCurrency.length > 0 && cachedDays.length === 0) fetchable.push(...sameCurrency);
+
+  const computed = new Map<string, ExchangeRate[]>();
+  let fallback: LookupMissReason = "not_found";
+
+  if (fetchable.length > 0) {
+    const outcome = await fetchHistory(fetchable, stored, from, to);
+    for (const [key, rows] of outcome.rates) computed.set(key, rows);
+    for (const key of outcome.errors.keys()) reasons.set(key, "not_found");
+    if (outcome.reason !== null) {
+      for (const pair of fetchable) reasons.set(pairKey(pair), outcome.reason);
+      fallback = outcome.reason;
+    }
+  }
+
+  const days =
+    cachedDays.length > 0
+      ? cachedDays
+      : [...new Set([...computed.values()].flatMap((rows) => rows.map((row) => row.date)))].sort();
+  const now = new Date().toISOString();
+  const rates = new Map<string, ExchangeRate[]>();
+  for (const pair of pairs) {
+    const key = pairKey(pair);
+    if (pair.from === pair.to) {
+      rates.set(key, computed.get(key) ?? sameCurrencyRates(pair, days, now));
+      continue;
+    }
+    rates.set(key, mergeRates(stored.get(key), computed.get(key)));
+  }
+  return answerHistory(requested, rates, reasons, fallback);
+}
+
+/**
+ * Each pair's rate on `date`, or on the closest published day before it.
+ *
+ * The Bank publishes on business days, so a Sunday, a holiday or a day a
+ * consumer typed in has no observation of its own; the answer is then the
+ * newest one within `RATE_BACKFILL_DAYS` before it, and the `date` on each
+ * rate says which day that turned out to be. Past that the pair is
+ * `not_found` — a rate from a fortnight earlier presented as the day's rate
+ * would be a wrong number.
+ *
+ * Cache-first: a pair with any stored row in the ten-day window is answered
+ * from the newest of them without a call. Otherwise one ranged call covers
+ * every remaining pair at once.
+ */
+async function lookupRatesOn(
+  requested: readonly string[],
+  date: IsoDate,
+): Promise<ExchangeRateLookupResponse> {
+  const pairs = requested.map(parsePair);
+  const from = shiftDays(date, -RATE_BACKFILL_DAYS);
+  const reasons = new Map<string, LookupMissReason>();
+  const { stored, frozen } = await historyContext(pairs, from, date);
+
+  const rates = new Map<string, ExchangeRate[]>();
+  const fetchable: PairRequest[] = [];
+  const sameCurrency: PairRequest[] = [];
+
+  for (const pair of pairs) {
+    const key = pairKey(pair);
+    if (pair.from === pair.to) {
+      sameCurrency.push(pair);
+      continue;
+    }
+    // Ascending by day, and every row is inside the window: the last one is
+    // the closest observation on or before `date`.
+    const newest = stored.get(key)?.at(-1);
+    if (newest) {
+      rates.set(key, [newest]);
+      continue;
+    }
+    if (frozen.has(key)) {
+      reasons.set(key, "unavailable");
+      continue;
+    }
+    fetchable.push(pair);
+  }
+
+  const cachedDay = [...rates.values()].map((rows) => rows[0].date).sort().at(-1) ?? null;
+  if (sameCurrency.length > 0 && cachedDay === null) fetchable.push(...sameCurrency);
+
+  let fallback: LookupMissReason = "not_found";
+  const computed = new Map<string, ExchangeRate[]>();
+
+  if (fetchable.length > 0) {
+    // One call for the whole ten-day window; the newest day each pair can be
+    // computed for is picked out of it below.
+    const outcome = await fetchHistory(fetchable, stored, from, date, { newestDayOnly: true });
+    for (const [key, rows] of outcome.rates) computed.set(key, rows);
+    for (const key of outcome.errors.keys()) reasons.set(key, "not_found");
+    if (outcome.reason !== null) {
+      for (const pair of fetchable) reasons.set(pairKey(pair), outcome.reason);
+      fallback = outcome.reason;
+    }
+  }
+
+  const day =
+    cachedDay ??
+    [...computed.values()]
+      .map((rows) => rows[0]?.date)
+      .filter((value): value is IsoDate => value !== undefined)
+      .sort()
+      .at(-1) ??
+    null;
+  const now = new Date().toISOString();
+  for (const pair of pairs) {
+    const key = pairKey(pair);
+    if (pair.from === pair.to) {
+      const own = computed.get(key);
+      if (own && own.length > 0) rates.set(key, own);
+      else if (day !== null) rates.set(key, sameCurrencyRates(pair, [day], now));
+      continue;
+    }
+    const fresh = computed.get(key);
+    if (fresh && fresh.length > 0) rates.set(key, fresh);
+  }
+  return answerHistory(requested, rates, reasons, fallback);
+}
+
+/** What one ranged provider call produced. */
+interface HistoryFetch {
+  /** Rates computed, keyed `FROM/TO`, oldest day first. */
+  rates: Map<string, ExchangeRate[]>;
+  /** Pairs no day in the window could be rated for. */
+  errors: Map<string, string>;
+  /**
+   * `null` when the Bank was reached and answered; otherwise why it was not,
+   * to be recorded against every pair that was waiting on it.
+   */
+  reason: LookupMissReason | null;
+}
+
+/**
+ * The one ranged Bank of Canada call a historical lookup is allowed, recorded
+ * as an `on_demand` run so the Integrations page shows it.
+ *
+ * Never throws: a provider that is down, disabled or already busy with another
+ * run leaves the caller with whatever the cache had, exactly as in the
+ * "latest" form.
+ *
+ * `newestDayOnly` is the `date` form: the whole window is fetched (it is one
+ * document either way) but only each pair's newest usable day is written and
+ * answered, because that is the only day the caller asked about. A series the
+ * Bank discontinued mid-window means different pairs resolve to different
+ * days, which is why they are grouped rather than written in one pass.
+ */
+async function fetchHistory(
+  pairs: readonly PairRequest[],
+  stored: ReadonlyMap<string, readonly ExchangeRate[]>,
+  from: IsoDate,
+  to: IsoDate,
+  options: { newestDayOnly?: boolean } = {},
+): Promise<HistoryFetch> {
+  const result: HistoryFetch = { rates: new Map(), errors: new Map(), reason: null };
+  const row = await ratesIntegration();
+  if (!row) {
+    result.reason = "unavailable";
+    return result;
+  }
+  try {
+    await beginRun({
+      integrationKey: "bank_of_canada_rates",
+      trigger: "on_demand",
+      requestedBy: null,
+      request: { pairs: pairs.map(pairKey), from, to },
+      total: pairs.length,
+      inline: true,
+      work: async (report) => {
+        const { observations, fetchedAt } = await fetchObservations(row.base_url, from, to);
+        const groups = options.newestDayOnly
+          ? newestDayGroups(pairs, observations)
+          : [{ pairs, observations }];
+        let created = 0;
+        let updated = 0;
+        let failed = 0;
+        for (const group of groups) {
+          const written = await writeHistoricalRates(
+            group.pairs,
+            group.observations,
+            stored,
+            fetchedAt,
+          );
+          for (const [key, rows] of written.rates) result.rates.set(key, rows);
+          for (const [key, message] of written.errors) result.errors.set(key, message);
+          created += written.created;
+          updated += written.updated;
+          failed += written.failed;
+        }
+        // Only the pairs a rate was computed for earn a watch row, and it is
+        // created without a `last_rated_at`: a historical rate says nothing
+        // about whether the pair has today's.
+        await ensurePairsWatched(
+          pairs.filter((pair) => result.rates.has(pairKey(pair))),
+          null,
+        );
+        await report({
+          total: pairs.length,
+          processed: pairs.length,
+          created,
+          updated,
+          failed,
+        });
+      },
+    });
+  } catch (error) {
+    // A live run — the nightly one, or another lookup — holds the integration.
+    result.reason = error instanceof ConflictError ? "pending" : "provider_error";
+    console.warn(`[integrations] historical rate lookup fell back to cache: ${messageOf(error)}`);
+  }
+  return result;
+}
+
+/**
+ * Groups the pairs by the newest observation day each of them can be computed
+ * for, so the `date` form writes one row per pair and no more.
+ *
+ * Almost always one group. It is more only when a series ends inside the
+ * window: `VND/CAD` resolves to the last day the Bank published it, while
+ * every other pair resolves to the last day in the window. A pair no day
+ * works for is put in its own group with the whole window, where
+ * `writeHistoricalRates` turns it into the "not published" error.
+ */
+function newestDayGroups(
+  pairs: readonly PairRequest[],
+  observations: readonly FxObservation[],
+): { pairs: PairRequest[]; observations: FxObservation[] }[] {
+  const byDate = new Map<IsoDate, PairRequest[]>();
+  const unresolved: PairRequest[] = [];
+  for (const pair of pairs) {
+    let chosen: FxObservation | null = null;
+    for (let index = observations.length - 1; index >= 0; index -= 1) {
+      if (rateFor(pair.from, pair.to, observations[index].rates)) {
+        chosen = observations[index];
+        break;
+      }
+    }
+    if (!chosen) {
+      unresolved.push(pair);
+      continue;
+    }
+    const group = byDate.get(chosen.date);
+    if (group) group.push(pair);
+    else byDate.set(chosen.date, [pair]);
+  }
+  const groups = [...byDate.entries()].map(([date, group]) => ({
+    pairs: group,
+    observations: observations.filter((observation) => observation.date === date),
+  }));
+  if (unresolved.length > 0) groups.push({ pairs: unresolved, observations: [...observations] });
+  return groups;
 }
 
 /** Re-exported so a caller can name the reason a currency was refused. */
