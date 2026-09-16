@@ -96,7 +96,7 @@ export default function CustomerCostSection({
           {rows.map((row) => (
             <span key={row.month} className="flex min-w-40 flex-col gap-1">
               <span
-                className="text-[11px] font-medium tracking-wide uppercase"
+                className="text-xs font-medium tracking-wide uppercase"
                 style={{ color: surfaceColors.textSecondary }}
               >
                 {formatMonth(row.month)}

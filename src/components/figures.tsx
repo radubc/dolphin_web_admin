@@ -55,7 +55,7 @@ export default function Figures({
                 without a pointer: antd opens it on focus as well as on hover. */}
             <span tabIndex={0} className="flex flex-col items-end gap-0.5">
               <span
-                className="text-[11px] font-medium tracking-wide uppercase"
+                className="text-xs font-medium tracking-wide uppercase"
                 style={{ color: surfaceColors.textSecondary }}
               >
                 {figure.label}

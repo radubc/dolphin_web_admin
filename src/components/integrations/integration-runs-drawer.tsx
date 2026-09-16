@@ -80,7 +80,7 @@ export default function IntegrationRunsDrawer({
           <Tooltip title={formatDateTimeOrDash(run.startedAt ?? run.createdAt)}>
             <span tabIndex={0}>{formatRelativeTimeOrNever(run.startedAt ?? run.createdAt)}</span>
           </Tooltip>
-          <span className="text-xs" style={{ color: surfaceColors.textTertiary }}>
+          <span className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
             {formatDuration(run.startedAt, run.finishedAt)}
           </span>
         </span>
@@ -100,7 +100,7 @@ export default function IntegrationRunsDrawer({
         <span className="flex flex-col gap-1">
           <TriggerTag trigger={run.trigger} />
           {run.requestedBy !== null && (
-            <span className="text-xs" style={{ color: surfaceColors.textTertiary }}>
+            <span className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
               {run.requestedBy}
             </span>
           )}

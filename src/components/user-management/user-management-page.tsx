@@ -177,7 +177,7 @@ export default function UserManagementPage({ capabilities }: UserManagementPageP
     ) : (
       <RibbonBar
         trailing={
-          <span className="shrink-0 pr-1 text-[11px] tabular-nums" style={{ color: surfaceColors.textSecondary }}>
+          <span className="shrink-0 pr-1 text-[13px] tabular-nums" style={{ color: surfaceColors.textSecondary }}>
             {pluralise(store.audit.length, "event")} loaded
           </span>
         }

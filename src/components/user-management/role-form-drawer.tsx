@@ -223,7 +223,7 @@ function RoleFormBody({
                     >
                       <span className="flex flex-col">
                         <span className="text-sm">{humaniseKey(action.key.replace(/^can_/, ""))}</span>
-                        <span className="text-xs" style={{ color: surfaceColors.textTertiary }}>
+                        <span className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
                           {action.description}
                         </span>
                       </span>

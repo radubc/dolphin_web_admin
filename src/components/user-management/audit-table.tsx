@@ -89,7 +89,7 @@ export default function AuditTable({ rows, hasMore, loadingMore, onLoadMore }: A
           <span className="truncate" style={{ color: surfaceColors.text }}>
             {event.targetLabel ?? event.targetId ?? "—"}
           </span>
-          <span className="text-xs" style={{ color: surfaceColors.textTertiary }}>
+          <span className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
             {humaniseKey(event.targetType)}
           </span>
         </span>

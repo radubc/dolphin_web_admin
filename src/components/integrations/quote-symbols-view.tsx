@@ -64,7 +64,7 @@ function renderSymbolCell(row: QuoteSymbol) {
     <span className="flex flex-col">
       <code style={{ color: surfaceColors.text }}>{row.canonical}</code>
       {row.name !== null && row.name !== "" && (
-        <span className="truncate text-xs" style={{ color: surfaceColors.textTertiary }}>
+        <span className="truncate text-[13px]" style={{ color: surfaceColors.textTertiary }}>
           {row.name}
         </span>
       )}
@@ -215,7 +215,7 @@ export default function QuoteSymbolsView({
               {quote.currency === "" ? "" : ` ${quote.currency}`}{" "}
               <PercentChange fraction={quote.percentChange} />
             </span>
-            <span className="text-xs" style={{ color: surfaceColors.textTertiary }}>
+            <span className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
               {formatDate(quote.quoteDate)}
             </span>
           </span>
@@ -334,7 +334,7 @@ export default function QuoteSymbolsView({
     <RibbonBar
       trailing={
         <span
-          className="shrink-0 pr-1 text-right text-[11px] tabular-nums"
+          className="shrink-0 pr-1 text-right text-[13px] tabular-nums"
           style={{ color: surfaceColors.textSecondary }}
         >
           {store.refreshing && (

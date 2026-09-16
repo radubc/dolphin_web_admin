@@ -80,8 +80,19 @@ export const surfaceColors = {
   text: "#141414",
   /** Secondary text. */
   textSecondary: "#6b6b6b",
-  /** Tertiary text and disabled hints. */
-  textTertiary: "#9a9a9a",
+  /**
+   * Tertiary text: hints, footnotes, metadata, chart axis labels.
+   *
+   * The owner's rule (2026-09-15) is that nothing is set in a small, light
+   * grey, so this is the lightest grey that still passes WCAG AA for normal
+   * text on `card` white (4.54:1). It was `#9a9a9a`, which measured 2.72:1 and
+   * was unreadable on a laptop screen in daylight. It goes with the size floor
+   * the same rule sets: 12px for an uppercase eyebrow label, a pill or a badge,
+   * and 13px (`text-[13px]`) for anything a person reads as content — a hint, a
+   * footnote, a sublabel, a metadata line, a chart axis label. Nothing in the
+   * app sets text below 12px.
+   */
+  textTertiary: "#767676",
 } as const;
 
 /* -------------------------------------------------------------------------- */

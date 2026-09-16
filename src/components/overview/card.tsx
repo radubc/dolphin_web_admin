@@ -52,7 +52,7 @@ export function OverviewCard({
       <header className="mb-3 flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col items-start gap-1.5">
           <h2
-            className="m-0 text-[11px] font-semibold tracking-wide uppercase"
+            className="m-0 text-xs font-semibold tracking-wide uppercase"
             style={{ color: surfaceColors.textSecondary }}
           >
             {title}
@@ -65,7 +65,7 @@ export function OverviewCard({
         </div>
         {badge !== undefined && (
           <span
-            className="shrink-0 text-right text-[11px] leading-tight"
+            className="shrink-0 text-right text-[13px] leading-tight"
             style={{ color: surfaceColors.textTertiary }}
           >
             {badge}
@@ -76,7 +76,7 @@ export function OverviewCard({
       <div className="flex min-w-0 flex-1 flex-col gap-3">{children}</div>
 
       {footnote !== undefined && (
-        <p className="mt-3 mb-0 text-[11px] leading-snug" style={{ color: surfaceColors.textTertiary }}>
+        <p className="mt-3 mb-0 text-[13px] leading-snug" style={{ color: surfaceColors.textTertiary }}>
           {footnote}
         </p>
       )}
@@ -140,7 +140,7 @@ export function Figure({ label, value, color, hint, help }: FigureProps) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5" title={help}>
       <span
-        className="text-[11px] font-medium tracking-wide uppercase"
+        className="text-xs font-medium tracking-wide uppercase"
         style={{ color: surfaceColors.textSecondary }}
       >
         {label}
@@ -152,7 +152,7 @@ export function Figure({ label, value, color, hint, help }: FigureProps) {
         {value}
       </span>
       {hint !== undefined && (
-        <span className="text-[11px] leading-snug" style={{ color: surfaceColors.textTertiary }}>
+        <span className="text-[13px] leading-snug" style={{ color: surfaceColors.textTertiary }}>
           {hint}
         </span>
       )}
@@ -224,7 +224,7 @@ export function BarRow({
             {label}
           </span>
           {sublabel !== undefined && (
-            <span className="shrink-0 text-[11px]" style={{ color: surfaceColors.textTertiary }}>
+            <span className="shrink-0 text-[13px]" style={{ color: surfaceColors.textTertiary }}>
               {sublabel}
             </span>
           )}
@@ -245,7 +245,7 @@ export function BarRow({
 export function Pill({ children, color }: { children: ReactNode; color: string }) {
   return (
     <span
-      className="inline-block rounded-full px-2 py-0.5 text-[11px] font-medium whitespace-nowrap"
+      className="inline-block rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap"
       style={{ color, backgroundColor: withAlpha(color, 0.14) }}
     >
       {children}

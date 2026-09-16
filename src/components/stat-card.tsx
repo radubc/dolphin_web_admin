@@ -55,7 +55,7 @@ export default function StatCard({
         {icon !== undefined && <span aria-hidden>{icon}</span>}
         <Typography.Text
           strong
-          className="text-[11px] tracking-wide uppercase"
+          className="text-xs tracking-wide uppercase"
           style={{ color: surfaceColors.textSecondary }}
         >
           {title}
@@ -125,7 +125,7 @@ export default function StatCard({
       )}
 
       {footnote !== undefined && (
-        <p className="mt-3 mb-0 text-xs" style={{ color: surfaceColors.textTertiary }}>
+        <p className="mt-3 mb-0 text-[13px]" style={{ color: surfaceColors.textTertiary }}>
           {footnote}
         </p>
       )}

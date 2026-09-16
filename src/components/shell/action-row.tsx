@@ -53,7 +53,7 @@ export default function ActionRow({
       </span>
       <RightOutlined
         className="ms-auto"
-        style={{ fontSize: 11, color: surfaceColors.textTertiary }}
+        style={{ fontSize: 12, color: surfaceColors.textTertiary }}
       />
     </>
   );

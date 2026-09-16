@@ -116,7 +116,7 @@ export function RuleSummary({
         return (
           <span key={key} className="flex items-center gap-1">
             {index > 0 && (
-              <span className="text-[11px]" style={{ color: surfaceColors.textTertiary }}>
+              <span className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
                 or
               </span>
             )}

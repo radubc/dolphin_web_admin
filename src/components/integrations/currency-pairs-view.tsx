@@ -160,7 +160,7 @@ export default function CurrencyPairsView({
               1 {row.fromCurrency} = {rate.rate.toFixed(RATE_DECIMALS)} {row.toCurrency}
             </span>
             <span className="flex items-center gap-2">
-              <span className="text-xs" style={{ color: surfaceColors.textTertiary }}>
+              <span className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
                 {formatDate(rate.date)}
               </span>
               <RateSourceTag source={rate.source} />
@@ -301,7 +301,7 @@ export default function CurrencyPairsView({
     <RibbonBar
       trailing={
         <span
-          className="shrink-0 pr-1 text-right text-[11px] tabular-nums"
+          className="shrink-0 pr-1 text-right text-[13px] tabular-nums"
           style={{ color: surfaceColors.textSecondary }}
         >
           {store.refreshing && (

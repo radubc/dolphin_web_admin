@@ -184,7 +184,7 @@ function RuleFormBody({
                   >
                     <span className="flex flex-col">
                       <span className="text-sm">{humaniseKey(action.key.replace(/^can_/, ""))}</span>
-                      <span className="text-xs" style={{ color: surfaceColors.textTertiary }}>
+                      <span className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
                         {action.description}
                       </span>
                     </span>
@@ -219,7 +219,7 @@ function RuleFormBody({
         )}
       </FormSection>
 
-      <div className="px-1 text-xs" style={{ color: surfaceColors.textTertiary }}>
+      <div className="px-1 text-[13px]" style={{ color: surfaceColors.textTertiary }}>
         Key: <code>{rule.key}</code>
         {target.kind === "page" && target.rule.path ? <> · Route: <code>{target.rule.path}</code></> : null}
         {target.kind === "endpoint" ? (

@@ -134,11 +134,11 @@ export default function DayBarChart({
       {/* The scale, above the plot rather than on a y-axis: one number is
           enough to read a bar chart whose bars all carry their own value. */}
       <div className="flex items-baseline justify-between">
-        <span className="text-[11px] tabular-nums" style={{ color: surfaceColors.textTertiary }}>
+        <span className="text-[13px] tabular-nums" style={{ color: surfaceColors.textTertiary }}>
           peak {formatValue(max)}
         </span>
         {note !== undefined && (
-          <span className="text-[11px]" style={{ color: surfaceColors.textTertiary }}>
+          <span className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
             {note}
           </span>
         )}
@@ -215,15 +215,39 @@ export default function DayBarChart({
       </svg>
 
       {/* The axis, as flex boxes rather than SVG text: the browser's own text
-          layout handles the ellipsis and the font tokens for free. */}
-      <div className="flex" aria-hidden>
+          layout handles the font tokens and the centring for free.
+
+          One slot per bar, so a label sits under the day it names, but the
+          label itself is painted out of flow and centred on its slot: a slot
+          is only a few pixels wide on a 35-day chart, and a readable 13px
+          date has to be allowed to spill over the empty slots either side of
+          it rather than be clipped to nothing. Only every `labelEvery`-th day
+          prints, so two labels never collide. The row carries the height,
+          because its children no longer do. */}
+      <div className="flex" style={{ height: 18 }} aria-hidden>
         {bars.map((bar, index) => (
           <span
             key={bar.day}
-            className="overflow-hidden text-center text-[10px] whitespace-nowrap"
-            style={{ width: `${step}%`, color: surfaceColors.textTertiary }}
+            className="relative min-w-0"
+            style={{ width: `${step}%` }}
           >
-            {index % labelEvery === 0 ? formatDayShort(bar.day) : ""}
+            {index % labelEvery === 0 && (
+              <span
+                // Centred on its slot, except at the two ends, where a
+                // centred label would hang off the edge of the chart: the
+                // first is flush left and the last flush right.
+                className={`absolute top-0 text-[13px] leading-[18px] whitespace-nowrap ${
+                  index === 0
+                    ? "left-0"
+                    : index + labelEvery >= bars.length
+                      ? "right-0"
+                      : "left-1/2 -translate-x-1/2"
+                }`}
+                style={{ color: surfaceColors.textTertiary }}
+              >
+                {formatDayShort(bar.day)}
+              </span>
+            )}
           </span>
         ))}
       </div>

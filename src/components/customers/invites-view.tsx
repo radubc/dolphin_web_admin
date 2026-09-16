@@ -170,7 +170,7 @@ export default function InvitesView({ canInvite, onInvite, switcher, onSendabili
             {row.sendCount > 1 && (
               // How many times the email went out: an invitation resent four
               // times is usually a wrong address, not a slow reader.
-              <span className="ms-1 text-xs" style={{ color: surfaceColors.textTertiary }}>
+              <span className="ms-1 text-[13px]" style={{ color: surfaceColors.textTertiary }}>
                 ×{row.sendCount}
               </span>
             )}
@@ -328,7 +328,7 @@ export default function InvitesView({ canInvite, onInvite, switcher, onSendabili
     <RibbonBar
       trailing={
         <span
-          className="shrink-0 pr-1 text-right text-[11px] tabular-nums"
+          className="shrink-0 pr-1 text-right text-[13px] tabular-nums"
           style={{ color: surfaceColors.textSecondary }}
         >
           {store.refreshing && (

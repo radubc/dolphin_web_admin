@@ -72,7 +72,7 @@ export default function RolesTable({
               </Tooltip>
             )}
           </span>
-          <code className="text-xs" style={{ color: surfaceColors.textTertiary }}>
+          <code className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
             {role.key}
           </code>
         </span>
@@ -116,7 +116,7 @@ export default function RolesTable({
                 {pluralise(role.actionKeys.length, "action")}
               </span>
               {summary.length > 0 && (
-                <span className="truncate text-xs" style={{ color: surfaceColors.textTertiary }}>
+                <span className="truncate text-[13px]" style={{ color: surfaceColors.textTertiary }}>
                   {summary.join(" · ")}
                 </span>
               )}

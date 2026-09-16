@@ -100,7 +100,7 @@ export default function NotificationRow({
             {notification.body}
           </span>
           <span
-            className="mt-0.5 text-[11px]"
+            className="mt-0.5 text-[13px]"
             style={{ color: surfaceColors.textTertiary }}
           >
             {notification.timestamp}

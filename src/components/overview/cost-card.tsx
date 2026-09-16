@@ -107,7 +107,7 @@ export default function CostCard({
               actualUsd={budget.actualUsd ?? snapshot?.monthToDateUsd ?? monthTotal}
             />
           ) : (
-            <span className="text-[11px]" style={{ color: surfaceColors.textTertiary }}>
+            <span className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
               No AWS budget is configured, so there is nothing to measure the month against.
             </span>
           )}
@@ -139,10 +139,10 @@ function BudgetBar({
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="truncate text-[11px]" style={{ color: surfaceColors.textSecondary }}>
+        <span className="truncate text-[13px]" style={{ color: surfaceColors.textSecondary }}>
           Budget · {name}
         </span>
-        <span className="shrink-0 text-[11px] tabular-nums" style={{ color }}>
+        <span className="shrink-0 text-[13px] tabular-nums" style={{ color }}>
           {formatUsdRounded(actualUsd)} of {formatUsdRounded(limitUsd)} ({Math.round(share * 100)}%)
         </span>
       </div>

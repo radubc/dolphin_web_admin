@@ -92,7 +92,7 @@ export default function ConstantsRibbon({
 
   const readout = (
     <span
-      className="shrink-0 pr-1 text-right text-[11px] tabular-nums"
+      className="shrink-0 pr-1 text-right text-[13px] tabular-nums"
       style={{ color: surfaceColors.textSecondary }}
     >
       {busy && (

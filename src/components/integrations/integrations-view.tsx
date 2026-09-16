@@ -60,7 +60,7 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
       <span
-        className="text-[11px] font-medium tracking-wide uppercase"
+        className="text-xs font-medium tracking-wide uppercase"
         style={{ color: surfaceColors.textSecondary }}
       >
         {label}
@@ -156,7 +156,7 @@ function IntegrationCard({
             <span className="truncate text-base font-semibold" style={{ color: surfaceColors.text }}>
               {integration.name}
             </span>
-            <span className="text-xs" style={{ color: surfaceColors.textTertiary }}>
+            <span className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
               {providerLabel(integration.provider)} · <code>{integration.key}</code>
             </span>
           </span>
@@ -498,7 +498,7 @@ export default function IntegrationsView({
     <RibbonBar
       trailing={
         <span
-          className="shrink-0 pr-1 text-right text-[11px] tabular-nums"
+          className="shrink-0 pr-1 text-right text-[13px] tabular-nums"
           style={{ color: surfaceColors.textSecondary }}
         >
           {liveCount > 0 && (

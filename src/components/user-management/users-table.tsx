@@ -73,7 +73,7 @@ export default function UsersTable({
               >
                 {user.displayName ?? user.email}
                 {user.id === selfId ? (
-                  <span className="ml-1 text-xs" style={{ color: surfaceColors.textTertiary }}>
+                  <span className="ml-1 text-[13px]" style={{ color: surfaceColors.textTertiary }}>
                     (you)
                   </span>
                 ) : null}
@@ -100,7 +100,7 @@ export default function UsersTable({
           ))}
           {!user.isSuperAdmin && user.roleKeys.length === 0 && (
             <Tooltip title="Holds no role, so every action is denied.">
-              <span className="text-xs" style={{ color: surfaceColors.textTertiary }}>
+              <span className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
                 No roles
               </span>
             </Tooltip>

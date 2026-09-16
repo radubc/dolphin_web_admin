@@ -46,7 +46,7 @@ function BottomTab({
       {/* One line: the strip scrolls sideways, so a long label widens its tab
           rather than wrapping into a ragged second row. */}
       <span
-        className="text-[11px] leading-[13px] font-medium whitespace-nowrap"
+        className="text-xs leading-[14px] font-medium whitespace-nowrap"
         style={{ color }}
       >
         {tab.label}

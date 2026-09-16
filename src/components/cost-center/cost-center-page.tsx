@@ -196,7 +196,7 @@ function CostCenterPage({ capabilities }: CostCenterPageProps) {
     <RibbonBar
       trailing={
         <span
-          className="flex shrink-0 flex-col items-end pr-1 text-[11px]"
+          className="flex shrink-0 flex-col items-end pr-1 text-[13px]"
           style={{ color: surfaceColors.textSecondary }}
         >
           <span className="tabular-nums">
@@ -222,7 +222,7 @@ function CostCenterPage({ capabilities }: CostCenterPageProps) {
         <Tooltip title="Asking AWS again needs the can_write_integrations action, because it starts the aws_costs integration run. The figures below are the cached ones.">
           <span
             tabIndex={0}
-            className="flex items-center px-2 text-[11px]"
+            className="flex items-center px-2 text-[13px]"
             style={{ color: surfaceColors.textTertiary }}
           >
             Refresh not permitted
@@ -362,7 +362,7 @@ function CostCenterPage({ capabilities }: CostCenterPageProps) {
               <DollarOutlined aria-hidden style={{ color: COST_COLOR }} />
               <Typography.Text
                 strong
-                className="text-[11px] tracking-wide uppercase"
+                className="text-xs tracking-wide uppercase"
                 style={{ color: surfaceColors.textSecondary }}
               >
                 Daily spend

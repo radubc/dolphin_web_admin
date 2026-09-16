@@ -104,7 +104,7 @@ export default function OperationsCard({
           <div key={group} className="flex flex-col gap-2">
             {index > 0 && <Divider />}
             <span
-              className="text-[11px] font-medium tracking-wide uppercase"
+              className="text-xs font-medium tracking-wide uppercase"
               style={{ color: surfaceColors.textTertiary }}
             >
               {GROUP_LABELS[group]}
@@ -141,7 +141,7 @@ function MetricRow({ metric }: { metric: OpsMetric }) {
           </span>
           {metric.scope !== null && (
             <span
-              className="truncate text-[11px]"
+              className="truncate text-[13px]"
               style={{ color: surfaceColors.textTertiary }}
               title={metric.scope}
             >
@@ -157,14 +157,14 @@ function MetricRow({ metric }: { metric: OpsMetric }) {
         />
 
         <span
-          className="w-24 shrink-0 text-right text-sm font-semibold tabular-nums"
+          className="w-28 shrink-0 text-right text-sm font-semibold tabular-nums"
           style={{ color }}
           title={showTotal ? "Total over the last 24 hours" : "The newest hour"}
         >
           {empty ?? formatMetric(value, metric.unit)}
           {showTotal && empty === undefined && (
             <span
-              className="ml-1 text-[11px] font-normal"
+              className="ml-1 text-[13px] font-normal"
               style={{ color: surfaceColors.textTertiary }}
             >
               /24h
@@ -175,7 +175,7 @@ function MetricRow({ metric }: { metric: OpsMetric }) {
 
       {note !== null && (
         <span
-          className="pr-24 text-[11px] leading-snug"
+          className="pr-28 text-[13px] leading-snug"
           style={{ color: surfaceColors.textTertiary }}
         >
           {note}

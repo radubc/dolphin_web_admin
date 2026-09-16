@@ -153,7 +153,7 @@ function perClientColumns(): ColumnsType<PerClientTenant> {
               </Tag>
             )}
           </span>
-          <span className="truncate text-xs" style={{ color: surfaceColors.textTertiary }}>
+          <span className="truncate text-[13px]" style={{ color: surfaceColors.textTertiary }}>
             {row.ownerEmail ?? "no member"}
           </span>
         </span>

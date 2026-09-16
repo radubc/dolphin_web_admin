@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import Image from "next/image";
 import { Card } from "antd";
 import { Paragraph, Title } from "@/components/typography";
+import { surfaceColors } from "@/lib/theme/colors";
 
 interface AuthShellProps {
   /** Card heading, e.g. "Sign in to your account". */
@@ -32,7 +33,10 @@ export default function AuthShell({
 }: AuthShellProps) {
   return (
     <div className="flex min-h-dvh flex-1 flex-col">
-      <main className="flex flex-1 flex-col items-center justify-center bg-[#f6f6f7] px-6 py-12 text-[#141414]">
+      <main
+        className="flex flex-1 flex-col items-center justify-center px-6 py-12"
+        style={{ backgroundColor: surfaceColors.page, color: surfaceColors.text }}
+      >
         <Image
           src="/brand/symbol.png"
           alt="Penny Squeeze Admin"
@@ -51,7 +55,12 @@ export default function AuthShell({
           </Paragraph>
           {children}
         </Card>
-        <p className="mt-6 text-sm text-[#8c8c8c]">© 2026 Penny Squeeze</p>
+        {/* A theme grey rather than a lighter hard-coded one. Secondary, not
+            tertiary: this line sits on the page background rather than on a
+            white card, where tertiary would fall just under AA contrast. */}
+        <p className="mt-6 text-sm" style={{ color: surfaceColors.textSecondary }}>
+          © 2026 Penny Squeeze
+        </p>
       </main>
     </div>
   );

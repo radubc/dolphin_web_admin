@@ -76,7 +76,7 @@ function Figure({ label, value }: { label: string; value: string }) {
   return (
     <span className="flex flex-col gap-0.5">
       <span
-        className="text-[11px] font-medium tracking-wide uppercase"
+        className="text-xs font-medium tracking-wide uppercase"
         style={{ color: surfaceColors.textSecondary }}
       >
         {label}
@@ -238,7 +238,7 @@ function ActivitySection({ customerId }: { customerId: string }) {
                     <Tag color={undefined} style={{ marginInlineEnd: 0, color: meta.color }}>
                       {meta.label}
                     </Tag>
-                    <span className="truncate text-xs" style={{ color: surfaceColors.textTertiary }}>
+                    <span className="truncate text-[13px]" style={{ color: surfaceColors.textTertiary }}>
                       {SOURCE_LABELS[event.source]}
                     </span>
                   </span>
@@ -378,7 +378,7 @@ export default function CustomerDetailDrawer({
                       </Tag>
                     )}
                   </span>
-                  <span className="shrink-0 text-xs" style={{ color: surfaceColors.textTertiary }}>
+                  <span className="shrink-0 text-[13px]" style={{ color: surfaceColors.textTertiary }}>
                     {formatDateTimeOrDash(tenant.createdAt)}
                   </span>
                 </div>

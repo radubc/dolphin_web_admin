@@ -48,7 +48,7 @@ export default function RolesRibbon({
 
   const readout = (
     <span
-      className="shrink-0 pr-1 text-[11px] tabular-nums"
+      className="shrink-0 pr-1 text-[13px] tabular-nums"
       style={{ color: surfaceColors.textSecondary }}
     >
       {pluralise(totalCount, "role")}

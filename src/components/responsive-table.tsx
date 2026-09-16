@@ -920,7 +920,7 @@ export default function ResponsiveTable<RecordType = Record<string, unknown>>(
               {fieldColumns.map(({ column, id }) => (
                 <Fragment key={id}>
                   <dt
-                    className="min-w-0 text-[11px] tracking-wide break-words uppercase"
+                    className="min-w-0 text-xs tracking-wide break-words uppercase"
                     style={{ color: surfaceColors.textSecondary }}
                   >
                     {columnLabel(column)}
@@ -999,7 +999,7 @@ export default function ResponsiveTable<RecordType = Record<string, unknown>>(
                   onChange={(event) => toggleAll(event.target.checked)}
                 >
                   <span
-                    className="text-[11px] tracking-wide uppercase"
+                    className="text-xs tracking-wide uppercase"
                     style={{ color: surfaceColors.textSecondary }}
                   >
                     {selectionLabel === undefined

@@ -384,7 +384,7 @@ function instrumentColumns<T extends EtfRow>(): ColumnsType<T> {
           <span style={{ color: surfaceColors.text }}>{row.exchange}</span>
           {/* The MIC is what the market catalog keys on, so it stays in sight
               next to the exchange it names. */}
-          <code className="text-xs" style={{ color: surfaceColors.textTertiary }}>
+          <code className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
             {row.micCode === "" ? "—" : row.micCode}
           </code>
         </span>
@@ -421,7 +421,7 @@ function IdentifierPanel({ row }: { row: EtfRow }) {
     <div className="flex flex-wrap gap-x-8 gap-y-1 py-1 text-sm">
       {identifiers.map(([label, value]) => (
         <span key={label} className="flex items-center gap-2">
-          <span className="text-xs" style={{ color: surfaceColors.textTertiary }}>
+          <span className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
             {label}
           </span>
           {value.trim() === "" ? (
@@ -771,7 +771,7 @@ export default function ConstantsTable({
               <span style={{ color: surfaceColors.text }}>{row.displayName}</span>
               {/* The machine name is what the main app stores and matches on,
                   so it stays visible even when it reads the same. */}
-              <code className="text-xs" style={{ color: surfaceColors.textTertiary }}>
+              <code className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
                 {row.name}
               </code>
             </span>

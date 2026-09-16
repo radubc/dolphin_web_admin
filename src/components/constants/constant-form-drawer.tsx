@@ -846,9 +846,9 @@ function FormBody({
       </FormSection>
 
       {target.row !== null && (
-        <div className="flex flex-col gap-1 px-1 text-xs" style={{ color: surfaceColors.textTertiary }}>
+        <div className="flex flex-col gap-1 px-1 text-[13px]" style={{ color: surfaceColors.textTertiary }}>
           <span>Id: {target.row.id}</span>
-          <Typography.Text type="secondary" className="text-xs">
+          <Typography.Text type="secondary" className="text-[13px]">
             Saving edits the admin catalog only. Push the row to carry the change into the main app.
           </Typography.Text>
         </div>

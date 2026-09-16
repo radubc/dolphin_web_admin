@@ -58,7 +58,7 @@ export function CostCard({
       <div className="mb-3 flex items-center justify-between gap-2">
         <Typography.Text
           strong
-          className="text-[11px] tracking-wide uppercase"
+          className="text-xs tracking-wide uppercase"
           style={{ color: surfaceColors.textSecondary }}
         >
           {title}
@@ -67,7 +67,7 @@ export function CostCard({
       </div>
       {children}
       {footnote !== undefined && (
-        <p className="mt-3 mb-0 text-xs" style={{ color: surfaceColors.textTertiary }}>
+        <p className="mt-3 mb-0 text-[13px]" style={{ color: surfaceColors.textTertiary }}>
           {footnote}
         </p>
       )}
@@ -320,7 +320,7 @@ export function AnomaliesCard({ anomalies }: { anomalies: readonly CostAnomaly[]
                   {formatUsd(anomaly.totalImpactUsd)}
                 </span>
               </span>
-              <span className="text-xs" style={{ color: surfaceColors.textTertiary }}>
+              <span className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
                 {anomaly.startDate === null ? "Date unknown" : formatDay(anomaly.startDate)}
                 {anomaly.endDate === null ? " · still open" : ` to ${formatDay(anomaly.endDate)}`}
                 {anomaly.totalExpectedUsd === null
@@ -391,7 +391,7 @@ export function FreeTierCard({ state }: { state: FreeTierState }) {
                 />
               </span>
               {offer.description !== "" && (
-                <span className="text-xs" style={{ color: surfaceColors.textTertiary }}>
+                <span className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
                   {offer.description}
                 </span>
               )}
@@ -434,9 +434,9 @@ export function BudgetMeter({
     <Tooltip
       title={`AWS budget “${name}”: ${formatUsd(used)} of ${formatUsd(limitUsd)} used, as Budgets itself calculates it.`}
     >
-      <span tabIndex={0} className="flex w-44 flex-col gap-0.5">
+      <span tabIndex={0} className="flex w-48 flex-col gap-0.5">
         <span
-          className="text-[11px] font-medium tracking-wide uppercase"
+          className="text-xs font-medium tracking-wide uppercase"
           style={{ color: surfaceColors.textSecondary }}
         >
           Budget
@@ -450,7 +450,7 @@ export function BudgetMeter({
           style={{ marginBottom: 0 }}
         />
         <span
-          className="text-[11px] tabular-nums"
+          className="text-[13px] tabular-nums"
           style={{ color: over ? featureColors.rule : surfaceColors.textSecondary }}
         >
           {formatUsd(used)} of {formatUsd(limitUsd)}

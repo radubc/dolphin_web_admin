@@ -103,13 +103,13 @@ function ServiceRow({ service }: { service: DeployService }) {
       </div>
 
       {service.error !== null ? (
-        <span className="text-[11px] leading-snug" style={{ color: surfaceColors.textSecondary }}>
+        <span className="text-[13px] leading-snug" style={{ color: surfaceColors.textSecondary }}>
           {service.error}
         </span>
       ) : (
         <>
           <span
-            className="truncate text-[11px] tabular-nums"
+            className="truncate text-[13px] tabular-nums"
             style={{ color: surfaceColors.textTertiary }}
             title="Task definition family and revision"
           >
@@ -120,7 +120,7 @@ function ServiceRow({ service }: { service: DeployService }) {
           </span>
           {(service.rolloutStateReason ?? service.lastEvent?.message) !== undefined && (
             <span
-              className="line-clamp-2 text-[11px] leading-snug"
+              className="line-clamp-2 text-[13px] leading-snug"
               style={{ color: surfaceColors.textSecondary }}
               title={service.lastEvent?.at ?? undefined}
             >

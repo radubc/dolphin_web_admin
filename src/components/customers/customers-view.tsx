@@ -151,7 +151,7 @@ export default function CustomersView({ canInvite, onInvite, switcher, onSendabi
               {tenant.name}
             </span>
             {tenant.others > 0 && (
-              <span className="text-xs" style={{ color: surfaceColors.textTertiary }}>
+              <span className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
                 and {tenant.others} more
               </span>
             )}
@@ -326,7 +326,7 @@ export default function CustomersView({ canInvite, onInvite, switcher, onSendabi
     <RibbonBar
       trailing={
         <span
-          className="shrink-0 pr-1 text-right text-[11px] tabular-nums"
+          className="shrink-0 pr-1 text-right text-[13px] tabular-nums"
           style={{ color: surfaceColors.textSecondary }}
         >
           {store.refreshing && (

@@ -200,7 +200,7 @@ function UserFormBody({
       </FormSection>
 
       {user && (
-        <div className="flex flex-col gap-1 px-1 text-xs" style={{ color: surfaceColors.textTertiary }}>
+        <div className="flex flex-col gap-1 px-1 text-[13px]" style={{ color: surfaceColors.textTertiary }}>
           <span>Cognito subject: {user.cognitoSub}</span>
         </div>
       )}

@@ -113,7 +113,7 @@ export default function ServicesPage({ capabilities }: { capabilities: AdminCapa
           <MethodTag method={row.method} />
           <span className="flex min-w-0 flex-col">
             <span style={{ color: surfaceColors.text, fontWeight: 500 }}>{row.name}</span>
-            <code className="text-xs" style={{ color: surfaceColors.textTertiary }}>{row.path}</code>
+            <code className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>{row.path}</code>
           </span>
         </span>
       ),
@@ -226,7 +226,7 @@ export default function ServicesPage({ capabilities }: { capabilities: AdminCapa
   const ribbon = (
     <RibbonBar
       trailing={
-        <span className="shrink-0 pr-1 text-[11px] tabular-nums" style={{ color: surfaceColors.textSecondary }}>
+        <span className="shrink-0 pr-1 text-[13px] tabular-nums" style={{ color: surfaceColors.textSecondary }}>
           {rows.length} of {pluralise(totals.endpoints, "endpoint")}
         </span>
       }
@@ -284,7 +284,7 @@ export default function ServicesPage({ capabilities }: { capabilities: AdminCapa
                     <div className="flex flex-col gap-1 py-1 text-sm" style={{ color: surfaceColors.textSecondary }}>
                       <span>{row.description ?? "No description."}</span>
                       {row.notes && <span><strong>Notes:</strong> {row.notes}</span>}
-                      <span className="text-xs" style={{ color: surfaceColors.textTertiary }}>
+                      <span className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
                         Key <code>{row.key}</code> · every response carries <code>x-request-id</code> and <code>Cache-Control: no-store</code>; errors use the <code>{"{ error: { code, message } }"}</code> envelope.
                       </span>
                     </div>

@@ -84,8 +84,10 @@ export function RibbonButton({
         {icon}
       </span>
       {/* Two-line labels ("Add Transaction") get a fixed two-line box so every
-          button in the bar is the same height and single-line labels align. */}
-      <span className="flex h-[26px] w-[72px] items-center justify-center text-center text-[11px] leading-[13px] whitespace-normal">
+          button in the bar is the same height and single-line labels align.
+          Two 14px lines, which is what the app's 12px label floor needs; the
+          box grew with the text so no label gained a third line. */}
+      <span className="flex h-[28px] w-[76px] items-center justify-center text-center text-xs leading-[14px] whitespace-normal">
         {label}
       </span>
     </Button>
@@ -102,7 +104,8 @@ export function RibbonButton({
  * The hairline between two groups of actions.
  *
  * A measured `<span>` rather than antd's `Divider`: the rule has to be exactly
- * as tall as a ribbon button (56px) and sit on the band's own separator colour,
+ * as tall as a ribbon button (58px: 8px of padding, an 18px icon, a 4px gap and
+ * a 28px two-line label) and sit on the band's own separator colour,
  * which `Divider type="vertical"` — sized in `em` off the surrounding text —
  * cannot be made to do without overriding every one of its tokens.
  */
@@ -111,7 +114,7 @@ export function RibbonDivider() {
     <span
       aria-hidden
       className="mx-2 self-center"
-      style={{ width: 1, height: 56, backgroundColor: surfaceColors.separator }}
+      style={{ width: 1, height: 58, backgroundColor: surfaceColors.separator }}
     />
   );
 }

@@ -61,7 +61,7 @@ export default function AccessMapPage({ capabilities }: { capabilities: AdminCap
                   </Tooltip>
                 )}
               </span>
-              <span className="text-xs" style={{ color: surfaceColors.textTertiary }}>
+              <span className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
                 {rule.path ? <code>{rule.path}</code> : <code>{rule.key}</code>}
                 {rule.description ? ` · ${rule.description}` : ""}
               </span>
@@ -114,7 +114,7 @@ export default function AccessMapPage({ capabilities }: { capabilities: AdminCap
               </Button>
               {!rule.inCode && <Tag style={{ marginInlineEnd: 0 }}>Not in code</Tag>}
             </span>
-            <code className="text-xs" style={{ color: surfaceColors.textTertiary }}>{rule.path}</code>
+            <code className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>{rule.path}</code>
           </span>
         </span>
       ),
@@ -220,7 +220,7 @@ export default function AccessMapPage({ capabilities }: { capabilities: AdminCap
   const ribbon = (
     <RibbonBar
       trailing={
-        <span className="shrink-0 pr-1 text-[11px] tabular-nums" style={{ color: surfaceColors.textSecondary }}>
+        <span className="shrink-0 pr-1 text-[13px] tabular-nums" style={{ color: surfaceColors.textSecondary }}>
           {view === "pages" ? pluralise(store.pages.length, "entry", "entries") : pluralise(store.endpoints.length, "endpoint")}
         </span>
       }
