@@ -78,9 +78,11 @@ function displayNameFor(name: string | null, email: string | null): string {
  * they *open* — drawers, the notification centre — is shell state and is raised
  * through the callbacks above.
  *
- * On compact the bar keeps the brand, "New", the bell and the avatar, and
- * gives up the display name, Help and the gear — the last two reappear inside
- * the avatar menu, so nothing becomes unreachable.
+ * On compact the bar keeps the brand, "New", the bell and one menu button,
+ * and gives up the display name, Help, the gear popover and the avatar. That
+ * one button is drawn as the gear: its menu lists the settings pages, then
+ * Help, then the account section, so nothing becomes unreachable
+ * (`./user-menu.tsx`).
  */
 export default function NavBar({
   email,
@@ -165,8 +167,8 @@ export default function NavBar({
       </div>
 
       <div className="flex items-center gap-5 max-lg:gap-3">
-        {/* Help and Settings fold into the avatar menu on compact; the bell
-            and the avatar stay in the bar.
+        {/* Help and Settings fold into the gear menu on compact, which also
+            takes the account section; the bell stays in the bar.
 
             The `max-lg:hidden` sits on a plain wrapper rather than on the
             antd control itself: antd injects its CSS unlayered, so its
@@ -253,8 +255,9 @@ export default function NavBar({
           </Popover>
         </span>
 
-        {/* The menu grows a Help item and the settings pages on compact, where
-            the two buttons above are hidden; on desktop it is unchanged. */}
+        {/* On compact this becomes the gear menu — settings pages, Help, then
+            the account section — because the two buttons above are hidden;
+            on desktop it is the avatar menu, unchanged. */}
         <UserMenu
           email={email}
           settingsEntries={settingsEntries}

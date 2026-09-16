@@ -2,11 +2,16 @@
 
 import { useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Avatar, Dropdown, type MenuProps } from "antd";
-import { LogoutOutlined, QuestionCircleOutlined, UserOutlined } from "@ant-design/icons";
+import { Avatar, Button, Dropdown, type MenuProps } from "antd";
+import {
+  LogoutOutlined,
+  QuestionCircleOutlined,
+  SettingOutlined,
+  UserOutlined,
+} from "@ant-design/icons";
 import { LOGOUT_PATH } from "@/lib/auth/cookies";
 import { useCompactLayout } from "@/lib/hooks/use-compact-layout";
-import { accentBlue, accentTints } from "@/lib/theme/colors";
+import { accentBlue, accentTints, surfaceColors } from "@/lib/theme/colors";
 import { presentationFor, type ShellSettingsEntry } from "./definitions";
 
 interface UserMenuProps {
@@ -27,11 +32,16 @@ interface UserMenuProps {
  * Avatar dropdown at the right end of the nav bar: who is signed in, Account
  * & security, and Sign out.
  *
- * On compact it also carries the two things the bar drops — Help and the
- * settings pages — so the fold never costs a way in. This is a *structural*
- * difference rather than a hidden element, so it reads the breakpoint with
- * `useCompactLayout()` instead of a Tailwind variant; the menu body is only
- * built when the dropdown opens, long after the query has resolved.
+ * On compact the bar drops the Help button and the gear, and this menu takes
+ * them in — but it becomes the *gear's* menu, not the avatar's: the trigger is
+ * drawn as the Settings icon, the settings pages come first, then Help, and
+ * the account section (who is signed in, Account & security, Sign out) closes
+ * the list. Owner's call (2026-09-15, both apps): the account belongs under
+ * Settings, not the settings under the account. The two trigger glyphs are
+ * both rendered and swapped by CSS (`max-lg:hidden` / `lg:hidden`), so the
+ * server paints the right one; the breakpoint hook only decides the menu's
+ * order and label, which are read when the dropdown opens, long after the
+ * query has resolved. On desktop nothing changes.
  */
 export default function UserMenu({
   email,
@@ -44,17 +54,10 @@ export default function UserMenu({
   const compact = useCompactLayout();
 
   // Empty on desktop, so the menu below is exactly what it has always been.
-  const compactItems: MenuProps["items"] = compact
+  const compactItems: NonNullable<MenuProps["items"]> = compact
     ? [
-        {
-          key: "help",
-          label: "Help",
-          icon: <QuestionCircleOutlined />,
-          onClick: onOpenHelp,
-        },
         ...(settingsEntries.length > 0
           ? [
-              { type: "divider" as const },
               ...settingsEntries.map((entry) => {
                 const { icon: Icon } = presentationFor(entry.key);
                 return {
@@ -67,11 +70,43 @@ export default function UserMenu({
                   onClick: () => router.push(entry.href),
                 };
               }),
+              { type: "divider" as const },
             ]
           : []),
+        {
+          key: "help",
+          label: "Help",
+          icon: <QuestionCircleOutlined />,
+          onClick: onOpenHelp,
+        },
         { type: "divider" as const },
       ]
     : [];
+
+  /** Who is signed in, Account & security and Sign out — always last. */
+  const accountItems: NonNullable<MenuProps["items"]> = [
+    {
+      key: "signed-in-as",
+      label: `Signed in as ${email ?? "your account"}`,
+      disabled: true,
+    },
+    { type: "divider" as const },
+    {
+      key: "account",
+      label: "Account & security",
+      icon: <UserOutlined />,
+      // A drawer, not a page: these are the operator's own Cognito
+      // settings (password, authenticator app, passkeys), not
+      // something the access map should have to grant.
+      onClick: onOpenAccount,
+    },
+    {
+      key: "sign-out",
+      label: "Sign out",
+      icon: <LogoutOutlined />,
+      onClick: () => signOutFormRef.current?.requestSubmit(),
+    },
+  ];
 
   return (
     <>
@@ -118,45 +153,40 @@ export default function UserMenu({
       <Dropdown
         trigger={["click"]}
         placement="bottomRight"
-        menu={{
-          items: [
-            {
-              key: "signed-in-as",
-              label: `Signed in as ${email ?? "your account"}`,
-              disabled: true,
-            },
-            { type: "divider" as const },
-            ...compactItems,
-            {
-              key: "account",
-              label: "Account & security",
-              icon: <UserOutlined />,
-              // A drawer, not a page: these are the operator's own Cognito
-              // settings (password, authenticator app, passkeys), not
-              // something the access map should have to grant.
-              onClick: onOpenAccount,
-            },
-            {
-              key: "sign-out",
-              label: "Sign out",
-              icon: <LogoutOutlined />,
-              onClick: () => signOutFormRef.current?.requestSubmit(),
-            },
-          ],
-        }}
+        menu={{ items: [...compactItems, ...accountItems] }}
       >
-        <button
-          type="button"
-          aria-label="Account menu"
-          className="flex cursor-pointer items-center rounded-full border-0 bg-transparent p-0"
-        >
-          {/* A soft blue disc with a blue glyph: accent present, not shouting. */}
-          <Avatar
-            size={32}
-            icon={<UserOutlined />}
-            style={{ backgroundColor: accentTints.soft, color: accentBlue }}
-          />
-        </button>
+        {/* One trigger, two faces: the avatar on desktop, the gear on compact.
+            Both are in the document and CSS picks, so there is no flash of the
+            wrong glyph before the breakpoint query resolves. The label is the
+            only thing the hook decides, and a screen reader hears it on
+            open, not on first paint. */}
+        <span className="inline-flex">
+          <button
+            type="button"
+            aria-label="Account menu"
+            className="flex cursor-pointer items-center rounded-full border-0 bg-transparent p-0 max-lg:hidden"
+          >
+            {/* A soft blue disc with a blue glyph: accent present, not shouting. */}
+            <Avatar
+              size={32}
+              icon={<UserOutlined />}
+              style={{ backgroundColor: accentTints.soft, color: accentBlue }}
+            />
+          </button>
+          <span className="inline-flex lg:hidden">
+            <Button
+              type="text"
+              shape="circle"
+              title="Settings"
+              aria-label={compact ? "Settings menu" : "Settings"}
+              icon={
+                <SettingOutlined
+                  style={{ fontSize: 18, color: surfaceColors.textSecondary }}
+                />
+              }
+            />
+          </span>
+        </span>
       </Dropdown>
     </>
   );
