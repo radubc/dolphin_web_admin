@@ -2,29 +2,68 @@
  * Session cookie names, paths and routing constants.
  *
  * Dependency-free on purpose: both the proxy (which must stay lightweight) and
- * the server-only session module import from here.
+ * the server-only session module import from here, and so does the client
+ * keepalive component — {@link IDLE_TIMEOUT_SECONDS} is one number the browser,
+ * the proxy and the refresh endpoint all have to agree on.
  *
  * The session is split across two cookie paths:
  *
  * - `/` — the short-lived id and access tokens plus a value-free marker. These
  *   travel with every request, which is what the proxy and the API read.
- * - `/api/auth` — the long-lived refresh token and the username it must be
- *   presented with. The refresh token is the most sensitive credential in the
- *   set (30 days, exchangeable for fresh tokens), so it is scoped to the only
- *   endpoints allowed to spend it. It is never sent to a page render, an API
- *   route, or any third-party subresource request.
+ * - `/api/auth` — the refresh token and the proof of last activity. The refresh
+ *   token is the most valuable credential in the set (it is exchangeable for
+ *   fresh tokens), so it is scoped to the only endpoints allowed to spend it.
+ *   It is never sent to a page render, an API route, or any third-party
+ *   subresource request.
  */
+
+/**
+ * How long a browser may sit without any activity before its session is over.
+ *
+ * The session is a sliding window, not a fixed one: every refresh re-dates the
+ * marker, refresh and proof cookies, so someone who keeps working is never
+ * signed out, and someone who walks away is signed out half an hour later.
+ * Cognito has no idle timeout of its own — a refresh token has a fixed absolute
+ * validity and rotation does not extend it — so this window is entirely the
+ * app's, enforced in three places that share this constant:
+ *
+ * - the browser, which drops the refresh cookie once it is this far past the
+ *   last id token (see `createSession()`);
+ * - `refreshSession()`, which refuses to spend a refresh token when the proof
+ *   cookie's id token expired more than this long ago;
+ * - the `SessionKeepalive` component, which signs out after this long without
+ *   a pointer, key, wheel, touch, scroll or visibility event in any tab.
+ */
+export const IDLE_TIMEOUT_SECONDS = 30 * 60;
 
 export const ID_TOKEN_COOKIE = "psa_id_token";
 export const ACCESS_TOKEN_COOKIE = "psa_access_token";
 export const REFRESH_TOKEN_COOKIE = "psa_refresh_token";
 
 /**
- * Username Cognito needs alongside the refresh token when the app client has a
- * secret (the SECRET_HASH is computed over it). Stored next to the refresh
- * token because it is only ever needed there. Carries no credential.
+ * Legacy: the username Cognito needed alongside the refresh token when the
+ * `REFRESH_TOKEN_AUTH` flow computed a SECRET_HASH over it.
+ *
+ * **No longer written.** `GetTokensFromRefreshToken` takes the client secret
+ * itself and needs no username, so nothing reads this any more. The constant
+ * and its `SESSION_COOKIES` entry stay so that logout, the proxy's
+ * `?session=expired` branch and `clearSession()` keep deleting the copies left
+ * in the cookie jars of sessions created before that change.
  */
 export const REFRESH_USER_COOKIE = "psa_refresh_user";
+
+/**
+ * The id token that was issued last, kept beside the refresh token as the
+ * tamper-proof record of when this browser was last active.
+ *
+ * It is a credential-free use of a credential: the refresh endpoint verifies
+ * it against the pool's JWKS with a {@link IDLE_TIMEOUT_SECONDS} grace, so a
+ * token that expired longer ago than that means the session has been idle too
+ * long. Cognito's signature is what makes it unforgeable, so the app needs no
+ * secret of its own to keep an honest clock. Path-scoped to `/api/auth` like
+ * the refresh token, and written with the same lifetime.
+ */
+export const REFRESH_PROOF_COOKIE = "psa_refresh_proof";
 
 /**
  * Value-free marker ("1") telling the proxy that a refresh token exists. The
@@ -64,6 +103,7 @@ export const SESSION_COOKIES: readonly SessionCookie[] = [
   { name: ACCESS_TOKEN_COOKIE, path: "/" },
   { name: SESSION_MARKER_COOKIE, path: "/" },
   { name: REFRESH_TOKEN_COOKIE, path: AUTH_COOKIE_PATH },
+  { name: REFRESH_PROOF_COOKIE, path: AUTH_COOKIE_PATH },
   { name: REFRESH_USER_COOKIE, path: AUTH_COOKIE_PATH },
 ];
 
@@ -75,3 +115,16 @@ export const SESSION_COOKIES: readonly SessionCookie[] = [
 export const EXPIRED_SESSION_PARAM = "session";
 export const EXPIRED_SESSION_VALUE = "expired";
 export const EXPIRED_SESSION_REDIRECT = `/login?${EXPIRED_SESSION_PARAM}=${EXPIRED_SESSION_VALUE}`;
+
+/**
+ * The other value of the same query parameter: the session ended because the
+ * browser was idle for {@link IDLE_TIMEOUT_SECONDS}. Set by the refresh
+ * endpoint and by the keepalive component, and read only by `/login`, which
+ * explains what happened.
+ *
+ * Deliberately *not* handled by the proxy the way `expired` is: by the time
+ * this value is used the cookies have already been cleared by the server, so
+ * there is nothing left to clean up and no bounce to break.
+ */
+export const IDLE_SESSION_VALUE = "idle";
+export const IDLE_SESSION_REDIRECT = `/login?${EXPIRED_SESSION_PARAM}=${IDLE_SESSION_VALUE}`;

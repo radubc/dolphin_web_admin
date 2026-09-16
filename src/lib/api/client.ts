@@ -89,23 +89,64 @@ function toError(response: Response, body: unknown): ApiClientError {
   return new ApiClientError(response.status, code, message, envelope.details);
 }
 
-let inFlightRefresh: Promise<boolean> | null = null;
+/** What `POST /api/auth/refresh` answered, flattened for the callers. */
+export interface SessionRefreshResult {
+  /** The session was renewed and the cookies rewritten. */
+  ok: boolean;
+  /** The HTTP status, or 0 when the request never got an answer at all. */
+  status: number;
+  /** The error code from the envelope on a failure (`session_idle`, …). */
+  code: string | null;
+  /** The new id token's `exp`, epoch seconds, when the server sent one. */
+  idTokenExpiresAt: number | null;
+  /** The new access token's lifetime in seconds, when the server sent one. */
+  expiresIn: number | null;
+}
+
+function refreshResultFrom(response: Response, body: unknown): SessionRefreshResult {
+  const data = isRecord(body) && isRecord(body.data) ? body.data : {};
+  const error = isRecord(body) && isRecord(body.error) ? body.error : {};
+  return {
+    ok: response.ok,
+    status: response.status,
+    code: typeof error.code === "string" ? error.code : null,
+    idTokenExpiresAt:
+      typeof data.idTokenExpiresAt === "number" ? data.idTokenExpiresAt : null,
+    expiresIn: typeof data.expiresIn === "number" ? data.expiresIn : null,
+  };
+}
+
+/** The shape a network failure gets: nothing was learned, so nothing is claimed. */
+const REFRESH_UNREACHABLE: SessionRefreshResult = {
+  ok: false,
+  status: 0,
+  code: null,
+  idTokenExpiresAt: null,
+  expiresIn: null,
+};
+
+let inFlightRefresh: Promise<SessionRefreshResult> | null = null;
 
 /**
  * Asks the server to spend the refresh cookie, at most once at a time.
  *
- * Several requests can fail with `token_expired` at the same moment; letting
- * them all POST would burn several refresh tokens when rotation is enabled, so
- * they share one call.
+ * Several requests can fail with `token_expired` at the same moment, and the
+ * keepalive timer can come due in the middle of one; letting them all POST
+ * would burn several refresh tokens once rotation is enabled, so they share one
+ * call and one answer.
+ *
+ * Exported because `SessionKeepalive` refreshes *before* anything fails, and it
+ * must go through this same de-duplication. It never throws: a failure is a
+ * result with `ok: false`, and the caller decides what to do about it.
  */
-function refreshSession(): Promise<boolean> {
+export function refreshSessionOnce(): Promise<SessionRefreshResult> {
   inFlightRefresh ??= fetch(REFRESH_ENDPOINT, {
     method: "POST",
     credentials: "same-origin",
     headers: { Accept: "application/json" },
   })
-    .then((response) => response.ok)
-    .catch(() => false)
+    .then(async (response) => refreshResultFrom(response, await readBody(response)))
+    .catch(() => REFRESH_UNREACHABLE)
     .finally(() => {
       inFlightRefresh = null;
     });
@@ -182,7 +223,7 @@ export async function apiFetch<T>(
         // `token_expired` code so it can refresh and rebuild the request.
         throw error;
       }
-      if (await refreshSession()) {
+      if ((await refreshSessionOnce()).ok) {
         // One retry, never a loop: a second 401 falls through to the throw.
         response = await fetch(path, requestInit);
         body = await readBody(response);

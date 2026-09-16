@@ -13,6 +13,11 @@ import "server-only";
  * beside the id token by `createSession()` and refreshed with it, so nothing
  * new has to be stored. It is read here and nowhere else, and it never leaves
  * the server: it is handed straight to the AWS SDK.
+ *
+ * Its cookie is dated from the *access* token's own `exp`, which the pool sets
+ * independently of the id token's (15 minutes against 5, in the planned
+ * settings). So the two cookies are written together but do not expire
+ * together, and the access cookie normally outlives the id cookie.
  */
 import type { NextRequest } from "next/server";
 import { ApiError, UnauthorizedError } from "@/lib/api/errors";
@@ -26,8 +31,9 @@ export function accessTokenFrom(request: NextRequest): string | null {
 /**
  * The access token, or a refusal the client can act on.
  *
- * The id and access cookies are written and expire together, so a request that
- * authenticated with the id token normally has both. When it does not:
+ * The id and access cookies are written together and the access token is the
+ * longer-lived of the two, so a request that authenticated with the id token
+ * normally has both. When it does not:
  *
  * - a browser that still holds a refresh token (the `psa_session` marker) gets
  *   401 `token_expired`, which is the code `apiFetch` answers by refreshing

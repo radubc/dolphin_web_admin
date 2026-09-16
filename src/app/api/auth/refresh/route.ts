@@ -24,7 +24,12 @@ import {
 } from "@/lib/api/errors";
 import { apiHandler } from "@/lib/api/handler";
 import { ok, redirectRelative } from "@/lib/api/response";
-import { NEXT_PARAM, REFRESH_PATH } from "@/lib/auth/cookies";
+import {
+  IDLE_SESSION_REDIRECT,
+  IDLE_TIMEOUT_SECONDS,
+  NEXT_PARAM,
+  REFRESH_PATH,
+} from "@/lib/auth/cookies";
 import { refreshSession } from "@/lib/auth/refresh";
 import { clearPageSession } from "@/lib/auth/session";
 import { clientIp, ipRateLimitKey } from "@/lib/security/client-ip";
@@ -92,10 +97,18 @@ function safeNextPath(raw: string | null): string {
 /**
  * POST /api/auth/refresh — refresh for fetch clients.
  *
- * 200 with the new lifetime and the caller's identity; 401 `refresh_failed`
- * when there is nothing left to refresh with (send the user to /login); 503
- * `auth_unavailable` when Cognito could not answer — a retry may well succeed,
- * and the session cookies are still intact.
+ * 200 with the new lifetimes and the caller's identity; 401 `refresh_failed`
+ * when there is nothing left to refresh with (send the user to /login); 401
+ * `session_idle` when the browser sat idle past the window, which the client
+ * answers by going to `/login?session=idle`; 503 `auth_unavailable` when
+ * Cognito could not answer — a retry may well succeed, and the session cookies
+ * are still intact.
+ *
+ * `idTokenExpiresAt` is the new id token's `exp` in epoch seconds. The browser
+ * keepalive (`src/components/auth/session-keepalive.tsx`) refreshes a little
+ * before it, which is what keeps an active operator from ever meeting a login
+ * page mid-form. It is not the same as `expiresIn`, which describes the
+ * *access* token.
  */
 export const POST = apiHandler(async () => {
   const outcome = await refreshSession();
@@ -104,9 +117,19 @@ export const POST = apiHandler(async () => {
     case "refreshed":
       return ok({
         expiresIn: outcome.expiresIn,
+        idTokenExpiresAt: outcome.session.expiresAt,
         userId: outcome.session.userId,
         email: outcome.session.email,
       });
+    case "idle":
+      // `refreshSession` has already revoked the refresh token and cleared
+      // every cookie. A distinct code so the client can say what happened
+      // instead of showing a bare sign-in page.
+      throw new ApiError(
+        401,
+        "session_idle",
+        `You were signed out after ${Math.round(IDLE_TIMEOUT_SECONDS / 60)} minutes of inactivity. Sign in again.`,
+      );
     case "no_refresh_token":
     case "invalid":
       // Cookies are cleared by `refreshSession` on "invalid" only — it saw
@@ -130,9 +153,11 @@ export const POST = apiHandler(async () => {
  * GET /api/auth/refresh?next=/path — refresh for browser navigations.
  *
  * Always answers 303, so the browser lands on a real page: back to `next` on
- * success, on /login when the session is genuinely over. A Cognito outage also
- * lands on /login but keeps every cookie, because destroying a valid 30-day
- * refresh token over a transient failure is the one unrecoverable mistake here.
+ * success, on /login when the session is genuinely over, and on
+ * `/login?session=idle` when it ended because the browser sat idle. A Cognito
+ * outage also lands on /login but keeps every cookie, because destroying a
+ * perfectly good refresh token over a transient failure is the one
+ * unrecoverable mistake here.
  *
  * `rateLimit: null` and the policy enforced inline below, for the same reason:
  * the wrapper would answer a 429 with a JSON error envelope, and the caller
@@ -165,6 +190,14 @@ export const GET = apiHandler(async (request: NextRequest) => {
 
   if (outcome.status === "refreshed") {
     return redirectRelative(next, 303);
+  }
+
+  if (outcome.status === "idle") {
+    // Cookies are already gone, so this cannot loop: the next navigation has
+    // no marker and goes straight to /login. The parameter only tells the page
+    // what to say. (The proxy's cookie-clearing branch is keyed on
+    // `?session=expired` and leaves this one alone.)
+    return redirectRelative(IDLE_SESSION_REDIRECT, 303);
   }
 
   if (outcome.status === "unavailable") {

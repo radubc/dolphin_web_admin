@@ -102,11 +102,13 @@ export const RATE_LIMITS = {
   authPasskey: { name: "auth_passkey", limit: 10, windowMs: 15 * 60_000 },
 
   /**
-   * Token refresh. Higher than sign-in because a legitimate multi-tab session
-   * refreshes on its own schedule, still low enough to make a stolen refresh
-   * token a poor oracle.
+   * Token refresh, per IP. An active tab refreshes about every 3.5 minutes
+   * once the pool issues 5-minute id tokens (the keepalive renews 90 s before
+   * expiry), so one operator with a few tabs open spends 10-15 calls in this
+   * window; 200 leaves room for an office behind one NAT. A refresh needs a
+   * valid refresh-token cookie, so the budget caps Cognito spend, not guesses.
    */
-  authRefresh: { name: "auth_refresh", limit: 30, windowMs: 15 * 60_000 },
+  authRefresh: { name: "auth_refresh", limit: 200, windowMs: 15 * 60_000 },
 
   /**
    * The health probe. One monitor polls every 10-30 s; 30/min leaves room for

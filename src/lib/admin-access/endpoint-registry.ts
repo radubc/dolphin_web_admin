@@ -68,7 +68,7 @@ export const ENDPOINT_REGISTRY: readonly EndpointRegistryEntry[] = [
     path: "/api/auth/refresh",
     name: "Refresh session (fetch)",
     description:
-      "Exchanges the refresh-token cookie for a new id/access token pair. Called by apiFetch on token_expired.",
+      "Exchanges the refresh-token cookie for a new id/access token pair. Called by apiFetch on token_expired and by the session keepalive shortly before the id token expires; refuses an idle session with session_idle.",
     category: "authentication",
     authKind: "public",
     rateLimit: "authRefresh",

@@ -13,9 +13,11 @@ asked, two rate limits apply: per client IP (skipped when the IP is unknown,
 see below) and per email address (5 attempts per 15 minutes). Wrong password
 and unknown user share one message; the server log keeps the distinction.
 
-Cognito requirements on the app client: `ALLOW_USER_PASSWORD_AUTH`,
-`ALLOW_REFRESH_TOKEN_AUTH`, token revocation on, and the client secret in
-`.env` if the client has one.
+Cognito requirements on the app client: `ALLOW_USER_PASSWORD_AUTH`, token
+revocation on, and the client secret in `.env` if the client has one.
+`ALLOW_REFRESH_TOKEN_AUTH` is no longer needed — refreshes go through
+`GetTokensFromRefreshToken` (see [Refresh](#refresh)), which works with the flow
+removed and with refresh-token rotation enabled.
 
 Sign-in is a **two-step** form (`login-form.tsx`). Step one is always email and
 password; what Cognito answers decides whether there is a step two:
@@ -156,15 +158,25 @@ the button into a free account-existence oracle.
 
 ## The session
 
-On success five httpOnly cookies are written (`src/lib/auth/session.ts`):
+On success five httpOnly cookies are written (`src/lib/auth/session.ts`), and
+every one of them is dated from the tokens themselves:
 
 | Cookie | Path | Lifetime | Holds |
 | --- | --- | --- | --- |
-| `psa_id_token` | `/` | token lifetime minus 60 s | the id token: the credential every check verifies |
-| `psa_access_token` | `/` | same | the access token, for future AWS calls |
-| `psa_session` | `/` | 30 days | a marker saying a refresh token exists |
-| `psa_refresh_token` | `/api/auth` | 30 days | the refresh token |
-| `psa_refresh_user` | `/api/auth` | 30 days | the username the refresh SECRET_HASH is computed over |
+| `psa_id_token` | `/` | the id token's own `exp` minus 60 s | the id token: the credential every check verifies |
+| `psa_access_token` | `/` | the access token's own `exp` minus 60 s | the access token, for the Account & security calls |
+| `psa_session` | `/` | id token `exp` + 30 minutes | a marker saying a refresh token exists |
+| `psa_refresh_token` | `/api/auth` | id token `exp` + 30 minutes | the refresh token |
+| `psa_refresh_proof` | `/api/auth` | id token `exp` + 30 minutes | the id token just issued — the proof of when this browser was last active |
+
+Each token cookie gets its *own* expiry, never the response's `ExpiresIn`: that
+field describes the access token, and the pool gives the id and access tokens
+different validities (5 and 15 minutes once the planned settings are applied).
+
+`psa_refresh_user` is no longer written. `GetTokensFromRefreshToken` needs no
+username, so there is nothing for it to carry; the name is still in
+`SESSION_COOKIES` so sign-out and the expiry paths keep deleting the copies
+left in older cookie jars.
 
 The `psa_` prefix differs from the consumer app's `ps_` on purpose: browsers do
 not separate cookies by port, so on localhost both apps would otherwise
@@ -174,23 +186,84 @@ Every page render verifies the id token's signature, issuer, audience and
 expiry against the pool's JWKS (`verifySession`). Nothing trusts the cookie's
 presence alone.
 
+## Session lifetime: 30 minutes idle, never while working
+
+The policy is one sentence: **a browser is signed out after 30 minutes without
+activity, and never while the operator is working.** Cognito cannot do this on
+its own — it has no idle timeout, a refresh token has a fixed absolute validity
+measured from sign-in, and rotation does not extend it — so the sliding window
+is the app's, built out of three layers that share
+`IDLE_TIMEOUT_SECONDS` in `src/lib/auth/cookies.ts`.
+
+1. **The cookies slide.** The marker, the refresh token and the proof are
+   rewritten on every refresh with a lifetime of "id token expiry + 30
+   minutes". A browser left alone therefore throws its own refresh token away
+   half an hour after the last one it was given.
+2. **The server enforces it.** Before `refreshSession()` spends anything, it
+   verifies `psa_refresh_proof` — the previous id token — against the pool's
+   JWKS with `graceSeconds: 30 minutes`. A token can only ever have been issued
+   to a browser that was there, so "its `exp` is less than 30 minutes old" is a
+   Cognito-signed statement about the last activity, and nothing in the browser
+   can forge it. Too old, missing or not ours ⇒ the refresh token is revoked,
+   every cookie is cleared, and the caller is told `session_idle`. The slack
+   runs one way only: the window is 30 minutes plus at most one id token
+   lifetime, never less than 30.
+3. **The browser keeps an active session alive.** `SessionKeepalive`
+   (`src/components/auth/session-keepalive.tsx`, mounted by the authenticated
+   layout) records pointer, key, wheel, touch, scroll and visibility events,
+   shares the timestamp with every other tab through
+   `localStorage["psa:last-activity"]`, and every 30 seconds either renews the
+   session (when the id token is within 90 seconds of expiring) or signs out
+   (when nothing has happened for 30 minutes). Renewing ahead of time is what
+   keeps a Server Action POST from ever bouncing to `/login` mid-form: the
+   proxy can replay a GET through the refresh endpoint, but not a POST.
+
+Sessions created before this was deployed have no proof cookie and get one
+forced sign-in. That is intended.
+
 ## Refresh
 
-The id token lives an hour. When it is gone:
+When the id token is gone:
 
 - a **page** navigation is sent by the proxy to `GET /api/auth/refresh?next=…`,
   which spends the refresh cookie and redirects back;
 - a **fetch** from a client component gets 401 `token_expired`; `apiFetch`
-  calls `POST /api/auth/refresh` once and retries once.
+  calls `POST /api/auth/refresh` once and retries once;
+- the **keepalive** calls the same endpoint before anything fails, through the
+  de-duplicated `refreshSessionOnce()` in `src/lib/api/client.ts`, and takes
+  the new `idTokenExpiresAt` from the answer.
 
-A Cognito outage leaves every cookie in place (503 `auth_unavailable`); only a
-verdict from Cognito that the refresh token is dead clears the session.
+The exchange itself is `GetTokensFromRefreshToken`
+(`refreshTokens()` in `src/lib/auth/cognito.ts`), with the client secret and
+**no username and no SECRET_HASH**. It replaced the `REFRESH_TOKEN_AUTH`
+InitiateAuth flow because refresh-token rotation disables that flow, and it
+works identically with rotation on and off: with rotation off the answer
+carries no new refresh token and the one on file is re-set (which is what
+slides its lifetime), with rotation on the new one replaces it. Presenting a
+rotated-out token afterwards is `RefreshTokenReuseException` — logged as a
+possible theft or a lost race, and treated as a dead session.
+
+The outcomes:
+
+| Outcome | HTTP (POST) | Navigation (GET) | Cookies |
+| --- | --- | --- | --- |
+| refreshed | 200 with `expiresIn`, `idTokenExpiresAt`, `userId`, `email` | 303 back to `next` | rewritten |
+| idle (proof missing or too old) | 401 `session_idle` | 303 to `/login?session=idle` | revoked at Cognito and cleared |
+| no refresh token / invalid | 401 `refresh_failed` | 303 to `/login` | cleared (GET also drops a stale marker) |
+| Cognito unreachable | 503 `auth_unavailable` | 303 to `/login` | untouched |
+
+A Cognito outage leaves every cookie in place; only a verdict — from Cognito
+that the refresh token is dead, or from the proof cookie that the browser has
+been idle — clears the session. `/login?session=idle` renders the notice
+"You were signed out after 30 minutes of inactivity."
 
 ## Sign-out
 
 The avatar menu submits a real form to `POST /api/auth/logout`, because the
 refresh cookie only travels on a navigation to `/api/auth/*`. The route revokes
-the refresh token at Cognito and clears all five cookies.
+the refresh token at Cognito and clears every cookie. The keepalive's idle
+sign-out `fetch`es the same route (which answers 204) before sending the
+browser to `/login?session=idle`.
 
 ## Account & security
 
@@ -350,14 +423,39 @@ own user pool if more than one is to use passkeys.
 needs; registering and deleting passkeys from the drawer needs only (a) and (b).
 Note that (c) passes `--policies`, which replaces the whole policy document:
 include the pool's existing `PasswordPolicy` in the same JSON, or the password
-rules go back to their defaults.
+rules go back to their defaults. `ALLOW_REFRESH_TOKEN_AUTH` is listed in (d)
+only because the pool still has it; it can be left out (see
+[Token lifetimes and rotation](#3-token-lifetimes-and-rotation)), and rotation
+removes it anyway.
 
-### 3. Nothing else changes
+### 3. Token lifetimes and rotation
 
-`ALLOW_USER_PASSWORD_AUTH`, `ALLOW_REFRESH_TOKEN_AUTH` and token revocation
-stay exactly as they are; the invitation flow needs no pool change at all,
-because `AdminCreateUser` already produces the `NEW_PASSWORD_REQUIRED`
-challenge the form now answers.
+The session policy above is the app's, not the pool's, but the pool's numbers
+decide how often it is exercised. The intended settings for the app client are
+an id token of **5 minutes**, an access token of **15 minutes**, a refresh
+token valid **1 day** (an absolute cap counted from sign-in), and refresh-token
+rotation **enabled** with a 60-second retry grace:
+
+    aws cognito-idp update-user-pool-client \
+      --region "$REGION" \
+      --user-pool-id "$POOL_ID" \
+      --client-id "$CLIENT_ID" \
+      --id-token-validity 5 --access-token-validity 15 \
+      --token-validity-units IdToken=minutes,AccessToken=minutes,RefreshToken=days \
+      --refresh-token-validity 1 \
+      --refresh-token-rotation Feature=ENABLED,RetryGracePeriodSeconds=60
+
+(`update-user-pool-client` replaces the client's configuration: pass back the
+explicit auth flows and everything else that must survive.) Enabling rotation
+disables `REFRESH_TOKEN_AUTH`, which is why `ALLOW_REFRESH_TOKEN_AUTH` can be
+dropped from the explicit auth flows at the same time. The app works either
+way, before and after.
+
+### 4. Nothing else changes
+
+`ALLOW_USER_PASSWORD_AUTH` and token revocation stay exactly as they are; the
+invitation flow needs no pool change at all, because `AdminCreateUser` already
+produces the `NEW_PASSWORD_REQUIRED` challenge the form now answers.
 
 ## Authentication is not authorization
 

@@ -3,6 +3,7 @@ import {
   CognitoIdentityProviderClient,
   ConfirmForgotPasswordCommand,
   ForgotPasswordCommand,
+  GetTokensFromRefreshTokenCommand,
   InitiateAuthCommand,
   RespondToAuthChallengeCommand,
   RevokeTokenCommand,
@@ -19,7 +20,12 @@ export interface SignInTokens {
   idToken: string;
   accessToken: string;
   refreshToken?: string;
-  /** Lifetime of the id/access tokens, in seconds. */
+  /**
+   * Cognito's `ExpiresIn`: the **access** token's lifetime in seconds. The id
+   * token's may differ (the pool sets the two separately), so cookie lifetimes
+   * are taken from each token's own `exp` and this is only the fallback — see
+   * `createSession()` in `./session`.
+   */
   expiresIn: number;
 }
 
@@ -39,8 +45,8 @@ export interface NewPasswordChallenge {
    * The username Cognito expects back in `ChallengeResponses.USERNAME`, and
    * the value the SECRET_HASH must be computed over: `USER_ID_FOR_SRP` from
    * the challenge parameters (the pool username), falling back to the address
-   * that was typed. Same reasoning as `refreshUsernameFrom()` in `./session` —
-   * Cognito checks the hash against the pool username, not the alias.
+   * that was typed: Cognito checks the hash against the pool username, not the
+   * alias the person happened to sign in with.
    */
   username: string;
   /**
@@ -1246,73 +1252,71 @@ export async function respondToWebAuthnChallenge(
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Token refresh (REFRESH_TOKEN_AUTH) and revocation                         */
+/*  Token refresh (GetTokensFromRefreshToken) and revocation                  */
 /* -------------------------------------------------------------------------- */
 
 export type RefreshResult =
   | ({ ok: true } & SignInTokens)
   /**
    * `invalid` — the refresh token will never work again (revoked, expired,
-   * issued to another client, user gone). The session must be cleared.
-   * `unavailable` — Cognito could not answer. The session must be left alone.
+   * rotated out, issued to another client, user gone). The session must be
+   * cleared. `unavailable` — Cognito could not answer. The session must be
+   * left alone.
    */
   | { ok: false; reason: "invalid" | "unavailable" };
 
 /**
  * Exchanges a refresh token for a fresh id and access token.
  *
- * `username` must be the value the SECRET_HASH was computed against — for this
- * flow Cognito uses the user's `sub`; see `refreshUsernameFrom()` in
- * `./session`, which is the single place that decision lives. It is ignored
- * when the app client has no secret.
+ * Uses `GetTokensFromRefreshToken`, which takes the refresh token, the client
+ * id and — when the app client has one — the client secret, and nothing else:
+ * no username, no SECRET_HASH. That is the whole reason this call needs no
+ * companion cookie, and why the old `psa_refresh_user` is no longer written.
  *
- * The response only carries a new refresh token when refresh-token rotation is
- * enabled on the app client; otherwise `refreshToken` is undefined and the
- * caller must keep the one it already holds.
- *
- * Requires `ALLOW_REFRESH_TOKEN_AUTH` on the app client. A pool that does not
- * allow the flow answers `NotAuthorizedException`, which is reported as
- * `invalid` — the logged message is what distinguishes a misconfiguration from
- * a genuinely dead token.
+ * It is the API to use whether or not refresh-token rotation is enabled, which
+ * matters because the pool is moving to rotation: rotation *disables* the
+ * `REFRESH_TOKEN_AUTH` InitiateAuth flow this used to call. With rotation off
+ * the response carries no `RefreshToken` and the caller keeps the one it holds;
+ * with rotation on it carries a new one that replaces it, and presenting a
+ * rotated-out token afterwards fails with `RefreshTokenReuseException`.
  *
  * @throws {import("./config").CognitoConfigError} when the environment is not configured.
  */
 export async function refreshTokens(
   refreshToken: string,
-  username: string,
 ): Promise<RefreshResult> {
   // Thrown deliberately: the caller turns this into a 503, not a sign-out.
   const config = getCognitoConfig();
 
-  const authParameters: Record<string, string> = {
-    REFRESH_TOKEN: refreshToken,
-  };
-  if (config.clientSecret) {
-    authParameters.SECRET_HASH = secretHash(
-      username,
-      config.clientId,
-      config.clientSecret,
-    );
-  }
-
   let response;
   try {
     response = await getClient(config).send(
-      new InitiateAuthCommand({
-        AuthFlow: "REFRESH_TOKEN_AUTH",
+      new GetTokensFromRefreshTokenCommand({
+        RefreshToken: refreshToken,
         ClientId: config.clientId,
-        AuthParameters: authParameters,
+        // Undefined when the app client has no secret, which the SDK omits.
+        ClientSecret: config.clientSecret,
       }),
     );
   } catch (error) {
     switch (errorName(error)) {
+      case "RefreshTokenReuseException":
+        // Rotation is on and this token was already spent. Either two tabs
+        // raced past the retry grace period, or a stolen copy is being
+        // replayed. Either way the session is over and Cognito has already
+        // invalidated the whole chain.
+        console.error(
+          "[auth] A rotated-out refresh token was presented — possible theft or a lost race:",
+          errorMessage(error),
+        );
+        return { ok: false, reason: "invalid" };
       case "NotAuthorizedException":
-        // Revoked, expired, wrong client, wrong SECRET_HASH, or the flow is
-        // not enabled on the app client. Logged because the last two are
-        // configuration bugs that would otherwise look like a normal timeout.
+        // Revoked, expired, wrong client, or the wrong client secret. Logged
+        // because the last is a configuration bug that would otherwise look
+        // like a normal timeout.
         console.error(
           config.clientSecret
-            ? "[auth] Cognito refused a refresh token (with a client secret configured, a SECRET_HASH computed over the wrong username is a likely cause; it must be the pool username, `cognito:username`):"
+            ? "[auth] Cognito refused a refresh token (a wrong ADMIN_COGNITO_CLIENT_SECRET is a likely cause when this is not simply an expired token):"
             : "[auth] Cognito refused a refresh token:",
           errorMessage(error),
         );
@@ -1327,19 +1331,18 @@ export async function refreshTokens(
       case "LimitExceededException":
         console.error("[auth] Cognito throttled a token refresh.");
         return { ok: false, reason: "unavailable" };
+      case "OperationNotEnabledException":
+        // A pool configuration problem, not a dead token: reported as
+        // "unavailable" so nobody's session is destroyed while it is fixed.
+        console.error(
+          "[auth] The user pool refused GetTokensFromRefreshToken; check the app client's token settings:",
+          errorMessage(error),
+        );
+        return { ok: false, reason: "unavailable" };
       default:
         console.error("[auth] Unexpected Cognito refresh error:", error);
         return { ok: false, reason: "unavailable" };
     }
-  }
-
-  if (response.ChallengeName) {
-    // A refresh never legitimately produces a challenge. Treat it as a dead
-    // session rather than pretending the refresh worked.
-    console.error(
-      `[auth] Unexpected challenge on refresh: ${response.ChallengeName}`,
-    );
-    return { ok: false, reason: "invalid" };
   }
 
   const result = response.AuthenticationResult;
@@ -1354,6 +1357,9 @@ export async function refreshTokens(
     accessToken: result.AccessToken,
     // Present only with refresh-token rotation enabled.
     refreshToken: result.RefreshToken,
+    // The ACCESS token's lifetime, and only a fallback: each cookie is dated
+    // from its own token's `exp` (see `createSession`), because the pool gives
+    // the id and access tokens different validities.
     expiresIn: result.ExpiresIn ?? 3600,
   };
 }

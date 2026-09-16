@@ -1,3 +1,4 @@
+import SessionKeepalive from "@/components/auth/session-keepalive";
 import AppShell from "@/components/shell/app-shell";
 import { accessiblePages, requireAdminSession } from "@/lib/admin-access/authorize";
 import { pageRegistryEntry, pageSection } from "@/lib/admin-access/page-registry";
@@ -20,6 +21,11 @@ import { capabilitiesOf } from "@/lib/admin-access/types";
  * is the `section` field of the page registry — the rail for `main`, the nav
  * bar's gear menu for `settings`. Moving a page between them is a build
  * decision and never changes its route or its rule.
+ *
+ * `SessionKeepalive` rides along with the shell: it holds the session open for
+ * as long as this operator is doing something and signs them out half an hour
+ * after they stop. It is mounted here, and not in the root layout, because
+ * `/login` and `/forgot-password` have no session to keep alive.
  */
 export default async function AppLayout({ children }: LayoutProps<"/">) {
   const { session, principal } = await requireAdminSession();
@@ -49,15 +55,18 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
     }));
 
   return (
-    <AppShell
-      email={session.email}
-      name={principal.user.displayName ?? session.name}
-      capabilities={capabilitiesOf(principal)}
-      tabs={tabs}
-      settingsEntries={settingsEntries}
-      quickActions={quickActions}
-    >
-      {children}
-    </AppShell>
+    <>
+      <SessionKeepalive idTokenExpiresAt={session.expiresAt} />
+      <AppShell
+        email={session.email}
+        name={principal.user.displayName ?? session.name}
+        capabilities={capabilitiesOf(principal)}
+        tabs={tabs}
+        settingsEntries={settingsEntries}
+        quickActions={quickActions}
+      >
+        {children}
+      </AppShell>
+    </>
   );
 }

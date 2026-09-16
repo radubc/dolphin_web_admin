@@ -96,9 +96,13 @@ function handleApiRequest(request: NextRequest, hasCredential: boolean) {
 export function proxy(request: NextRequest) {
   const { pathname, search, searchParams } = request.nextUrl;
   const hasSessionCookie = request.cookies.has(ID_TOKEN_COOKIE);
-  // Set for as long as a refresh token exists. The refresh token itself is
-  // scoped to `/api/auth` and is invisible here, so this marker is what tells
-  // "signed out" apart from "signed in, id token just expired".
+  // Set for as long as a refresh token exists, which is now the id token's
+  // remaining life plus the idle window (`IDLE_TIMEOUT_SECONDS`, see
+  // `src/lib/auth/cookies.ts`) rather than a flat thirty days. The refresh
+  // token itself is scoped to `/api/auth` and is invisible here, so this marker
+  // is what tells "signed out" apart from "signed in, id token just expired" —
+  // and because it now expires with the session, "marker present, id cookie
+  // gone" still means exactly "try a refresh".
   const hasSessionMarker = request.cookies.has(SESSION_MARKER_COOKIE);
 
   if (pathname === API_PREFIX || pathname.startsWith(`${API_PREFIX}/`)) {
@@ -120,8 +124,12 @@ export function proxy(request: NextRequest) {
       new URL(LOGIN_PATH, request.nextUrl),
     );
     // Only clear when there really is a session to clear. Without this guard a
-    // hand-typed or stale `?session=expired` link would delete the 30-day
-    // refresh cookie of someone who is merely signed out of this browser tab.
+    // hand-typed or stale `?session=expired` link would delete the refresh
+    // cookie of someone who is merely signed out of this browser tab.
+    //
+    // `?session=idle` is deliberately *not* handled here: by the time it is
+    // used the server has already revoked the refresh token and cleared every
+    // cookie, so /login renders it as a plain notice.
     if (hasSessionCookie || hasSessionMarker) {
       for (const { name, path } of SESSION_COOKIES) {
         // Name and path both have to match, so each cookie is deleted at the
@@ -134,10 +142,13 @@ export function proxy(request: NextRequest) {
 
   if (!hasSessionCookie && !isPublicRoute) {
     // The id cookie expires a minute before the token inside it, so this is the
-    // normal end of an hour-long session rather than an error. With a refresh
-    // token still on file, send the browser through the refresh endpoint and
-    // back to where it was going. Only for GET: a POST cannot be replayed
-    // across a redirect chain, so those keep going to /login as before.
+    // normal end of a token lifetime (minutes, not an hour, once the pool is
+    // updated) rather than an error. With a refresh token still on file, send
+    // the browser through the refresh endpoint and back to where it was going.
+    // Only for GET: a POST cannot be replayed across a redirect chain, so those
+    // keep going to /login as before — which is exactly why the authenticated
+    // layout mounts `SessionKeepalive`, so an active operator's id cookie is
+    // renewed before a Server Action POST can ever find it missing.
     if (hasSessionMarker && request.method === "GET") {
       const target = new URL(REFRESH_PATH, request.nextUrl);
       target.searchParams.set(NEXT_PARAM, `${pathname}${search}`);
