@@ -14,6 +14,7 @@ import { cookies } from "next/headers";
 import { CognitoJwtVerifier } from "aws-jwt-verify";
 import { decomposeUnverifiedJwt } from "aws-jwt-verify/jwt";
 import {
+  JwtExpiredError,
   JwtInvalidClaimError,
   JwtInvalidSignatureAlgorithmError,
   JwtInvalidSignatureError,
@@ -341,6 +342,13 @@ export async function verifyIdToken(token: string): Promise<Session | null> {
  * {@link verifyIdToken}, a failure to reach the JWKS endpoint throws instead,
  * so an outage never reads as "idle".
  *
+ * The two verdicts are logged differently on purpose. A proof that is merely
+ * expired past the grace is the policy working — someone stopped working half
+ * an hour ago — and gets one `info` line; anything else (bad signature, wrong
+ * pool, malformed) is `error`, because it means a cookie jar that should not
+ * exist. Neither line carries token content: aws-jwt-verify attaches the
+ * decoded token, sub and email included, to these errors.
+ *
  * @throws when verification could not be performed at all.
  */
 export async function verifyRecentIdToken(
@@ -350,6 +358,12 @@ export async function verifyRecentIdToken(
   try {
     return sessionFrom(await getVerifier().verify(token, { graceSeconds }));
   } catch (error) {
+    if (error instanceof JwtExpiredError) {
+      console.info(
+        `[auth] Proof of activity expired more than ${graceSeconds} seconds ago: the session was idle.`,
+      );
+      return null;
+    }
     if (isInvalidTokenError(error)) {
       const reason =
         error instanceof Error ? `${error.name}: ${error.message}` : error;

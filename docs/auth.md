@@ -204,22 +204,45 @@ is the app's, built out of three layers that share
    JWKS with `graceSeconds: 30 minutes`. A token can only ever have been issued
    to a browser that was there, so "its `exp` is less than 30 minutes old" is a
    Cognito-signed statement about the last activity, and nothing in the browser
-   can forge it. Too old, missing or not ours ⇒ the refresh token is revoked,
-   every cookie is cleared, and the caller is told `session_idle`. The slack
-   runs one way only: the window is 30 minutes plus at most one id token
-   lifetime, never less than 30.
+   can forge it. Too old or not ours ⇒ the refresh token is revoked, every
+   cookie is cleared, and the caller is told `session_idle`. The slack runs one
+   way only: the window is 30 minutes plus at most one id token lifetime, never
+   less than 30. A *missing* proof also ends the session, but it is no evidence
+   of inactivity, so it is reported as an ordinary dead session (`refresh_failed`,
+   a plain `/login`) rather than as a lunch break nobody took.
 3. **The browser keeps an active session alive.** `SessionKeepalive`
    (`src/components/auth/session-keepalive.tsx`, mounted by the authenticated
-   layout) records pointer, key, wheel, touch, scroll and visibility events,
-   shares the timestamp with every other tab through
-   `localStorage["psa:last-activity"]`, and every 30 seconds either renews the
-   session (when the id token is within 90 seconds of expiring) or signs out
-   (when nothing has happened for 30 minutes). Renewing ahead of time is what
-   keeps a Server Action POST from ever bouncing to `/login` mid-form: the
-   proxy can replay a GET through the refresh endpoint, but not a POST.
+   layout) records pointer, key, wheel, touch, scroll (in the capture phase —
+   a table's scroll never reaches the window) and visibility events, and checks
+   the clock every 15 seconds. It either renews the session — when the id token
+   is within 120 seconds of expiring, which is the 60 s the id cookie is dropped
+   early plus a tick plus margin — or signs out, when nothing has happened for
+   30 minutes. Renewing ahead of time is what keeps a Server Action POST from
+   ever bouncing to `/login` mid-form: the proxy can replay a GET through the
+   refresh endpoint, but not a POST.
+
+Three `localStorage` keys make the tabs of one browser act as one session:
+`psa:last-activity` (the shared clock, so a tab left open never signs out
+someone working next to it), `psa:id-expires-at` (the expiry any tab last saw,
+so one tab's renewal spares the others theirs) and `psa:refresh-lock` (a 45 s
+claim, so tabs coming due together do not all spend a Cognito call; the 60 s
+rotation grace covers the rare overlap).
+
+When `localStorage` cannot be written at all — a locked-down browser profile —
+the keepalive goes **passive**: it never signs anybody out, because it cannot
+know what the other tabs are doing, and simply stops renewing. The cookies then
+lapse on their own within 30-35 minutes and the server refuses the next refresh,
+so the policy still holds; only the redirect to the notice is lost.
+
+The idle sign-out waits for `POST /api/auth/logout` (up to 5 seconds) before it
+navigates. Only a 2xx — cookies confirmed gone — earns `/login?session=idle`; a
+timeout, a network failure or a refusal goes to `/login?session=expired`, which
+the proxy answers by deleting every session cookie and landing on a clean
+`/login`. Navigating to the idle notice while the cookies were still valid would
+only bounce back to `/` and restart the clock.
 
 Sessions created before this was deployed have no proof cookie and get one
-forced sign-in. That is intended.
+forced sign-in, on a plain `/login`. That is intended.
 
 ## Refresh
 
@@ -248,7 +271,8 @@ The outcomes:
 | Outcome | HTTP (POST) | Navigation (GET) | Cookies |
 | --- | --- | --- | --- |
 | refreshed | 200 with `expiresIn`, `idTokenExpiresAt`, `userId`, `email` | 303 back to `next` | rewritten |
-| idle (proof missing or too old) | 401 `session_idle` | 303 to `/login?session=idle` | revoked at Cognito and cleared |
+| idle (proof too old) | 401 `session_idle` | 303 to `/login?session=idle` | revoked at Cognito and cleared |
+| idle (no proof cookie) | 401 `refresh_failed` | 303 to `/login` | revoked at Cognito and cleared |
 | no refresh token / invalid | 401 `refresh_failed` | 303 to `/login` | cleared (GET also drops a stale marker) |
 | Cognito unreachable | 503 `auth_unavailable` | 303 to `/login` | untouched |
 
@@ -257,13 +281,26 @@ that the refresh token is dead, or from the proof cookie that the browser has
 been idle — clears the session. `/login?session=idle` renders the notice
 "You were signed out after 30 minutes of inactivity."
 
+One exception to the "cleared" column: the `GET` is a top-level navigation, so
+any page on the web can cause it and the `sameSite: "lax"` cookies ride along.
+A **cross-site** GET may still refresh — a link from an email opened after the
+id cookie lapsed is exactly that request, and it has to keep working — but an
+idle verdict on one is only *reported*, never acted on: the redirect happens and
+no cookie is touched, so no link on the web can force a sign-out. The next
+same-site request reaches the same verdict and does the revoking. An expired
+proof is logged at `info` (routine) and a forged or foreign one at `error`.
+
 ## Sign-out
 
 The avatar menu submits a real form to `POST /api/auth/logout`, because the
 refresh cookie only travels on a navigation to `/api/auth/*`. The route revokes
 the refresh token at Cognito and clears every cookie. The keepalive's idle
-sign-out `fetch`es the same route (which answers 204) before sending the
-browser to `/login?session=idle`.
+sign-out `fetch`es the same route (which answers 204) and waits for the answer
+before sending the browser to `/login?session=idle`, or to
+`/login?session=expired` when the call did not succeed. Sign-out has its own
+rate-limit budget (`authLogout`, 30 per 15 minutes) rather than a share of the
+refresh one, so a browser that has burned through its refresh allowance can
+still get its token revoked.
 
 ## Account & security
 

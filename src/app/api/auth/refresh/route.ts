@@ -123,8 +123,17 @@ export const POST = apiHandler(async () => {
       });
     case "idle":
       // `refreshSession` has already revoked the refresh token and cleared
-      // every cookie. A distinct code so the client can say what happened
-      // instead of showing a bare sign-in page.
+      // every cookie.
+      //
+      // Only a *stale* proof is evidence of inactivity, and it gets the
+      // distinct code so the client can say what happened instead of showing a
+      // bare sign-in page. A *missing* proof says nothing about activity — it
+      // is a session from before the cookie existed, or a jar that lost it — so
+      // it is reported as an ordinary dead session and the person is not told a
+      // story about a lunch break they did not take.
+      if (outcome.proof === "missing") {
+        throw new ApiError(401, "refresh_failed", "Sign in again.");
+      }
       throw new ApiError(
         401,
         "session_idle",
@@ -186,18 +195,31 @@ export const GET = apiHandler(async (request: NextRequest) => {
   // resolves against whatever origin it is already on — there is no host to
   // spoof because none is ever read.
   const next = safeNextPath(request.nextUrl.searchParams.get(NEXT_PARAM));
-  const outcome = await refreshSession();
+
+  // A top-level GET is something any page on the web can cause, and the
+  // `sameSite: "lax"` cookies ride along. Refreshing on one is fine and has to
+  // keep working — a link from an email opened after the id cookie lapsed is
+  // exactly that request. *Ending* a session on one is not: it would be a
+  // one-link forced sign-out. So a cross-site call may still refresh, but an
+  // idle verdict is only reported here, never acted on; the next same-site
+  // request reaches the same verdict and does the revoking.
+  const crossSite = request.headers.get("sec-fetch-site") === "cross-site";
+  const outcome = await refreshSession({ endIdleSession: !crossSite });
 
   if (outcome.status === "refreshed") {
     return redirectRelative(next, 303);
   }
 
   if (outcome.status === "idle") {
-    // Cookies are already gone, so this cannot loop: the next navigation has
-    // no marker and goes straight to /login. The parameter only tells the page
-    // what to say. (The proxy's cookie-clearing branch is keyed on
+    // On a same-site call the cookies are already gone, so this cannot loop:
+    // the next navigation has no marker and goes straight to /login. The
+    // parameter only tells the page what to say, and only when the proof was
+    // stale — a missing proof is no evidence of inactivity, so it lands on a
+    // plain /login. (The proxy's cookie-clearing branch is keyed on
     // `?session=expired` and leaves this one alone.)
-    return redirectRelative(IDLE_SESSION_REDIRECT, 303);
+    return outcome.proof === "stale"
+      ? redirectRelative(IDLE_SESSION_REDIRECT, 303)
+      : toLogin;
   }
 
   if (outcome.status === "unavailable") {
@@ -221,7 +243,7 @@ export const GET = apiHandler(async (request: NextRequest) => {
   // guarded by `Sec-Fetch-Site`, so a cross-site page cannot use it to force a
   // sign-out. A request with no such header is a non-browser client, which has
   // no ambient cookie to abuse in the first place.
-  if (request.headers.get("sec-fetch-site") !== "cross-site") {
+  if (!crossSite) {
     await clearPageSession();
   }
   return toLogin;

@@ -40,34 +40,72 @@ import {
   type Session,
 } from "./session";
 
+/**
+ * Why the proof of activity did not hold.
+ *
+ * - `stale` — the proof was there and expired more than the idle window ago:
+ *   this browser really did sit idle, and the person should be told so.
+ * - `missing` — there was no proof cookie at all. A session created before the
+ *   cookie existed, or a jar that lost it. Nothing is known about activity, so
+ *   the caller is sent to a plain sign-in page rather than told it was idle.
+ */
+export type IdleProof = "missing" | "stale";
+
 export type RefreshOutcome =
   /** New tokens are in the cookie jar. */
   | { status: "refreshed"; session: Session; expiresIn: number }
   /** Nothing to refresh with: the caller is simply signed out. */
   | { status: "no_refresh_token" }
   /**
-   * The browser was idle for longer than {@link IDLE_TIMEOUT_SECONDS}. The
-   * refresh token has been revoked at Cognito and every cookie cleared.
+   * The proof of activity did not hold — see {@link IdleProof}. Unless the
+   * caller asked otherwise (`endIdleSession: false`), the refresh token has
+   * been revoked at Cognito and every cookie cleared.
    */
-  | { status: "idle" }
+  | { status: "idle"; proof: IdleProof }
   /** The refresh token is dead for good. Session cookies have been cleared. */
   | { status: "invalid" }
   /** Cognito could not answer. Cookies are untouched so a retry can succeed. */
   | { status: "unavailable" };
 
+export interface RefreshSessionOptions {
+  /**
+   * Whether an idle verdict may *act*: revoke the refresh token at Cognito and
+   * clear every cookie. Default `true`.
+   *
+   * `GET /api/auth/refresh` passes `false` for a `cross-site` request. That GET
+   * is a top-level navigation any page on the web can cause, and the cookies
+   * ride along because they are `sameSite: "lax"` — so acting on it would hand
+   * an attacker a one-link forced sign-out. The verdict is still reported and
+   * the route still redirects; the next same-site request reaches the same
+   * conclusion and does the revoking.
+   */
+  endIdleSession?: boolean;
+}
+
 /**
- * Ends the session because the browser has been idle too long: revokes the
- * refresh token so the copy in the jar is worthless even if it is stolen on its
- * way out, then clears every cookie. Revocation is best effort, exactly as at
- * logout — `revokeRefreshToken` swallows its own failures.
+ * Reports — and, unless the caller opted out, acts on — an idle verdict:
+ * revokes the refresh token so the copy in the jar is worthless even if it is
+ * stolen on its way out, then clears every cookie. Revocation is best effort,
+ * exactly as at logout — `revokeRefreshToken` swallows its own failures.
  */
-async function endIdleSession(refreshToken: string): Promise<RefreshOutcome> {
+async function idleOutcome(
+  refreshToken: string,
+  proof: IdleProof,
+  endSession: boolean,
+): Promise<RefreshOutcome> {
+  if (!endSession) {
+    // A cross-site navigation. Say what happened, touch nothing: see
+    // {@link RefreshSessionOptions.endIdleSession}.
+    return { status: "idle", proof };
+  }
   console.warn(
-    `[auth] Refresh refused: the session has been idle for more than ${IDLE_TIMEOUT_SECONDS} seconds.`,
+    proof === "missing"
+      ? "[auth] Refresh refused: the session carries no proof of activity."
+      : `[auth] Refresh refused: the session has been idle for more than ${IDLE_TIMEOUT_SECONDS} seconds.`,
   );
   await revokeRefreshToken(refreshToken);
   await clearSession();
-  return { status: "idle" };
+  return { status: "idle", proof };
 }
 
 /**
@@ -81,7 +119,10 @@ async function endIdleSession(refreshToken: string): Promise<RefreshOutcome> {
  * Only a verdict — from Cognito that the token is dead, or from the proof
  * cookie that the browser has been idle — clears it.
  */
-export async function refreshSession(): Promise<RefreshOutcome> {
+export async function refreshSession(
+  options: RefreshSessionOptions = {},
+): Promise<RefreshOutcome> {
+  const endSession = options.endIdleSession ?? true;
   const cookieStore = await cookies();
   const refreshToken = cookieStore.get(REFRESH_TOKEN_COOKIE)?.value;
   if (!refreshToken) {
@@ -94,7 +135,7 @@ export async function refreshSession(): Promise<RefreshOutcome> {
   // which is the intended cost of the change — or a jar someone has edited.
   const proof = cookieStore.get(REFRESH_PROOF_COOKIE)?.value;
   if (!proof) {
-    return endIdleSession(refreshToken);
+    return idleOutcome(refreshToken, "missing", endSession);
   }
 
   let proofSession: Session | null;
@@ -107,7 +148,7 @@ export async function refreshSession(): Promise<RefreshOutcome> {
   }
   if (!proofSession) {
     // Expired more than the idle window ago, forged, or from another pool.
-    return endIdleSession(refreshToken);
+    return idleOutcome(refreshToken, "stale", endSession);
   }
 
   let result;

@@ -28,9 +28,14 @@ import { REFRESH_TOKEN_COOKIE } from "@/lib/auth/cookies";
 import { clearSession } from "@/lib/auth/session";
 import { RATE_LIMITS } from "@/lib/security/rate-limit";
 
-/** Same budget as refresh: both spend a Cognito call per request. */
-const GET_OPTIONS = { rateLimit: RATE_LIMITS.authRefresh, endpoint: "auth.logout.get" };
-const POST_OPTIONS = { rateLimit: RATE_LIMITS.authRefresh, endpoint: "auth.logout.post" };
+/**
+ * Its own budget, not refresh's. Both spend a Cognito call, but sign-out is one
+ * call per session while refresh is many, and the keepalive's idle sign-out has
+ * to get through: sharing a bucket would let an exhausted refresh budget keep a
+ * refresh token from ever being revoked.
+ */
+const GET_OPTIONS = { rateLimit: RATE_LIMITS.authLogout, endpoint: "auth.logout.get" };
+const POST_OPTIONS = { rateLimit: RATE_LIMITS.authLogout, endpoint: "auth.logout.post" };
 
 const LOGIN_PATH = "/login";
 

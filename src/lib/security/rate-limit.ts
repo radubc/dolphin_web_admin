@@ -111,6 +111,15 @@ export const RATE_LIMITS = {
   authRefresh: { name: "auth_refresh", limit: 200, windowMs: 15 * 60_000 },
 
   /**
+   * Sign-out, per IP. Deliberately its own budget rather than a share of
+   * `authRefresh`: signing out is one call per session, and keeping the two
+   * apart means an exhausted refresh budget can never block an idle sign-out's
+   * revoke — the one call that has to get through for the refresh token to die
+   * at Cognito.
+   */
+  authLogout: { name: "auth_logout", limit: 30, windowMs: 15 * 60_000 },
+
+  /**
    * The health probe. One monitor polls every 10-30 s; 30/min leaves room for
    * several of them without letting the endpoint become a free DB pinger.
    */
