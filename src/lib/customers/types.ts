@@ -289,13 +289,37 @@ export const POOL_METRICS_DAYS_MAX = 450;
 
 /**
  * How far back the nightly sweep looks for consumer-app account deletions
- * (`users.deleted_at`). A week, so several missed nights still cost nothing —
- * the events are deduped by `UNIQUE (sub, event, at)`, so re-reading the same
- * deletions writes nothing.
+ * (`users.deleted_at`).
+ *
+ * The whole statistics horizon: {@link STATISTICS_MONTHS_MAX} months of days,
+ * so a job whose *first* run happens long after a deletion still records it,
+ * instead of leaving a departure that no snapshot can ever recover. It was a
+ * week, which was enough only while the job had always been running — a fresh
+ * deployment, or a job switched off for a fortnight, silently lost every
+ * departure older than the window, and the lifecycle log is the only place a
+ * pool-side deletion is ever written down.
+ *
+ * Re-reading the same deletions every night costs nothing: the events are
+ * deduped by `UNIQUE (sub, event, at)` and by {@link
+ * import("./lifecycle").subsWithEvent} before the write, so a wide window
+ * writes no more rows than a narrow one — only the read is larger, and it is
+ * capped by {@link DELETED_IN_APP_MAX}. Churn itself no longer depends on
+ * this sweep at all (`deletionsPerMonth` reads `users.deleted_at` live); the
+ * sweep is what gives the per-customer lifecycle log an entry, and what keeps
+ * the departure on record if the `users` row ever goes away.
+ *
+ * Keep it in step with `STATISTICS_MONTHS_MAX`: 24 months is at most 731 days.
  */
-export const DELETED_IN_APP_LOOKBACK_DAYS = 7;
+export const DELETED_IN_APP_LOOKBACK_DAYS = 731;
 
-/** The most deletions one sweep records, so a mass deletion stays bounded. */
+/**
+ * The most deletions one sweep records, so a mass deletion stays bounded.
+ *
+ * Unchanged by the wider look-back, and it is now the binding limit rather
+ * than the window: the rows are read newest first, so hitting the cap drops
+ * the *oldest* deletions in the window — which, with a window this wide, are
+ * the ones a previous night has almost certainly recorded already.
+ */
 export const DELETED_IN_APP_MAX = 500;
 
 /** How many days without a sign-in still counts as a monthly active user. */
@@ -366,19 +390,29 @@ export interface MonthCount {
 /**
  * One month of churn.
  *
- * `churnPct` is `deleted ÷ activeAtStart × 100`, and `null` when
- * `activeAtStart` is 0 — a month that began with no customers has no churn
+ * `churnPct` is `deleted ÷ (activeAtStart + arrived) × 100`, and `null` when
+ * that denominator is 0 — a month that had no customers at all has no churn
  * rate, and reporting 0 % would be a measurement where there is none.
+ *
+ * The denominator is everyone who was a customer at any point in the month,
+ * not only those it began with (owner, 2026-09-15): a person who signs up and
+ * leaves inside the same month is a departure this product had, and with a
+ * start-of-month base a young product's churn read as nothing at all.
  */
 export interface ChurnMonth {
   month: string;
-  /** Departures: `deleted` and `deleted_in_app` events, deduped per sub. */
+  /**
+   * Departures: `deleted` and `deleted_in_app` events, plus the consumer
+   * app's own `users.deleted_at`, deduped per sub across both databases.
+   */
   deleted: number;
   /**
-   * The denominator: customers who existed and were not yet deleted at 00:00
-   * UTC on the 1st, plus anyone seen in the 30 days before that.
+   * Customers who existed and were not yet deleted at 00:00 UTC on the 1st,
+   * plus anyone seen in the 30 days before that.
    */
   activeAtStart: number;
+  /** Customers whose `users` row was created inside the month. */
+  arrived: number;
   churnPct: number | null;
 }
 
@@ -469,7 +503,11 @@ export interface CustomerStatistics {
   dau: number;
   /** New `users` rows per month: people who reached the app, not invitations. */
   newPerMonth: MonthCount[];
-  /** `deleted` + `deleted_in_app` events, deduped per sub per month. */
+  /**
+   * Departures: `deleted` + `deleted_in_app` events **and** live
+   * `users.deleted_at` rows, deduped per sub per month across both
+   * databases.
+   */
   deletedPerMonth: MonthCount[];
   churnPerMonth: ChurnMonth[];
   retentionBySignupMonth: RetentionMonth[];

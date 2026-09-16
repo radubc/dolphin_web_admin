@@ -33,8 +33,11 @@ import "server-only";
  *    which fails the run instead (see {@link diffRefusal}).
  * 3. *Metrics.* One `GetMetricData` call for the pool's daily counters.
  * 4. *Main-database sweep.* Record `deleted_in_app` for anyone the consumer
- *    app soft-deleted in the last week, so a self-service deletion is counted
- *    as churn the same night rather than waiting for the pool clean-up.
+ *    app soft-deleted inside the statistics horizon
+ *    (`DELETED_IN_APP_LOOKBACK_DAYS`), so a self-service deletion appears in
+ *    the lifecycle log even when the job's first run comes long after it.
+ *    Churn itself no longer waits for this — `deletionsPerMonth` reads
+ *    `users.deleted_at` live — so the sweep is the log, not the figure.
  *
  * Each part is committed before the next begins, so a run interrupted half
  * way leaves everything it had already learned. Parts 3 and 4 do not depend
@@ -466,6 +469,18 @@ export function cognitoDirectoryWork(context: CognitoDirectoryRunContext): RunWo
 
     /* ------------------------ (4) Deletions in the app -------------------- */
 
+    // The consumer app's own delete-my-account flow, copied into the
+    // lifecycle log. The window is the whole statistics horizon rather than a
+    // week, so a first run long after a deletion still records it: a
+    // departure the sweep never saw would otherwise be lost for good, since
+    // no pool snapshot can recover one. Re-reading the same deletions every
+    // night writes nothing — `subsWithEvent` filters them out here and
+    // `UNIQUE (sub, event, at)` catches the rest.
+    //
+    // Churn does not wait for this: `deletionsPerMonth` reads
+    // `users.deleted_at` live alongside the events. What the sweep adds is
+    // the entry in the per-customer lifecycle log, and a record that outlives
+    // the `users` row.
     try {
       const since = new Date(now.getTime() - DELETED_IN_APP_LOOKBACK_DAYS * DAY_MS);
       const deleted = await findRecentlyDeletedUsers(since, DELETED_IN_APP_MAX);
@@ -489,9 +504,11 @@ export function cognitoDirectoryWork(context: CognitoDirectoryRunContext): RunWo
       outcomes.deletedInApp =
         `ok: ${deleted.length} deletions in the last ${DELETED_IN_APP_LOOKBACK_DAYS} days, ` +
         `${written} newly recorded` +
-        // Not a failure — the sweep runs every night and the window is seven
-        // days long — but the operator should see it in the run, not only in
-        // the server log the repository writes.
+        // Not a failure — the sweep runs every night, the window now spans
+        // the whole statistics horizon, and the rows are read newest first,
+        // so what the cap drops is what an earlier night has almost certainly
+        // recorded already. The operator should still see it in the run, not
+        // only in the server log the repository writes.
         (deleted.length >= DELETED_IN_APP_MAX
           ? `; the read stopped at its cap of ${DELETED_IN_APP_MAX}, so older deletions in the window were not seen`
           : "");

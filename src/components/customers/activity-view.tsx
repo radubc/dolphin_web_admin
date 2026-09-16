@@ -157,7 +157,7 @@ function Card({
             </span>
             <Typography.Text
               strong
-              className="text-[11px] tracking-wide uppercase"
+              className="text-xs tracking-wide uppercase"
               style={{ color: surfaceColors.textSecondary }}
             >
               {title}
@@ -228,7 +228,7 @@ function FunnelStep({
             style={{ width: `${share * 100}%`, backgroundColor: color }}
           />
         </span>
-        <span className="text-[11px]" style={{ color: surfaceColors.textTertiary }}>
+        <span className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
           {previous === null
             ? `${formatPercentOrDash(top > 0 ? 100 : null)} of the pool`
             : drop === null
@@ -315,8 +315,8 @@ export default function ActivityView({ switcher, canSnapshot }: ActivityViewProp
           : undefined,
       tooltip:
         currentChurn === null
-          ? "Departures this month over the customers the month began with."
-          : `${currentChurn.deleted} ${currentChurn.deleted === 1 ? "departure" : "departures"} this month over the ${currentChurn.activeAtStart.toLocaleString()} customers it began with. A partial month — it grows until the 1st.`,
+          ? "Departures this month over everyone who was a customer at any point in it."
+          : `${currentChurn.deleted} ${currentChurn.deleted === 1 ? "departure" : "departures"} this month over ${(currentChurn.activeAtStart + currentChurn.arrived).toLocaleString()} customers (${currentChurn.activeAtStart.toLocaleString()} it began with, ${currentChurn.arrived.toLocaleString()} who arrived). A partial month — it grows until the 1st.`,
       separatorBefore: true,
     },
     {
@@ -396,7 +396,7 @@ export default function ActivityView({ switcher, canSnapshot }: ActivityViewProp
     <RibbonBar
       trailing={
         <span
-          className="shrink-0 pr-1 text-right text-[11px] tabular-nums"
+          className="shrink-0 pr-1 text-right text-[13px] tabular-nums"
           style={{ color: surfaceColors.textSecondary }}
         >
           {store.refreshing && (
@@ -600,7 +600,7 @@ export default function ActivityView({ switcher, canSnapshot }: ActivityViewProp
             <span className="truncate" style={{ color: surfaceColors.text }}>
               {value ?? "(deleted tenant)"}
             </span>
-            <code className="text-[10px]" style={{ color: surfaceColors.textTertiary }}>
+            <code className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
               {row.tenantId}
             </code>
           </span>

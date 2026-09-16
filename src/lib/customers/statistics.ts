@@ -22,9 +22,14 @@ import "server-only";
  *   one sign-in.
  * - **New per month** is `users.created_at`: the first time the consumer app
  *   saw the person. An invitation that was never accepted is not a customer.
- * - **Deleted per month** is `deleted` plus `deleted_in_app` events, deduped
- *   per sub within a month, so a person who deletes their account in the app
- *   and then disappears from the pool the same night is one departure.
+ * - **Deleted per month** is the union of the recorded `deleted` and
+ *   `deleted_in_app` events and the consumer app's own `users.deleted_at`,
+ *   deduped per sub within a month across both databases, so a person who
+ *   deletes their account in the app and then disappears from the pool the
+ *   same night is one departure. Reading `users.deleted_at` live is what
+ *   makes a self-service deletion count immediately: before it, a departure
+ *   was invisible until the nightly job copied it into the event log, and
+ *   invisible for ever if that first run came too late.
  * - **Churn** for a month is `deleted ÷ activeAtStart`, where `activeAtStart`
  *   is everyone who existed and had not been deleted at 00:00 UTC on the 1st,
  *   plus anyone seen in the 30 days before it. A month that began with nobody
@@ -59,7 +64,9 @@ import "server-only";
  * that never included them. At this scale the alternative — only counting
  * departures whose sub is known to the app database — would silently drop the
  * deletions that matter most (an account removed in the AWS console), so the
- * simpler definition is kept and documented.
+ * simpler definition is kept and documented. Note that the half of the
+ * numerator now read from `users.deleted_at` is by construction a `users`
+ * row, so only the pool-side events can fall outside the base.
  */
 import { NotFoundError } from "@/lib/api/errors";
 import {
@@ -271,9 +278,13 @@ function cachedLargestTenants(): ReturnType<typeof largestTenants> {
  *
  * Every section is independently allowed to be empty. A deployment where
  * `docs/sql/014_customer_statistics.sql` has run but the nightly job has not
- * answers with an empty account census, an empty funnel head, no pool metrics
- * and no deletions — while the app-side figures (active users, new customers,
- * usage, largest tenants) are all there, because those need no job at all.
+ * answers with an empty account census, an empty funnel head and no pool
+ * metrics — while the app-side figures (active users, new customers, usage,
+ * largest tenants) are all there, because those need no job at all.
+ * Departures and churn are in that second group now too: they still include
+ * every recorded event, but their main source is `users.deleted_at`, read
+ * live. Only a **pool-side** deletion — an account removed in the AWS console
+ * — needs the job, because nothing else can see it.
  * The page says which half is missing rather than drawing zeros as
  * measurements.
  *
@@ -336,11 +347,18 @@ export async function getCustomerStatistics(
   const churnPerMonth: ChurnMonth[] = starts.map((start, index) => {
     const deleted = deletedPerMonth[index]?.count ?? 0;
     const activeAtStart = activeAtStarts[index] ?? 0;
+    const arrived = newPerMonth[index]?.count ?? 0;
     return {
       month: monthLabel(start),
       deleted,
       activeAtStart,
-      churnPct: share(deleted, activeAtStart),
+      arrived,
+      // Everyone who was a customer at any point in the month, not only
+      // those it began with: a person who signs up and leaves inside the same
+      // month is a departure this product had, and with a start-of-month
+      // denominator a young product's churn would read as nothing at all
+      // (owner, 2026-09-15: two customers left, the rate said 0).
+      churnPct: share(deleted, activeAtStart + arrived),
     };
   });
 
@@ -427,12 +445,15 @@ export async function customerHeadline(now: Date = new Date()): Promise<Customer
   ]);
 
   const deleted = deletedThisMonth[0]?.count ?? 0;
+  const arrived = newThisMonth[0]?.count ?? 0;
   return {
     accountsTotal: census.snapshotDay === null ? liveUsers : census.total,
     mau,
-    newThisMonth: newThisMonth[0]?.count ?? 0,
+    newThisMonth: arrived,
     deletedThisMonth: deleted,
-    churnPct: share(deleted, activeAtStart),
+    // The same denominator as the Activity view's churn table: everyone who
+    // was a customer at any point in the month.
+    churnPct: share(deleted, activeAtStart + arrived),
   };
 }
 

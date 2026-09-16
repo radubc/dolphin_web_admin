@@ -31,10 +31,19 @@ import "server-only";
  * main-database figures and must keep working before the SQL has run, so a
  * missing `admin_customer_events` table answers with an empty log instead of
  * failing the whole drawer.
+ *
+ * One function here reads the **main** app database as well as the admin one:
+ * {@link deletionsPerMonth} unions the recorded departure events with the
+ * consumer app's own `users.deleted_at`, so churn is answered live rather
+ * than waiting for the nightly job to notice. It is the only crossing, it is
+ * two separate queries merged in TypeScript (never a join — they are
+ * different databases), and the main-database half lives in `./repository.ts`
+ * with every other read of the consumer app's data.
  */
 import { isMissingTableError } from "@/lib/admin-access/prisma-repository";
 import type { Prisma } from "@/generated/prisma-admin/client";
 import { prismaAdmin } from "@/lib/prisma-admin";
+import { deletedUserMonths } from "./repository";
 import {
   isCustomerEventKind,
   type AccountCensus,
@@ -356,33 +365,68 @@ export async function eventsForSub(sub: string, take: number): Promise<CustomerE
 }
 
 /**
- * Departures per UTC calendar month, **deduped per sub per month**.
+ * Departures per UTC calendar month, **deduped per sub per month** across
+ * both databases.
  *
- * Both departure events count: `deleted` (the account left the pool, whoever
- * removed it) and `deleted_in_app` (the consumer app's own delete-my-account
- * flow). A person who does both in the same month — deletes their account in
- * the app, and the pool account then disappears the same night — is one
- * departure, which is what `count(DISTINCT sub)` gives. Across two different
- * months they would be counted twice, which is the one honest imprecision
- * here and is called out in docs/customers.md.
+ * A departure is either of two facts, and the union of them is what churn
+ * counts:
  *
- * Raw SQL because the bucket is `date_trunc('month', …)` and the measure is a
- * `COUNT(DISTINCT …)`, neither of which Prisma's `groupBy` can express.
- * Parameterised through the tagged template, and the only inputs are two
- * `Date`s.
+ * 1. an `admin_customer_events` row of kind `deleted` (the account left the
+ *    customer pool, whoever removed it — the nightly snapshot diff is the
+ *    only thing that can see that) or `deleted_in_app` (the same nightly
+ *    run's sweep over `users.deleted_at`);
+ * 2. a **live** `users` row in the main app database with `deleted_at` inside
+ *    the window — the consumer app's own delete-my-account flow, read
+ *    directly.
+ *
+ * The second source is why churn no longer depends on the nightly job. The
+ * sweep that copies those deletions into `admin_customer_events` only looks
+ * back a bounded number of days, so before this a self-service deletion was
+ * invisible to churn until the job ran, and invisible *for ever* if the first
+ * run came after the look-back window had passed. Reading `users.deleted_at`
+ * live means the departure counts the moment it happens; the events table
+ * still matters for everything the main database cannot know — a pool account
+ * removed in the AWS console, a revoked invitation — and for a person whose
+ * `users` row is one day hard-deleted.
+ *
+ * Deduplication is per sub per UTC month over the union, the same rule the
+ * single `count(DISTINCT sub)` used to implement on its own: someone who
+ * deletes their account in the app and then disappears from the pool the same
+ * night is one departure, however many of the three sources noticed it.
+ * Across two different months they are counted twice, which is the one honest
+ * imprecision here and is called out in docs/customers.md.
+ *
+ * Two raw queries — one per database, so they cannot be a join — each
+ * grouping to `(month, sub)`; the union and the counting happen here. Raw
+ * because the bucket is `date_trunc('month', …)`, which Prisma's `groupBy`
+ * cannot express. Both are tagged templates whose only inputs are the two
+ * `Date`s, so the values are parameterised. Bounded by the window, which the
+ * schema caps at {@link import("./types").STATISTICS_MONTHS_MAX} months, and
+ * by one row per departed person per month inside it.
  */
 export async function deletionsPerMonth(from: Date, toExclusive: Date): Promise<MonthCount[]> {
-  const rows = await prismaAdmin.$queryRaw<{ month: string; n: bigint }[]>`
-    SELECT to_char(date_trunc('month', at AT TIME ZONE 'UTC'), 'YYYY-MM') AS month,
-           count(DISTINCT sub) AS n
-    FROM admin_customer_events
-    WHERE event IN ('deleted', 'deleted_in_app')
-      AND at >= ${from}
-      AND at < ${toExclusive}
-    GROUP BY 1
-    ORDER BY 1
-  `;
-  return rows.map((row) => ({ month: row.month, count: Number(row.n) }));
+  const [events, inApp] = await Promise.all([
+    prismaAdmin.$queryRaw<{ month: string; sub: string }[]>`
+      SELECT to_char(date_trunc('month', at AT TIME ZONE 'UTC'), 'YYYY-MM') AS month,
+             sub
+      FROM admin_customer_events
+      WHERE event IN ('deleted', 'deleted_in_app')
+        AND at >= ${from}
+        AND at < ${toExclusive}
+      GROUP BY 1, 2
+    `,
+    deletedUserMonths(from, toExclusive),
+  ]);
+
+  const subsByMonth = new Map<string, Set<string>>();
+  for (const row of [...events, ...inApp]) {
+    const subs = subsByMonth.get(row.month);
+    if (subs === undefined) subsByMonth.set(row.month, new Set([row.sub]));
+    else subs.add(row.sub);
+  }
+  return [...subsByMonth.entries()]
+    .map(([month, subs]) => ({ month, count: subs.size }))
+    .sort((a, b) => a.month.localeCompare(b.month));
 }
 
 /* -------------------------------------------------------------------------- */

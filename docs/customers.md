@@ -61,8 +61,8 @@ account's password.
 
 The third view answers the questions a list cannot: how many people are
 actually using the product, how many arrived last month, how many left, and
-where a new person stalls. None of it can be read live, because **neither
-system that holds the facts keeps the history**:
+where a new person stalls. Almost none of it can be read live, because
+**neither system that holds the facts keeps the history**:
 
 - Cognito's `ListUsers` answers "who is in the pool right now" and nothing
   else. There is **no event and no Lambda trigger for a deletion or a
@@ -78,6 +78,13 @@ system that holds the facts keeps the history**:
 So the admin app keeps its own history in three tables, filled once a night by
 the `cognito_directory` integration. **The difference between two snapshots is
 the event log.**
+
+The one exception is a **departure through the consumer app**. That fact does
+survive in the main database — `users.deleted_at` is set and stays set — so
+departures and churn read it directly, in the same breath as the recorded
+events, and are right whether or not the job has ever run. Only a deletion on
+the *pool* side, where nothing is written down, still depends on two
+snapshots.
 
 ### The three tables
 
@@ -97,7 +104,7 @@ Every writer is **idempotent**, because `UNIQUE (sub, event, at)` is combined
 with a deterministic `at`: the diff dates its events at 00:00 UTC of the
 snapshot day, and the main-database sweep dates a deletion at
 `users.deleted_at` itself. Running the job twice in a night, or re-reading the
-same week of deletions seven nights running, writes nothing new.
+same two years of deletions every night for a year, writes nothing new.
 
 ### The nightly run
 
@@ -123,10 +130,18 @@ center's refresh.
    out: a fraction of a day of sign-ins reads as a collapse. The queries are
    metric-math `SEARCH` expressions, for the reason below.
 4. **The consumer-app deletion sweep.** Everyone whose `users.deleted_at`
-   falls in the last 7 days and has no `deleted_in_app` event yet gets one,
-   dated at the deletion itself so the departure lands in the month it
-   happened in. This is what makes a self-service account deletion count as
-   churn the same night, rather than waiting for the pool clean-up.
+   falls inside the statistics horizon — `DELETED_IN_APP_LOOKBACK_DAYS`, 731
+   days, the same 24 months the Activity view will draw — and has no
+   `deleted_in_app` event yet gets one, dated at the deletion itself so the
+   departure lands in the month it happened in. The window used to be seven
+   days, which was enough only while the job had always been running: a first
+   run a fortnight after a deletion lost it for good. Re-reading two years of
+   deletions every night costs nothing, because the subs that already have an
+   event are filtered out before the write and `UNIQUE (sub, event, at)`
+   catches the rest; the read is capped at `DELETED_IN_APP_MAX` (500) rows,
+   newest first. This part is what puts the departure in the person's
+   lifecycle log — **churn no longer waits for it**, because the churn
+   numerator reads `users.deleted_at` itself.
 
 ### The diff rules
 
@@ -191,8 +206,8 @@ same sign-in in different months on either side of midnight.
 | Accounts, and the by-status breakdown | The newest snapshot day, `partial` or not — what a truncated listing did reach is real. Cognito's own `UserStatus`, lower-cased and otherwise untouched: a status the console has nothing to say about (`EXTERNAL_PROVIDER`, `ARCHIVED`, whatever AWS adds next) is **recorded**, not flattened to `unknown`, and the page labels the ones it knows and prints the rest verbatim. Only the *list* column narrows the status to the six states it can act on. |
 | DAU / WAU / MAU | Live `users` rows whose `last_seen_at` is inside the last 1 / 7 / 30 days. **Not sign-ins** — someone signed in for a week is one active user and one sign-in. |
 | New per month | `users.created_at`: the first time the consumer app saw the person. An invitation nobody accepted is not a customer. |
-| Deleted per month | `deleted` **and** `deleted_in_app` events, deduped per sub within the month. Someone who deletes their account in the app and then disappears from the pool the same night is one departure. **A pool deletion is attributed to the month of the snapshot that noticed it**, not to the month it happened in: the diff dates its events at 00:00 UTC of the snapshot day, because that is all it knows — Cognito has no deletion event, so an account removed on the 31st and first missed on the 1st lands in the new month, and a night the job did not run pushes it further still. `deleted_in_app` is different: it is dated at `users.deleted_at` itself, so a self-service deletion always lands in the month it happened in. |
-| Churn per month | `deleted ÷ activeAtStart`, where `activeAtStart` is everyone who existed and had not been deleted at 00:00 UTC on the 1st, plus anyone seen in the 30 days before it. A month that began with nobody is `null`, **not 0 %**. |
+| Deleted per month | The **union of two sources**, deduped per Cognito sub within the month: `deleted` **and** `deleted_in_app` events in the admin database, and live `users` rows in the main database whose `deleted_at` falls in the month. Someone who deletes their account in the app and then disappears from the pool the same night is one departure, however many of the sources saw it. The second source is read at query time, so an in-app deletion counts **the moment it happens** and needs no job at all; the events are what add the deletions the app database cannot know about (an account removed in the AWS console, a revoked invitation) and what keep a departure on record if a `users` row is ever hard-deleted. **A pool deletion is attributed to the month of the snapshot that noticed it**, not to the month it happened in: the diff dates its events at 00:00 UTC of the snapshot day, because that is all it knows — Cognito has no deletion event, so an account removed on the 31st and first missed on the 1st lands in the new month, and a night the job did not run pushes it further still. An in-app deletion is different: both the event and the live read are dated at `users.deleted_at` itself, so it always lands in the month it happened in. |
+| Churn per month | `deleted ÷ (activeAtStart + arrived)` over that same union, where `activeAtStart` is everyone who existed and had not been deleted at 00:00 UTC on the 1st, plus anyone seen in the 30 days before it, and `arrived` is everyone whose `users` row was created inside the month — so the base is everyone who was a customer at any point in the month (owner, 2026-09-15: with a start-of-month base, two customers who signed up and left in the same month read as 0 churn). A month that had nobody at all is `null`, **not 0 %**. Because the numerator reads `users.deleted_at` live, a customer who leaves through the app moves the rate on the next page load. |
 | Retention by sign-up month | Of everyone whose `users` row was created in month M, the share with a `last_seen_at` inside the last 30 days **and** no `deleted_at`. A deleted account stays in the cohort and can never be retained, so a cohort that left reads as retention falling. |
 | Funnel | `invited` and `confirmed` from the newest pool snapshot; `onboarded` (a live `user_tenants` row), `firstTransaction` (the tenant holds ≥1 live transaction) and `firstAttachment` (≥1 live `file_blobs` row) from the app database. |
 | Sign-ins per day | `admin_pool_metrics_daily.sign_ins` — `SignInSuccesses` `Sum`, summed over the pool's app clients (see the CloudWatch note below). `sign_in_attempts` is the same metric's `SampleCount`, so attempts minus sign-ins is the failures: Cognito publishes one datum per call with a value of 1 for a success, which holds per app client and therefore holds for the sum over them. |
@@ -235,6 +250,9 @@ reads as churn against a base that never included them. The alternative —
 only counting departures whose sub is known to the app database — would
 silently drop the deletions that matter most, such as an account removed in
 the AWS console, so the simpler definition is kept and stated here instead.
+It has narrowed, though: the half of the numerator now read from
+`users.deleted_at` is by construction a `users` row, so only the **pool-side
+events** can still fall outside the base.
 
 **A second, smaller one.** Deduplication is *per sub per month*. Someone who
 deletes their account on the 31st and disappears from the pool on the 1st is
@@ -245,8 +263,8 @@ counted twice, once in each month.
 | State | What the Activity view shows |
 | --- | --- |
 | `014_customer_statistics.sql` has not run | 503 `admin_schema_missing` on the **statistics** endpoint: every pool-derived figure on it depends on tables that do not exist, and drawing zeros instead would be inventing measurements. The rest of the Customers page is unaffected, the per-customer **activity** endpoint included — it is mostly main-database figures, so a missing `admin_customer_events` answers with an empty lifecycle log (`eventsForSub` is the one read in `lifecycle.ts` that tolerates the missing table, and it logs one line per process saying which file to run). |
-| The SQL has run, the job has not | The account census, the funnel's first two steps and the sign-ins chart are empty, with an alert saying so. Active users, new, deleted (from console-written events), churn, retention, usage and the tenant tables all answer — they need no job. |
-| The job ran once | Everything answers. Churn and deletions only cover what the event log has seen, so the first month or two is thin by construction; it is not wrong, it is young. |
+| The SQL has run, the job has not | The account census, the funnel's first two steps and the sign-ins chart are empty, with an alert saying so. Active users, new, **deleted and churn**, retention, usage and the tenant tables all answer — they need no job: departures are read live from `users.deleted_at`, plus whatever events the console itself wrote. The one departure a job-less deployment cannot see is a **pool-side** deletion — an account removed in the AWS console, or a revoked invitation for someone who never had a `users` row — which nothing but two snapshots can notice. |
+| The job ran once | Everything answers. The pool-derived half only covers what the snapshots have seen, so the first month or two of `deleted` events is thin by construction; it is not wrong, it is young. Departures through the consumer app are complete from the start, because they are read from `users.deleted_at` and not from the log. |
 | CloudWatch is refused by IAM | Snapshot and diff succeed, the metrics part is recorded as a skip with the reason, and the run does **not** fail. The chart stays empty until the permission is added. |
 | CloudWatch answers, but with nothing | Every query empty across the whole window is reported as a **failed** metrics part — with the dimensions and the pool id to check — but only when the pool holds at least one confirmed account. A pool of invitations nobody has accepted really does produce no sign-ins, and a young deployment must not be told its metrics are broken when they are merely quiet. A `StatusCode` other than `Complete`, and anything in the answer's `Messages`, always end up in the run's error text: neither ever arrives as an exception, so a run that ignored them would report success over an answer AWS had reservations about. |
 

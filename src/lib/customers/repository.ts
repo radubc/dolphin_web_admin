@@ -424,6 +424,44 @@ export async function newCustomersPerMonth(
 }
 
 /**
+ * Consumer-app account deletions in `[from, toExclusive)`, as one row per
+ * Cognito sub per UTC calendar month.
+ *
+ * This is the live half of the churn numerator. `users.deleted_at` is the
+ * consumer app's delete-my-account flow writing the fact down the moment it
+ * happens, so reading it here makes a departure count as churn immediately —
+ * without waiting for the nightly `cognito_directory` sweep to copy it into
+ * `admin_customer_events`, and without losing it for good when the job's
+ * first run falls outside its look-back window. The sweep still runs: it is
+ * what gives the per-customer lifecycle log an event to show, and what keeps
+ * a departure recorded after a `users` row is ever hard-deleted.
+ *
+ * `(month, sub)` rather than a count, because the deduplication has to happen
+ * across *both* databases — the same person can have a `deleted_in_app` event
+ * here and a `deleted` event from the pool diff — so the counting is done
+ * once, in {@link import("./lifecycle").deletionsPerMonth}, over the union.
+ * `GROUP BY` does the per-month deduplication on this side, so the answer is
+ * at most one row per departed person per month in a window the schema caps
+ * at `STATISTICS_MONTHS_MAX` months. There is deliberately no `LIMIT`: a
+ * truncated numerator would under-report churn silently, which is worse than
+ * a wide read on a table with one row per customer.
+ */
+export async function deletedUserMonths(
+  from: Date,
+  toExclusive: Date,
+): Promise<{ month: string; sub: string }[]> {
+  return prisma.$queryRaw<{ month: string; sub: string }[]>`
+    SELECT to_char(date_trunc('month', deleted_at AT TIME ZONE 'UTC'), 'YYYY-MM') AS month,
+           cognito_sub AS sub
+    FROM users
+    WHERE deleted_at IS NOT NULL
+      AND deleted_at >= ${from}
+      AND deleted_at < ${toExclusive}
+    GROUP BY 1, 2
+  `;
+}
+
+/**
  * The churn denominator for one month: how many customers the month started
  * with.
  *
@@ -740,14 +778,20 @@ export async function tenantFootprints(userId: string): Promise<TenantFootprint[
 /**
  * Customers soft-deleted since `since`, for the nightly `deleted_in_app`
  * sweep: the consumer app's delete-my-account flow sets `users.deleted_at`,
- * and this is how the admin app learns about it the same night.
+ * and this is how the departure reaches the lifecycle log.
  *
- * Bounded by the window (7 days) and a `take`, so a mass deletion cannot turn
- * one run into an unbounded read. Hitting the `take` is worth saying out loud:
- * the rows are ordered newest first, so the deletions that were dropped are
- * the *oldest* in the window, and unless another run picks them up inside the
- * seven days they are never recorded at all. One line per call — the caller is
- * a job that runs once a night.
+ * The caller's window is the whole statistics horizon
+ * (`DELETED_IN_APP_LOOKBACK_DAYS`), not a week, so a first run months after a
+ * deletion still records it. The read stays bounded by the `take`, which is
+ * now the binding limit rather than the window: the rows are ordered newest
+ * first, so what a hit cap drops is the *oldest* deletions in the window —
+ * with a window this wide, the ones an earlier night has almost certainly
+ * recorded already. It is still worth saying out loud. One line per call —
+ * the caller is a job that runs once a night.
+ *
+ * Note this is not the churn numerator. That is
+ * {@link import("./lifecycle").deletionsPerMonth}, which reads
+ * {@link deletedUserMonths} live and needs no job at all.
  */
 export async function findRecentlyDeletedUsers(
   since: Date,
