@@ -102,6 +102,7 @@ model accounts {
   crypto_trades                                        crypto_trades[]
   loans_loans_account_idToaccounts                     loans[]                        @relation("loans_account_idToaccounts")
   loans_loans_asset_account_idToaccounts               loans[]                        @relation("loans_asset_account_idToaccounts")
+  plaid_accounts                                       plaid_accounts[]
   reconciliations                                      reconciliations[]
   recurring_transactions                               recurring_transactions[]
   rule_account_applications                            rule_account_applications[]
@@ -187,6 +188,7 @@ model asset_transactions {
   asset_id       String
   transaction_id String
   created_at     DateTime?    @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime?    @default(now()) @db.Timestamptz(6)
   assets         assets       @relation(fields: [asset_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   tenants        tenants      @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   transactions   transactions @relation(fields: [transaction_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -242,6 +244,7 @@ model assets {
   asset_liability_accounts asset_liability_accounts[]
   asset_transactions       asset_transactions[]
   asset_valuations         asset_valuations[]
+  asset_warranties         asset_warranties[]
   accounts                 accounts?                  @relation(fields: [linked_asset_account_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   tenants                  tenants                    @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   real_estate              real_estate[]
@@ -411,6 +414,7 @@ model chart_color_assignments {
   label       String
   color_index Int
   created_at  DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime? @default(now()) @db.Timestamptz(6)
   tenants     tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([tenant_id, domain, label])
@@ -517,7 +521,7 @@ model exchange_rates {
   tenant_id          String
   from_currency      String
   to_currency        String
-  rate               Decimal   @db.Decimal(10, 10)
+  rate               Decimal   @db.Decimal(20, 10)
   date               DateTime  @db.Date
   source             String
   is_manual_override Boolean?  @default(false)
@@ -530,23 +534,26 @@ model exchange_rates {
 }
 
 model financial_institutions {
-  id                 String           @id
-  name               String
-  institution_number String
-  type               String
-  created_at         DateTime?        @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime?        @default(now()) @db.Timestamptz(6)
-  deleted_at         DateTime?        @db.Timestamptz(6)
-  tenant_id          String?
-  accounts           accounts[]
-  tenants            tenants?         @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  loan_schedules     loan_schedules[]
-  loans              loans[]
+  id                   String           @id
+  name                 String
+  institution_number   String
+  type                 String
+  created_at           DateTime?        @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime?        @default(now()) @db.Timestamptz(6)
+  deleted_at           DateTime?        @db.Timestamptz(6)
+  tenant_id            String?
+  plaid_institution_id String?
+  accounts             accounts[]
+  tenants              tenants?         @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  loan_schedules       loan_schedules[]
+  loans                loans[]
+  plaid_items          plaid_items[]
 
   @@index([institution_number], map: "idx_financial_institutions_institution_number")
   @@index([name], map: "idx_financial_institutions_name")
   @@index([type], map: "idx_financial_institutions_type")
   @@index([tenant_id], map: "idx_financial_institutions_tenant_id")
+  @@index([tenant_id, plaid_institution_id], map: "idx_financial_institutions_tenant_plaid")
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -649,6 +656,7 @@ model loan_schedules {
   balloon_payment              Decimal?                   @db.Decimal(11, 4)
   loan_id                      String?
   financial_institution_id     String?
+  notes                        String?
   loan_additional_costs        loan_additional_costs[]
   loan_schedule_breakdowns     loan_schedule_breakdowns[]
   financial_institutions       financial_institutions?    @relation(fields: [financial_institution_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -798,6 +806,7 @@ model portfolio_cryptocurrencies {
   portfolio_id      String
   cryptocurrency_id String
   created_at        DateTime?        @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime?        @default(now()) @db.Timestamptz(6)
   cryptocurrencies  cryptocurrencies @relation(fields: [cryptocurrency_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   portfolios        portfolios       @relation(fields: [portfolio_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   tenants           tenants          @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -816,6 +825,7 @@ model portfolio_stocks {
   portfolio_id String
   stock_id     String
   created_at   DateTime?  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime?  @default(now()) @db.Timestamptz(6)
   portfolios   portfolios @relation(fields: [portfolio_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   stocks       stocks     @relation(fields: [stock_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   tenants      tenants    @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -940,7 +950,7 @@ model real_estate {
   country        String
   square_footage Float?
   bedrooms       Int?
-  bathrooms      Int?
+  bathrooms      Decimal?  @db.Decimal(3, 1)
   lot_size       Float?
   year_built     Int?
   created_at     DateTime? @default(now()) @db.Timestamptz(6)
@@ -1277,6 +1287,7 @@ model tenants {
   asset_liability_accounts           asset_liability_accounts[]
   asset_transactions                 asset_transactions[]
   asset_valuations                   asset_valuations[]
+  asset_warranties                   asset_warranties[]
   assets                             assets[]
   bill_assignments                   bill_assignments[]
   bills                              bills[]
@@ -1302,6 +1313,12 @@ model tenants {
   notifications                      notifications[]
   overview_card_preferences          overview_card_preferences[]
   partners                           partners[]
+  plaid_accounts                     plaid_accounts[]
+  plaid_items                        plaid_items[]
+  plaid_link_sessions                plaid_link_sessions[]
+  plaid_sync_runs                    plaid_sync_runs[]
+  plaid_transaction_links            plaid_transaction_links[]
+  plaid_webhook_events               plaid_webhook_events[]
   portfolio_cryptocurrencies         portfolio_cryptocurrencies[]
   portfolio_stocks                   portfolio_stocks[]
   portfolios                         portfolios[]
@@ -1320,6 +1337,8 @@ model tenants {
   stocks                             stocks[]
   subscription_transaction_matches   subscription_transaction_matches[]
   subscriptions                      subscriptions[]
+  sync_devices                       sync_devices[]
+  sync_log                           sync_log[]
   tag_transactions                   tag_transactions[]
   transaction_attachments            transaction_attachments[]
   transaction_categories             transaction_categories[]
@@ -1354,6 +1373,7 @@ model transaction_attachments {
   file_size       Int?
   mime_type       String?
   attachment_type String?       @default("receipt")
+  updated_at      DateTime?     @default(now()) @db.Timestamptz(6)
   tenants         tenants       @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   transactions    transactions? @relation(fields: [transaction_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
@@ -1385,9 +1405,10 @@ model transaction_exchange_rates {
   transaction_id String
   from_currency  String
   to_currency    String
-  rate           Decimal      @db.Decimal(10, 10)
+  rate           Decimal      @db.Decimal(20, 10)
   source         String
   created_at     DateTime?    @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime?    @default(now()) @db.Timestamptz(6)
   tenants        tenants      @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   transactions   transactions @relation(fields: [transaction_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -1462,8 +1483,10 @@ model transactions {
   reconciliation_id                                            String?
   reconciliation_status                                        String?
   payee_id                                                     String?
+  source                                                       String                             @default("manual")
   asset_transactions                                           asset_transactions[]
   goal_transactions                                            goal_transactions[]
+  plaid_transaction_links                                      plaid_transaction_links[]
   recurring_transaction_matches                                recurring_transaction_matches[]
   subscription_transaction_matches                             subscription_transaction_matches[]
   tag_transactions                                             tag_transactions[]
@@ -1512,32 +1535,45 @@ model transfers {
 }
 
 model user_tenants {
-  id         String    @id
-  user_id    String    @unique(map: "user_tenants_one_primary_per_user", where: raw("(is_primary AND (deleted_at IS NULL))"))
-  tenant_id  String
-  is_primary Boolean?  @default(false)
-  created_at DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at DateTime? @default(now()) @db.Timestamptz(6)
-  deleted_at DateTime? @db.Timestamptz(6)
-  tenants    tenants   @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  users      users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  id                 String    @id
+  user_id            String    @unique(map: "user_tenants_one_primary_per_user", where: raw("(is_primary AND (deleted_at IS NULL))"))
+  tenant_id          String
+  is_primary         Boolean?  @default(false)
+  created_at         DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime? @default(now()) @db.Timestamptz(6)
+  deleted_at         DateTime? @db.Timestamptz(6)
+  role               String    @default("owner")
+  status             String    @default("active")
+  invited_by_user_id String?
+  invited_at         DateTime? @db.Timestamptz(6)
+  accepted_at        DateTime? @db.Timestamptz(6)
+  deactivated_at     DateTime? @db.Timestamptz(6)
+  tenants            tenants   @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users              users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([user_id, tenant_id])
+  @@unique([user_id, role], map: "user_tenants_one_owned_tenant_per_user", where: raw("((role = 'owner'::text) AND (deleted_at IS NULL))"))
+  @@unique([tenant_id, role], map: "user_tenants_one_owner_per_tenant", where: raw("((role = 'owner'::text) AND (deleted_at IS NULL))"))
   @@index([tenant_id], map: "idx_user_tenants_tenant_id")
   @@index([user_id], map: "idx_user_tenants_user_id")
 }
 
 model users {
-  id           String        @id
-  cognito_sub  String        @unique(map: "users_cognito_sub_live_key", where: raw("(deleted_at IS NULL)"))
-  email        String
-  is_primary   Boolean?      @default(false)
-  created_at   DateTime?     @default(now()) @db.Timestamptz(6)
-  updated_at   DateTime?     @default(now()) @db.Timestamptz(6)
-  deleted_at   DateTime?     @db.Timestamptz(6)
-  last_seen_at DateTime?     @db.Timestamptz(6)
-  usage_daily  usage_daily[]
-  user_tenants user_tenants?
+  id                  String                @id
+  cognito_sub         String                @unique(map: "users_cognito_sub_live_key", where: raw("(deleted_at IS NULL)"))
+  email               String
+  is_primary          Boolean?              @default(false)
+  created_at          DateTime?             @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime?             @default(now()) @db.Timestamptz(6)
+  deleted_at          DateTime?             @db.Timestamptz(6)
+  last_seen_at        DateTime?             @db.Timestamptz(6)
+  display_name        String?
+  plaid_items         plaid_items[]
+  plaid_link_sessions plaid_link_sessions[]
+  sync_devices        sync_devices[]
+  usage_daily         usage_daily[]
+  user_recovery_codes user_recovery_codes[]
+  user_tenants        user_tenants?
 }
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
@@ -1584,6 +1620,7 @@ model vehicle_maintenance_record_lines {
   cost                        Decimal?                    @db.Decimal(11, 4)
   notes                       String?
   created_at                  DateTime?                   @default(now()) @db.Timestamptz(6)
+  updated_at                  DateTime?                   @default(now()) @db.Timestamptz(6)
   vehicle_maintenance_items   vehicle_maintenance_items   @relation(fields: [maintenance_item_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   vehicle_maintenance_records vehicle_maintenance_records @relation(fields: [maintenance_record_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   tenants                     tenants                     @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -1618,6 +1655,7 @@ model vehicle_maintenance_schedule_items {
   schedule_id                   String
   item_id                       String
   created_at                    DateTime?                     @default(now()) @db.Timestamptz(6)
+  updated_at                    DateTime?                     @default(now()) @db.Timestamptz(6)
   vehicle_maintenance_items     vehicle_maintenance_items     @relation(fields: [item_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   vehicle_maintenance_schedules vehicle_maintenance_schedules @relation(fields: [schedule_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   tenants                       tenants                       @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -1649,35 +1687,39 @@ model vehicle_maintenance_schedules {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model vehicles {
-  id                            String                         @id
-  tenant_id                     String
-  make                          String
-  model                         String
-  year                          Int
-  trim                          String?
-  body_style                    String?
-  engine_size                   String?
-  transmission                  String?
-  fuel_type                     String?
-  color                         String?
-  vin                           String?
-  license_plate                 String?
-  mileage                       Int?
-  odometer_unit                 String                         @default("kilometers")
-  registration_expiry           DateTime?                      @db.Timestamptz(6)
-  insurance_expiry              DateTime?                      @db.Timestamptz(6)
-  last_service_date             DateTime?                      @db.Timestamptz(6)
-  next_service_due              DateTime?                      @db.Timestamptz(6)
-  vehicle_notes                 String?
-  created_at                    DateTime?                      @default(now()) @db.Timestamptz(6)
-  updated_at                    DateTime?                      @default(now()) @db.Timestamptz(6)
-  deleted_at                    DateTime?                      @db.Timestamptz(6)
-  asset_id                      String?
-  maintenance_schedule_id       String?
-  vehicle_maintenance_records   vehicle_maintenance_records[]
-  assets                        assets?                        @relation(fields: [asset_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  vehicle_maintenance_schedules vehicle_maintenance_schedules? @relation(fields: [maintenance_schedule_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  tenants                       tenants                        @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  id                              String                         @id
+  tenant_id                       String
+  make                            String
+  model                           String
+  year                            Int
+  trim                            String?
+  body_style                      String?
+  engine_size                     String?
+  transmission                    String?
+  fuel_type                       String?
+  color                           String?
+  vin                             String?
+  license_plate                   String?
+  mileage                         Int?
+  odometer_unit                   String                         @default("kilometers")
+  registration_expiry             DateTime?                      @db.Timestamptz(6)
+  insurance_expiry                DateTime?                      @db.Timestamptz(6)
+  last_service_date               DateTime?                      @db.Timestamptz(6)
+  next_service_due                DateTime?                      @db.Timestamptz(6)
+  vehicle_notes                   String?
+  created_at                      DateTime?                      @default(now()) @db.Timestamptz(6)
+  updated_at                      DateTime?                      @default(now()) @db.Timestamptz(6)
+  deleted_at                      DateTime?                      @db.Timestamptz(6)
+  asset_id                        String?
+  maintenance_schedule_id         String?
+  warranty_expiry                 DateTime?                      @db.Timestamptz(6)
+  warranty_mileage_limit          Int?
+  extended_warranty_expiry        DateTime?                      @db.Timestamptz(6)
+  extended_warranty_mileage_limit Int?
+  vehicle_maintenance_records     vehicle_maintenance_records[]
+  assets                          assets?                        @relation(fields: [asset_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  vehicle_maintenance_schedules   vehicle_maintenance_schedules? @relation(fields: [maintenance_schedule_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants                         tenants                        @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([tenant_id], map: "idx_vehicles_tenant_id")
 }
@@ -1689,6 +1731,7 @@ model watchlist_cryptocurrencies {
   watchlist_id      String
   cryptocurrency_id String
   created_at        DateTime?        @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime?        @default(now()) @db.Timestamptz(6)
   cryptocurrencies  cryptocurrencies @relation(fields: [cryptocurrency_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   tenants           tenants          @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   watchlists        watchlists       @relation(fields: [watchlist_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -1707,6 +1750,7 @@ model watchlist_stocks {
   watchlist_id String
   stock_id     String
   created_at   DateTime?  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime?  @default(now()) @db.Timestamptz(6)
   stocks       stocks     @relation(fields: [stock_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   tenants      tenants    @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   watchlists   watchlists @relation(fields: [watchlist_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -1748,6 +1792,7 @@ model file_blobs {
   created_at  DateTime? @default(now()) @db.Timestamptz(6)
   deleted_at  DateTime? @db.Timestamptz(6)
   storage_key String?
+  updated_at  DateTime? @default(now()) @db.Timestamptz(6)
   tenants     tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([tenant_id], map: "idx_file_blobs_tenant_id")
@@ -1770,4 +1815,253 @@ model usage_daily {
 
   @@unique([tenant_id, user_id, day], map: "usage_daily_tenant_user_day_key")
   @@index([tenant_id, day], map: "idx_usage_daily_tenant_day")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model asset_warranties {
+  id            String    @id
+  tenant_id     String
+  asset_id      String
+  warranty_type String    @default("manufacturer")
+  provider      String?
+  policy_number String?
+  start_date    DateTime? @db.Timestamptz(6)
+  term_months   Int?
+  expiry_date   DateTime? @db.Timestamptz(6)
+  mileage_limit Int?
+  cost          Decimal?  @db.Decimal(11, 4)
+  cost_currency String?
+  coverage      String?
+  notes         String?
+  is_active     Boolean?  @default(true)
+  created_at    DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime? @default(now()) @db.Timestamptz(6)
+  deleted_at    DateTime? @db.Timestamptz(6)
+  assets        assets    @relation(fields: [asset_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants       tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([asset_id], map: "idx_asset_warranties_asset_id")
+  @@index([tenant_id], map: "idx_asset_warranties_tenant_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model plaid_accounts {
+  id                      String                    @id
+  tenant_id               String
+  plaid_item_row_id       String
+  plaid_account_id        String
+  persistent_account_id   String?
+  account_id              String?
+  sync_enabled            Boolean                   @default(true)
+  mask                    String?
+  name                    String?
+  official_name           String?
+  plaid_type              String?
+  plaid_subtype           String?
+  currency_code           String?
+  balance_current         Decimal?                  @db.Decimal(11, 4)
+  balance_available       Decimal?                  @db.Decimal(11, 4)
+  balance_as_of           DateTime?                 @db.Timestamptz(6)
+  created_at              DateTime?                 @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime?                 @default(now()) @db.Timestamptz(6)
+  deleted_at              DateTime?                 @db.Timestamptz(6)
+  accounts                accounts?                 @relation(fields: [account_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  plaid_items             plaid_items               @relation(fields: [plaid_item_row_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants                 tenants                   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  plaid_transaction_links plaid_transaction_links[]
+
+  @@unique([tenant_id, plaid_account_id])
+  @@index([account_id], map: "idx_plaid_accounts_account_id")
+  @@index([plaid_item_row_id], map: "idx_plaid_accounts_item_row")
+  @@index([tenant_id], map: "idx_plaid_accounts_tenant_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model plaid_items {
+  id                         String                  @id
+  tenant_id                  String
+  environment                String
+  plaid_item_id              String                  @unique
+  plaid_institution_id       String?
+  institution_name           String?
+  financial_institution_id   String?
+  access_token_ciphertext    Bytes?
+  access_token_key_id        String?
+  status                     String                  @default("active")
+  status_since               DateTime?               @default(now()) @db.Timestamptz(6)
+  error_code                 String?
+  error_message              String?
+  consent_expires_at         DateTime?               @db.Timestamptz(6)
+  transactions_cursor        String?
+  initial_update_complete    Boolean                 @default(false)
+  historical_update_complete Boolean                 @default(false)
+  days_requested             Int
+  import_from_date           DateTime                @db.Date
+  sync_locked_until          DateTime?               @db.Timestamptz(6)
+  sync_lock_token            String?
+  last_sync_at               DateTime?               @db.Timestamptz(6)
+  last_webhook_at            DateTime?               @db.Timestamptz(6)
+  next_sync_at               DateTime?               @db.Timestamptz(6)
+  last_refresh_at            DateTime?               @db.Timestamptz(6)
+  disabled_since             DateTime?               @db.Timestamptz(6)
+  stale_notified_at          DateTime?               @db.Timestamptz(6)
+  removed_at                 DateTime?               @db.Timestamptz(6)
+  created_by_user_id         String?
+  created_at                 DateTime?               @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime?               @default(now()) @db.Timestamptz(6)
+  deleted_at                 DateTime?               @db.Timestamptz(6)
+  plaid_accounts             plaid_accounts[]
+  users                      users?                  @relation(fields: [created_by_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  financial_institutions     financial_institutions? @relation(fields: [financial_institution_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants                    tenants                 @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  plaid_sync_runs            plaid_sync_runs[]
+
+  @@index([next_sync_at], map: "idx_plaid_items_next_sync_at")
+  @@index([status], map: "idx_plaid_items_status")
+  @@index([tenant_id], map: "idx_plaid_items_tenant_id")
+  @@index([tenant_id, plaid_institution_id], map: "idx_plaid_items_tenant_institution")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model plaid_link_sessions {
+  id               String    @id
+  tenant_id        String
+  user_id          String?
+  link_token_hash  String    @unique
+  import_from_date DateTime  @db.Date
+  days_requested   Int
+  expires_at       DateTime  @db.Timestamptz(6)
+  consumed_at      DateTime? @db.Timestamptz(6)
+  created_at       DateTime? @default(now()) @db.Timestamptz(6)
+  tenants          tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users            users?    @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([expires_at], map: "idx_plaid_link_sessions_expires_at")
+  @@index([tenant_id], map: "idx_plaid_link_sessions_tenant_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model plaid_sync_runs {
+  id                String      @id
+  tenant_id         String
+  plaid_item_row_id String
+  trigger           String
+  started_at        DateTime?   @default(now()) @db.Timestamptz(6)
+  finished_at       DateTime?   @db.Timestamptz(6)
+  status            String      @default("running")
+  start_cursor      String?
+  added             Int?        @default(0)
+  modified          Int?        @default(0)
+  removed           Int?        @default(0)
+  pending           Int?        @default(0)
+  skipped           Int?        @default(0)
+  error_code        String?
+  error_message     String?
+  plaid_items       plaid_items @relation(fields: [plaid_item_row_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants           tenants     @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([plaid_item_row_id], map: "idx_plaid_sync_runs_item_row")
+  @@index([started_at], map: "idx_plaid_sync_runs_started_at")
+  @@index([tenant_id], map: "idx_plaid_sync_runs_tenant_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model plaid_transaction_links {
+  id                     String         @id
+  tenant_id              String
+  plaid_account_row_id   String
+  plaid_transaction_id   String
+  pending_transaction_id String?
+  transaction_id         String?
+  status                 String         @default("imported")
+  skip_reason            String?
+  raw                    Json
+  first_seen_at          DateTime?      @default(now()) @db.Timestamptz(6)
+  last_seen_at           DateTime?      @default(now()) @db.Timestamptz(6)
+  plaid_accounts         plaid_accounts @relation(fields: [plaid_account_row_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants                tenants        @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  transactions           transactions?  @relation(fields: [transaction_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([tenant_id, plaid_transaction_id])
+  @@index([plaid_account_row_id], map: "idx_plaid_transaction_links_account_row")
+  @@index([pending_transaction_id], map: "idx_plaid_transaction_links_pending_id")
+  @@index([tenant_id], map: "idx_plaid_transaction_links_tenant_id")
+  @@index([transaction_id], map: "idx_plaid_transaction_links_transaction_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model plaid_webhook_events {
+  id            String    @id
+  tenant_id     String?
+  plaid_item_id String?
+  webhook_type  String
+  webhook_code  String
+  environment   String?
+  payload       Json
+  received_at   DateTime? @default(now()) @db.Timestamptz(6)
+  processed_at  DateTime? @db.Timestamptz(6)
+  error         String?
+  attempts      Int       @default(0)
+  tenants       tenants?  @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([plaid_item_id], map: "idx_plaid_webhook_events_plaid_item_id")
+  @@index([processed_at], map: "idx_plaid_webhook_events_processed_at")
+  @@index([tenant_id], map: "idx_plaid_webhook_events_tenant_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model sync_devices {
+  id           String    @id
+  tenant_id    String
+  user_id      String?
+  platform     String
+  name         String?
+  cursor       BigInt?
+  last_seen_at DateTime? @db.Timestamptz(6)
+  created_at   DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime? @default(now()) @db.Timestamptz(6)
+  tenants      tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users        users?    @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_sync_devices_tenant_id")
+  @@index([user_id], map: "idx_sync_devices_user_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model sync_log {
+  tenant_key    String   @default("")
+  tenant_id     String?
+  table_name    String
+  row_id        String
+  op            String
+  seq           BigInt
+  changed_at    DateTime @default(now()) @db.Timestamptz(6)
+  origin_device String?
+  tenants       tenants? @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([tenant_key, table_name, row_id])
+  @@index([tenant_id, seq], map: "idx_sync_log_tenant_seq")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model user_recovery_codes {
+  id         String    @id
+  user_id    String
+  code_hash  String
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+  used_at    DateTime? @db.Timestamptz(6)
+  users      users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([user_id, code_hash])
+  @@index([user_id], map: "idx_user_recovery_codes_user_id")
 }
