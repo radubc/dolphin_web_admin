@@ -1572,6 +1572,7 @@ model users {
   plaid_link_sessions plaid_link_sessions[]
   sync_devices        sync_devices[]
   usage_daily         usage_daily[]
+  user_known_browsers user_known_browsers[]
   user_recovery_codes user_recovery_codes[]
   user_tenants        user_tenants?
 }
@@ -2064,4 +2065,19 @@ model user_recovery_codes {
 
   @@unique([user_id, code_hash])
   @@index([user_id], map: "idx_user_recovery_codes_user_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model user_known_browsers {
+  id            String   @id
+  user_id       String
+  token_hash    String
+  user_agent    String?
+  first_seen_at DateTime @default(now()) @db.Timestamptz(6)
+  last_seen_at  DateTime @default(now()) @db.Timestamptz(6)
+  users         users    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([user_id, token_hash])
+  @@index([user_id], map: "idx_user_known_browsers_user_id")
 }
