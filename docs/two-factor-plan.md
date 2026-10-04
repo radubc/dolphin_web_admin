@@ -177,6 +177,8 @@ The brief `docs/admin-console/two-factor-reset.md` (web repo), made concrete:
    says the policy grants nothing beyond the four actions).
 5. **Email to the customer** is phase 3 of the web plan; not sent here.
 
+*Phase C verified on stage 2026-10-04:* SQL 021 run; operator signed in with a passkey saw the button, a password-only session would see the sentence; the throwaway customer's two-factor was turned off (`UserMFASettingList` null, log `[customers] two-factor authentication turned off for sub …`). **Phase C complete.** Phase B next.
+
 *Phase C built 2026-10-04* (C went before B, so it took SQL **021**; B's
 `admin_user_recovery_codes` becomes `022_…`):
 
