@@ -2,7 +2,7 @@
 
 **Status: approved by the owner on 2026-10-04** (order A → C → B → D; the
 issuer label becomes "FairSums Admin"; the operator step-up rule in phase C
-is in). Phase A built 2026-10-04, stage test pending.
+is in). Phase A live on stage and verified 2026-10-04 (operator account lists WEB_AUTHN_MFA beside SOFTWARE_TOKEN_MFA; passkey and password+code both sign in).
 
 Mirrors phases 1 and 2 of the web app's `docs/two-factor-plan.md`
 (`~/Developer/projects/penny-squeeze-web`), plus the customer-support action
