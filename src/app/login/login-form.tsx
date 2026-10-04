@@ -40,17 +40,25 @@ import {
   completeInvitation,
   completePasskeySignIn,
   login,
+  redeemRecoveryCode,
   startPasskeySignIn,
   verifyMfaCode,
   type CompleteInvitationState,
   type LoginState,
   type MfaState,
   type PasskeyState,
+  type RedeemRecoveryCodeState,
 } from "./actions";
 
 interface LoginFields {
   email?: string;
   password?: string;
+}
+
+/** The recovery step: the password again, and one of the ten recovery codes. */
+interface RecoveryFields {
+  password?: string;
+  code?: string;
 }
 
 /**
@@ -74,6 +82,8 @@ type AntdFormRef<T> = FormInstance<T> & { nativeElement?: HTMLElement };
 const LOGIN_FIELDS = ["email", "password"] as const;
 const NEW_PASSWORD_FIELDS = ["password", "confirm"] as const;
 const MFA_FIELDS = ["code"] as const;
+/** The two inputs on the recovery-code step. */
+const RECOVERY_FIELDS = ["password", "code"] as const;
 
 /** Six digits, tolerating the space or dash an app may show them with. */
 const TOTP_INPUT_PATTERN = /^\s*\d{3}\s?-?\s?\d{3}\s*$/;
@@ -107,6 +117,7 @@ function inputTypeFor(spec: RequiredAttributeSpec): string {
 const INITIAL_LOGIN_STATE: LoginState = {};
 const INITIAL_INVITATION_STATE: CompleteInvitationState = {};
 const INITIAL_MFA_STATE: MfaState = {};
+const INITIAL_RECOVERY_STATE: RedeemRecoveryCodeState = {};
 const INITIAL_PASSKEY_STATE: PasskeyState = {};
 
 /** No-op subscribe: whether WebAuthn exists never changes within a page. */
@@ -249,6 +260,12 @@ function formDataFrom(
  * field, offer "Start over", and fall back to step one with an explanation
  * when that token expires.
  *
+ * The code step also offers **Use a recovery code instead**, which swaps it
+ * for a third step with its own form store — the password again and one of
+ * the ten recovery codes (`docs/two-factor-plan.md`, phase B). The challenge
+ * itself is untouched; only which form answers it changes, and "Back to the
+ * authenticator code" swaps back.
+ *
  * Step one also offers a **passkey**, which is a different shape: two Server
  * Action calls with the browser's authenticator prompt between them, and no
  * second step on screen. It uses the email that is already typed, and every
@@ -268,6 +285,14 @@ export default function LoginForm() {
     verifyMfaCode,
     INITIAL_MFA_STATE,
   );
+  const [recoveryState, recoveryAction, recoveryPending] = useActionState(
+    redeemRecoveryCode,
+    INITIAL_RECOVERY_STATE,
+  );
+  // "Use a recovery code instead" swaps the code step for the recovery form;
+  // the challenge itself is unchanged, only which form answers it. Plain
+  // state, reset whenever the person leaves step two.
+  const [recoveryMode, setRecoveryMode] = useState(false);
   // The passkey assertion is dispatched like the other steps, so that Cognito's
   // tokens and the action's `redirect("/")` are handled exactly as they are on
   // the password path. Only *starting* the ceremony is a direct call.
@@ -287,12 +312,15 @@ export default function LoginForm() {
   const [dismissedInvitation, setDismissedInvitation] =
     useState<CompleteInvitationState | null>(null);
   const [dismissedMfa, setDismissedMfa] = useState<MfaState | null>(null);
+  const [dismissedRecovery, setDismissedRecovery] =
+    useState<RedeemRecoveryCodeState | null>(null);
   const [dismissedPasskey, setDismissedPasskey] = useState<PasskeyState | null>(
     null,
   );
 
   const showInvitationFeedback = invitationState !== dismissedInvitation;
   const showMfaFeedback = mfaState !== dismissedMfa;
+  const showRecoveryFeedback = recoveryState !== dismissedRecovery;
 
   /**
    * Whether the message under step one belongs to the password attempt or to
@@ -310,14 +338,18 @@ export default function LoginForm() {
   /** True from the click until the assertion is dispatched (or abandoned). */
   const [passkeyBusy, setPasskeyBusy] = useState(false);
 
-  // Cognito retired the challenge session: back to email and password, with
-  // the reason shown there.
+  // Cognito retired the challenge session — or the recovery step cannot
+  // continue (the factor is already off, or the account is still on a
+  // temporary password): back to email and password, with the reason shown
+  // there.
   const expiredMessage =
     showInvitationFeedback && invitationState.restart === true
       ? invitationState.error
       : showMfaFeedback && mfaState.restart === true
         ? mfaState.error
-        : undefined;
+        : showRecoveryFeedback && recoveryState.restart === true
+          ? recoveryState.error
+          : undefined;
 
   const liveLogin =
     loginState !== dismissedChallenge && !expiredMessage
@@ -350,16 +382,21 @@ export default function LoginForm() {
   );
   // iOS and Safari fill a one-time code straight into the DOM.
   const syncMfaFromDom = useSyncFromDom(mfaFormRef, MFA_FIELDS);
+  // The password field on the recovery step is one a manager will fill.
+  const recoveryFormRef = useRef<AntdFormRef<RecoveryFields>>(null);
+  const syncRecoveryFromDom = useSyncFromDom(recoveryFormRef, RECOVERY_FIELDS);
 
   const loginEdits = useEditedFields();
   const passwordEdits = useEditedFields();
   const mfaEdits = useEditedFields();
+  const recoveryEdits = useEditedFields();
 
-  // One summary per step: the three forms are alternatives, but each keeps its
-  // own list of what was left empty rather than inheriting the last one's.
+  // One summary per step: the forms are alternatives, but each keeps its own
+  // list of what was left empty rather than inheriting the last one's.
   const loginSummary = useFormErrorSummary();
   const passwordSummary = useFormErrorSummary();
   const mfaSummary = useFormErrorSummary();
+  const recoverySummary = useFormErrorSummary();
 
   /**
    * Whether this browser can use a passkey at all.
@@ -395,8 +432,10 @@ export default function LoginForm() {
     // request is still in flight.
     setDismissedInvitation(invitationState);
     setDismissedMfa(mfaState);
+    setDismissedRecovery(recoveryState);
     setDismissedChallenge(loginState);
     setDismissedPasskey(passkeyState);
+    setRecoveryMode(false);
     setPasskeyError(undefined);
     setLastAttempt("password");
     loginEdits.clear();
@@ -514,22 +553,55 @@ export default function LoginForm() {
     });
   }
 
+  function handleRecoveryFinish(values: RecoveryFields) {
+    const formData = formDataFrom(recoveryFormRef.current?.nativeElement, {
+      password: values.password ?? "",
+      code: values.code ?? "",
+    });
+    // The hidden username rides along; the Cognito challenge session is not
+    // needed by this step and is not sent. The server re-validates everything.
+    formData.set("email", mfa?.email ?? "");
+    formData.set("username", mfa?.username ?? "");
+    recoveryEdits.clear();
+    recoverySummary.reset();
+    startTransition(() => {
+      recoveryAction(formData);
+    });
+  }
+
+  /** "Use a recovery code instead" and "Back to the authenticator code". */
+  function switchRecoveryMode(on: boolean) {
+    // A message from the other form is about a different attempt.
+    setDismissedMfa(mfaState);
+    setDismissedRecovery(recoveryState);
+    mfaEdits.clear();
+    recoveryEdits.clear();
+    mfaSummary.reset();
+    recoverySummary.reset();
+    setRecoveryMode(on);
+  }
+
   function startOver() {
     setDismissedChallenge(loginState);
     setDismissedInvitation(invitationState);
     setDismissedMfa(mfaState);
+    setDismissedRecovery(recoveryState);
+    setRecoveryMode(false);
     // Drop the half-typed secrets rather than carry them into the next visit.
     // The `key` on each Form already forces a remount, but resetting
     // explicitly also empties the inputs currently on screen, so nothing stale
     // is left for the browser or a password manager to re-read.
     passwordFormRef.current?.resetFields();
     mfaFormRef.current?.resetFields();
+    recoveryFormRef.current?.resetFields();
     passwordEdits.clear();
     mfaEdits.clear();
+    recoveryEdits.clear();
     loginEdits.clear();
     loginSummary.reset();
     passwordSummary.reset();
     mfaSummary.reset();
+    recoverySummary.reset();
     setDismissedPasskey(passkeyState);
     setPasskeyError(undefined);
     setLastAttempt("password");
@@ -539,6 +611,7 @@ export default function LoginForm() {
     loginPending ||
     invitationPending ||
     mfaPending ||
+    recoveryPending ||
     passkeyPending ||
     passkeyBusy;
 
@@ -565,6 +638,12 @@ export default function LoginForm() {
     !showMfaFeedback || mfaEdits.editedFields.includes("code")
       ? undefined
       : mfaState.fieldErrors?.code;
+
+  // The same, for the two inputs on the recovery step.
+  const recoveryFieldError = (name: "password" | "code") =>
+    !showRecoveryFeedback || recoveryEdits.editedFields.includes(name)
+      ? undefined
+      : recoveryState.fieldErrors?.[name];
 
   // Whatever the passkey route came to, from either of its two calls.
   const passkeyMessage =
@@ -692,6 +771,141 @@ export default function LoginForm() {
     );
   }
 
+  if (mfa !== undefined && recoveryMode) {
+    const recoveryPasswordError = recoveryFieldError("password");
+    const recoveryCodeError = recoveryFieldError("code");
+    return (
+      <>
+        {/*
+          Its own key and its own rc-form store, like the other steps: the
+          password typed on step one must not be sitting in this one.
+        */}
+        <Form<RecoveryFields>
+          key="recovery"
+          ref={recoveryFormRef}
+          layout="vertical"
+          method="post"
+          onSubmitCapture={syncRecoveryFromDom}
+          onFinish={handleRecoveryFinish}
+          onFinishFailed={recoverySummary.onFinishFailed}
+          onValuesChange={recoveryEdits.handleValuesChange}
+          disabled={pending}
+          size="large"
+        >
+          {/* The pool username the challenge named; the address is shown. */}
+          <input type="hidden" name="username" value={mfa.username} />
+          <input type="hidden" name="email" value={mfa.email} />
+
+          <FormErrorSummary
+            summary={recoverySummary.errorSummary}
+            onClose={recoverySummary.reset}
+            style={{ marginBottom: 20 }}
+          />
+
+          <Alert
+            type="info"
+            showIcon
+            title="Lost your authenticator? Enter your password and one of the recovery codes you saved when you set it up. Two-factor authentication will be turned off, and you can set it up again in Account & security."
+            role="status"
+            style={{ marginBottom: 20 }}
+          />
+
+          {showRecoveryFeedback &&
+          recoveryState.error &&
+          !recoveryState.restart ? (
+            <Alert
+              type="error"
+              showIcon
+              title={recoveryState.error}
+              role="alert"
+              style={{ marginBottom: 20 }}
+            />
+          ) : null}
+
+          <Form.Item label="Email" htmlFor="recovery-email">
+            <Input
+              id="recovery-email"
+              value={mfa.email}
+              readOnly
+              prefix={<MailOutlined aria-hidden />}
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="password"
+            label="Password"
+            htmlFor="recovery-password"
+            validateStatus={recoveryPasswordError ? "error" : undefined}
+            help={recoveryPasswordError}
+            rules={[{ required: true }]}
+          >
+            <Input.Password
+              id="recovery-password"
+              name="password"
+              autoComplete="current-password"
+              autoFocus
+              placeholder="Your password"
+              prefix={<LockOutlined aria-hidden />}
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="code"
+            label="Recovery code"
+            htmlFor="recovery-code"
+            validateStatus={recoveryCodeError ? "error" : undefined}
+            help={recoveryCodeError}
+            rules={[{ required: true }]}
+          >
+            <Input
+              id="recovery-code"
+              name="code"
+              autoComplete="off"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              maxLength={12}
+              placeholder="xxxxx-xxxxx"
+              prefix={<SafetyOutlined aria-hidden />}
+            />
+          </Form.Item>
+
+          <Form.Item style={{ marginBottom: 0, marginTop: 24 }}>
+            <Button
+              type="primary"
+              htmlType="submit"
+              block
+              loading={recoveryPending}
+            >
+              Sign in with the recovery code
+            </Button>
+          </Form.Item>
+        </Form>
+
+        <div className="mt-4 flex justify-between">
+          <Button
+            type="link"
+            size="small"
+            style={{ paddingInline: 0 }}
+            disabled={pending}
+            onClick={() => switchRecoveryMode(false)}
+          >
+            Back to the authenticator code
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            style={{ paddingInline: 0 }}
+            disabled={pending}
+            onClick={startOver}
+          >
+            Start over
+          </Button>
+        </div>
+      </>
+    );
+  }
+
   if (mfa !== undefined) {
     return (
       <>
@@ -776,7 +990,17 @@ export default function LoginForm() {
           </Form.Item>
         </Form>
 
-        <div className="mt-4 flex justify-end">
+        <div className="mt-4 flex justify-between">
+          {/* Swaps this step for the recovery form; the challenge stays. */}
+          <Button
+            type="link"
+            size="small"
+            style={{ paddingInline: 0 }}
+            disabled={pending}
+            onClick={() => switchRecoveryMode(true)}
+          >
+            Use a recovery code instead
+          </Button>
           <Button
             type="link"
             size="small"

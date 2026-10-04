@@ -294,7 +294,12 @@ Resources:
   # credential chain, which on Fargate is this role. It is scoped to the
   # customers' pool ARN that the environment stack exports, so the console can
   # never touch the operators' own pool — the pool that decides who is allowed
-  # to use the console at all.
+  # to use the console at all — with one deliberate, narrow exception: the
+  # `operator-recovery` policy below (docs/two-factor-plan.md, phase B) lets
+  # src/lib/auth/cognito-admin.ts read one operator by address and turn their
+  # second factor off, which is what a recovery-code sign-in needs. It can
+  # only weaken a sign-in; it cannot create, delete, enable or disable an
+  # operator, set a password or read a secret.
   #
   # Two more policies, both read-only, both for the console's own reporting
   # pages: `cost-and-usage-read` for the Cost center (src/lib/costs,
@@ -339,6 +344,42 @@ Resources:
                   - cognito-idp:AdminSetUserMFAPreference
                 Resource: !ImportValue
                   Fn::Sub: fairsums-${Environment}-CustomerUserPoolArn
+
+        # -------------------------------------------------------------------
+        # Two-factor recovery codes for OPERATORS (docs/two-factor-plan.md,
+        # phase B, 2026-10-04)
+        #
+        # When an operator signs in at /login with their password and one of
+        # their ten recovery codes, the console (src/lib/auth/cognito-admin.ts)
+        # looks the account up by the address the password was just proven
+        # for (AdminGetUser) and turns the authenticator app and passkey MFA
+        # off on it (AdminSetUserMFAPreference, both settings off) — on the
+        # ADMIN pool, the one this console's operators sign in to. Nobody is
+        # signed in when it runs, so it cannot use a user's own access token
+        # the way the Account & security drawer does; it signs with this role.
+        #
+        # Its own policy, and the only one that names the admin pool: no other
+        # policy on this role grants anything there (operators are invited by
+        # hand with the AWS CLI, not by the console), so there was no existing
+        # statement to add these two actions to. The pool ARN is built the
+        # same way the task definition below reads the pool's id and region —
+        # from the SSM parameters the environment stack writes — because that
+        # stack exports an ARN only for the customers' pool. The code guards
+        # the call: a valid, unused code hash for that operator, a password
+        # proven in the same request, and the sign-in rate limits. A role
+        # Description change needs iam:UpdateRoleDescription on the deploy
+        # role, so the Description above is deliberately left as it is.
+        # -------------------------------------------------------------------
+        - PolicyName: operator-recovery
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: AdminPoolRecoveryOnly
+                Effect: Allow
+                Action:
+                  - cognito-idp:AdminGetUser
+                  - cognito-idp:AdminSetUserMFAPreference
+                Resource: !Sub "arn:${AWS::Partition}:cognito-idp:{{resolve:ssm:/fairsums/${Environment}/admin/ADMIN_COGNITO_REGION}}:${AWS::AccountId}:userpool/{{resolve:ssm:/fairsums/${Environment}/admin/ADMIN_COGNITO_USER_POOL_ID}}"
 
         # -------------------------------------------------------------------
         # Billing, budget and free-tier reads for the Cost center page

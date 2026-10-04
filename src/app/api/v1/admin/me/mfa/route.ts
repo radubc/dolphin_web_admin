@@ -9,13 +9,19 @@
  * "paused" means there is at least one. Switching the flag on happens at TOTP
  * enrolment, passkey registration and TOTP sign-in
  * (`src/lib/account/passkey-mfa.ts`), never here.
+ *
+ * Since phase B (`docs/two-factor-plan.md`) the answer also carries
+ * `recoveryCodes` — how many of the caller's ten recovery codes are left and
+ * whether one has been used — from one read of `admin_user_recovery_codes`
+ * pinned to the caller's own allowlist row.
  */
 import { adminHandler } from "@/lib/admin-access/authorize";
 import { ok } from "@/lib/api/response";
 import { requireAccessToken } from "@/lib/auth/access-token";
-import { getMfaStatus } from "@/lib/account/service";
+import { getMfaStatusView } from "@/lib/account/recovery";
 
 export const GET = adminHandler(
-  async (request) => ok(await getMfaStatus(requireAccessToken(request))),
+  async (request, _ctx, principal) =>
+    ok(await getMfaStatusView(requireAccessToken(request), principal.user.id)),
   { endpoint: "admin.me.mfa.get" },
 );

@@ -6,9 +6,12 @@
  * so the drawer and the Route Handlers cannot drift. Nothing in this file
  * touches AWS or the database; `./service.ts` is the server half.
  *
- * Nothing here is stored in either database. Passwords, authenticator apps and
- * passkeys all live in the admin Cognito user pool, and every read is a live
- * call made with the operator's own access token.
+ * Nothing here is stored in either database — with one exception since phase B
+ * of `docs/two-factor-plan.md`: the two-factor **recovery codes**, whose
+ * hashes live in `admin_user_recovery_codes` and whose summary rides along
+ * with the MFA status. Passwords, authenticator apps and passkeys all live in
+ * the admin Cognito user pool, and every read is a live call made with the
+ * operator's own access token.
  */
 
 /** What Cognito reports about this operator's second factors. */
@@ -35,6 +38,35 @@ export interface MfaStatus {
    * manage is still visible rather than silently missing.
    */
   methods: string[];
+}
+
+/** The operator's recovery codes, as `GET /api/v1/admin/me/mfa` reports them. */
+export interface RecoveryCodesSummary {
+  /** Codes not yet used. */
+  remaining: number;
+  /** Rows in every state: 0 or 10 in practice, 1 after a recovery. */
+  total: number;
+  /** ISO 8601 when a code has been redeemed and the factor not set up again. */
+  usedAt: string | null;
+}
+
+/** What `GET /api/v1/admin/me/mfa` and `DELETE …/mfa/totp` answer. */
+export interface MfaStatusView extends MfaStatus {
+  recoveryCodes: RecoveryCodesSummary;
+}
+
+/**
+ * What `PUT /api/v1/admin/me/mfa/totp` answers: the fresh status plus the ten
+ * recovery codes, shown once. `null` when the factor went on but the codes
+ * could not be written; the drawer then offers "Generate them now".
+ */
+export interface TotpEnrolmentResult extends MfaStatusView {
+  issuedRecoveryCodes: string[] | null;
+}
+
+/** What `POST /api/v1/admin/me/mfa/recovery-codes` answers. */
+export interface RecoveryCodesIssued {
+  recoveryCodes: string[];
 }
 
 /**

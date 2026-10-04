@@ -8,11 +8,13 @@
  */
 import { apiFetch } from "@/lib/api/client";
 import type {
-  MfaStatus,
+  MfaStatusView,
   Passkey,
   PasskeyCreationOptions,
   PasskeyRegistrationStart,
+  RecoveryCodesIssued,
   TotpEnrolment,
+  TotpEnrolmentResult,
 } from "./types";
 
 const BASE = "/api/v1/admin/me";
@@ -27,9 +29,9 @@ export const accountApi = {
   },
 
   mfa: {
-    /** Which second factors are switched on right now. */
-    status(): Promise<MfaStatus> {
-      return apiFetch<MfaStatus>(`${BASE}/mfa`);
+    /** Which second factors are switched on right now, and the codes summary. */
+    status(): Promise<MfaStatusView> {
+      return apiFetch<MfaStatusView>(`${BASE}/mfa`);
     },
 
     /** Mints a shared secret. Shown once; nothing stores it. */
@@ -37,17 +39,31 @@ export const accountApi = {
       return apiFetch<TotpEnrolment>(`${BASE}/mfa/totp`, { method: "POST" });
     },
 
-    /** Verifies one code and switches the factor on. */
-    verifyTotp(input: { code: string; deviceName?: string }): Promise<MfaStatus> {
-      return apiFetch<MfaStatus>(`${BASE}/mfa/totp`, {
+    /**
+     * Verifies one code and switches the factor on. The answer carries the
+     * ten recovery codes, once; nothing returns them again.
+     */
+    verifyTotp(input: { code: string; deviceName?: string }): Promise<TotpEnrolmentResult> {
+      return apiFetch<TotpEnrolmentResult>(`${BASE}/mfa/totp`, {
         method: "PUT",
         json: input,
       });
     },
 
-    /** Switches the authenticator app off. */
-    disableTotp(): Promise<MfaStatus> {
-      return apiFetch<MfaStatus>(`${BASE}/mfa/totp`, { method: "DELETE" });
+    /** Switches the authenticator app off (and deletes the recovery codes). */
+    disableTotp(): Promise<MfaStatusView> {
+      return apiFetch<MfaStatusView>(`${BASE}/mfa/totp`, { method: "DELETE" });
+    },
+
+    /**
+     * "Generate new codes": replaces the set behind the password. 401
+     * `password_incorrect` for a wrong password, 422 while the app is off.
+     */
+    regenerateRecoveryCodes(input: { password: string }): Promise<RecoveryCodesIssued> {
+      return apiFetch<RecoveryCodesIssued>(`${BASE}/mfa/recovery-codes`, {
+        method: "POST",
+        json: input,
+      });
     },
   },
 

@@ -410,6 +410,180 @@ export async function signInWithPassword(
 }
 
 /* -------------------------------------------------------------------------- */
+/*  Re-checking a password for a sensitive action                             */
+/* -------------------------------------------------------------------------- */
+
+/** Why {@link verifyPasswordForSensitiveAction} said no. */
+export type PasswordCheckFailure =
+  /** Cognito judged the credentials and refused them. */
+  | "incorrect"
+  /**
+   * Cognito answered a challenge that is not proof of the password —
+   * `NEW_PASSWORD_REQUIRED`, which means the password accepted was the
+   * temporary one `AdminCreateUser` mailed out.
+   */
+  | "challenge"
+  /** Cognito could not be reached or answered something unusable. */
+  | "unavailable";
+
+/**
+ * Second-step challenges Cognito only ever issues *after* the password was
+ * right: `USER_PASSWORD_AUTH` sends `USERNAME` and `PASSWORD` in one call, and
+ * a wrong password ends that call with `NotAuthorizedException` before any
+ * second factor is reached. `NEW_PASSWORD_REQUIRED` is deliberately absent —
+ * the password accepted there is a temporary one, and must not authorise
+ * anything. Anything not listed is refused and named in the log. Ported from
+ * the consumer app (`../penny-squeeze-web/src/lib/auth/cognito.ts`).
+ */
+const PASSWORD_PROVEN_CHALLENGES: ReadonlySet<string> = new Set([
+  "SOFTWARE_TOKEN_MFA",
+  "SMS_MFA",
+  "SMS_OTP",
+  "EMAIL_OTP",
+  "EMAIL_MFA",
+  "SELECT_MFA_TYPE",
+  "MFA_SETUP",
+  "WEB_AUTHN",
+]);
+
+/** How Cognito proved the password. */
+export type PasswordProof =
+  /** Tokens came back: nothing stood between the password and a session. */
+  | "tokens"
+  /**
+   * A second-factor challenge came back. The password was accepted — see
+   * {@link PASSWORD_PROVEN_CHALLENGES} — and the challenge is left unanswered.
+   */
+  | "challenge";
+
+export type PasswordCheckResult =
+  | {
+      ok: true;
+      proof: PasswordProof;
+      /**
+       * The tokens Cognito minted, when `proof` is `"tokens"`. Absent for a
+       * challenge, which is exactly why no caller may depend on them: an
+       * account with the authenticator app on proves its password without
+       * ever getting a token here.
+       */
+      tokens?: SignInTokens;
+      /** The challenge Cognito issued, when `proof` is `"challenge"`. */
+      challengeName?: string;
+    }
+  | { ok: false; failure: PasswordCheckFailure };
+
+/**
+ * Re-checks a password without signing anyone in.
+ *
+ * Two callers (`docs/two-factor-plan.md`, phase B): "Generate new codes" in
+ * Account & security (`src/lib/account/recovery.ts`), where a session cookie
+ * is enough to *use* the console but not to mint recovery codes; and the
+ * recovery-code step at `/login` (`redeemRecoveryCode` in
+ * `src/app/login/actions.ts`), where nobody is signed in at all, which is why
+ * the address is a parameter and not read from a session. The same
+ * `USER_PASSWORD_AUTH` / `InitiateAuth` call as {@link signInWithPassword},
+ * with the same SECRET_HASH over the address given.
+ *
+ * Two differences from sign-in, both deliberate:
+ *
+ * - **The failure is classified, not worded.** The caller turns `incorrect`
+ *   into one fixed message and `unavailable` into a 503 or a generic error,
+ *   because a Cognito outage must never be shown as "your password is wrong".
+ * - **Nothing is written.** No session is created: this is a check.
+ *
+ * **This is proof of the password, not a sign-in.** With the authenticator
+ * app on, Cognito answers `SOFTWARE_TOKEN_MFA` and no tokens; that challenge
+ * is still proof (see {@link PASSWORD_PROVEN_CHALLENGES}) and is left
+ * unanswered. Callers therefore must not depend on `tokens`.
+ *
+ * Rate limiting is the caller's job and must happen **before** this call: it
+ * is a password guess, so `RATE_LIMITS.authLoginAccount` is charged per email
+ * exactly as `/login` does.
+ *
+ * @throws {import("./config").CognitoConfigError} when the environment is not
+ * configured — the caller answers 503 or "not configured", never "wrong".
+ */
+export async function verifyPasswordForSensitiveAction(
+  email: string,
+  password: string,
+): Promise<PasswordCheckResult> {
+  const config = getCognitoConfig();
+
+  const authParameters: Record<string, string> = {
+    USERNAME: email,
+    PASSWORD: password,
+  };
+  const hash = secretHashFor(config, email);
+  if (hash) {
+    authParameters.SECRET_HASH = hash;
+  }
+
+  let response;
+  try {
+    response = await getClient(config).send(
+      new InitiateAuthCommand({
+        AuthFlow: "USER_PASSWORD_AUTH",
+        ClientId: config.clientId,
+        AuthParameters: authParameters,
+      }),
+    );
+  } catch (error) {
+    const name = errorName(error);
+    switch (name) {
+      case "NotAuthorizedException":
+      case "UserNotFoundException":
+      case "InvalidPasswordException":
+      case "UserNotConfirmedException":
+      case "PasswordResetRequiredException":
+        // All of these are a verdict on the credentials (the last two mean the
+        // account cannot sign in at all, which is not something a re-check can
+        // resolve). One answer for the lot; the log keeps the name only.
+        console.warn(`[auth] password re-check refused: ${name}`);
+        return { ok: false, failure: "incorrect" };
+      default:
+        console.error("[auth] password re-check could not be completed:", error);
+        return { ok: false, failure: "unavailable" };
+    }
+  }
+
+  if (response.ChallengeName) {
+    if (PASSWORD_PROVEN_CHALLENGES.has(response.ChallengeName)) {
+      // A second factor. Cognito only got this far because the password was
+      // right, which is the whole question this function answers, so the
+      // challenge is proof and is deliberately left unanswered — no `Session`
+      // is kept and nothing is replayed.
+      console.info(
+        `[auth] password re-check accepted; Cognito went on to the ${response.ChallengeName} challenge, which is not answered here.`,
+      );
+      return { ok: true, proof: "challenge", challengeName: response.ChallengeName };
+    }
+    // `NEW_PASSWORD_REQUIRED` (a temporary password, which must not authorise
+    // anything) and anything unrecognised.
+    console.error(
+      `[auth] password re-check hit the ${response.ChallengeName} challenge, which is not proof of the password; refusing the action.`,
+    );
+    return { ok: false, failure: "challenge" };
+  }
+
+  const result = response.AuthenticationResult;
+  if (!result?.IdToken || !result.AccessToken) {
+    console.error("[auth] password re-check returned no authentication result.");
+    return { ok: false, failure: "unavailable" };
+  }
+
+  return {
+    ok: true,
+    proof: "tokens",
+    tokens: {
+      idToken: result.IdToken,
+      accessToken: result.AccessToken,
+      refreshToken: result.RefreshToken,
+      expiresIn: result.ExpiresIn ?? 3600,
+    },
+  };
+}
+
+/* -------------------------------------------------------------------------- */
 /*  Answering a sign-in challenge (invitation, authenticator app)             */
 /* -------------------------------------------------------------------------- */
 

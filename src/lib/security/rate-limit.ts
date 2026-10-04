@@ -102,6 +102,23 @@ export const RATE_LIMITS = {
   authPasskey: { name: "auth_passkey", limit: 10, windowMs: 15 * 60_000 },
 
   /**
+   * Second-factor codes at sign-in — the six-digit authenticator code and a
+   * recovery code — keyed `mfa:email:<pool username>` by the code step and
+   * `mfa:email:<address>` by the recovery step (one budget wherever the pool
+   * username is the address), so the recovery form is not a cheaper place to
+   * guess than the code step (`docs/two-factor-plan.md`, phase B). Additive:
+   * the code step still spends the sign-in budget as before.
+   */
+  authMfa: { name: "auth_mfa", limit: 10, windowMs: 15 * 60_000 },
+
+  /**
+   * "Generate new codes" in Account & security, per operator (keyed
+   * `account:mfa:<admin user id>`). It proves a password, so it also charges
+   * `authLoginAccount` per email; this is the per-user backstop.
+   */
+  accountMfa: { name: "account_mfa", limit: 10, windowMs: 15 * 60_000 },
+
+  /**
    * Token refresh, per IP. An active tab refreshes about every 3.5 minutes
    * once the pool issues 5-minute id tokens (the keepalive renews 90 s before
    * expiry), so one operator with a few tabs open spends 10-15 calls in this

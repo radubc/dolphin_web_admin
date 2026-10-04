@@ -194,6 +194,18 @@ export const ENDPOINT_REGISTRY: readonly EndpointRegistryEntry[] = [
     defaults: none,
   },
   {
+    key: "admin.me.mfa.recovery_codes",
+    method: "POST",
+    path: "/api/v1/admin/me/mfa/recovery-codes",
+    name: "Generate new recovery codes",
+    description:
+      "Replaces the caller's ten two-factor recovery codes behind a password re-check and answers the new ones once. A password guess, so it charges the sign-in budget per email and a per-operator budget as well as the reset budget per IP; 422 while the authenticator app is off.",
+    category: "account_security",
+    authKind: "admin",
+    rateLimit: "authReset",
+    defaults: none,
+  },
+  {
     key: "admin.me.passkeys.list",
     method: "GET",
     path: "/api/v1/admin/me/passkeys",

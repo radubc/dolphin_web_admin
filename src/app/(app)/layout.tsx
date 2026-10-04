@@ -1,5 +1,6 @@
 import SessionKeepalive from "@/components/auth/session-keepalive";
 import AppShell from "@/components/shell/app-shell";
+import { hasRedeemedRecoveryCode } from "@/lib/account/recovery-codes";
 import { accessiblePages, requireAdminSession } from "@/lib/admin-access/authorize";
 import { pageRegistryEntry, pageSection } from "@/lib/admin-access/page-registry";
 import { capabilitiesOf } from "@/lib/admin-access/types";
@@ -26,10 +27,18 @@ import { capabilitiesOf } from "@/lib/admin-access/types";
  * as long as this operator is doing something and signs them out half an hour
  * after they stop. It is mounted here, and not in the root layout, because
  * `/login` and `/forgot-password` have no session to keep alive.
+ *
+ * One more cheap read (`docs/two-factor-plan.md`, phase B): whether this
+ * operator signed in with a recovery code and has not set the authenticator
+ * app up again — admin database only, never Cognito on a layout render — so
+ * the shell can keep nudging them until they do.
  */
 export default async function AppLayout({ children }: LayoutProps<"/">) {
   const { session, principal } = await requireAdminSession();
-  const pages = await accessiblePages(principal);
+  const [pages, twoFactorResetPending] = await Promise.all([
+    accessiblePages(principal),
+    hasRedeemedRecoveryCode(principal.user.id),
+  ]);
 
   const routable = pages.filter((page) => page.kind === "page" && page.path !== null);
 
@@ -64,6 +73,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
         tabs={tabs}
         settingsEntries={settingsEntries}
         quickActions={quickActions}
+        twoFactorResetPending={twoFactorResetPending}
       >
         {children}
       </AppShell>

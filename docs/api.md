@@ -37,6 +37,8 @@ In-process sliding windows, per preset name (`src/lib/security/rate-limit.ts`):
 | `authLogin` | 10 / 15 min per IP | sign-in |
 | `authLoginAccount` | 5 / 15 min per email | sign-in |
 | `authReset` | 5 / 15 min | password reset |
+| `authMfa` | 10 / 15 min per account | the second-factor steps at sign-in — the authenticator code (keyed by pool username) and the recovery code (keyed by the address the password is proven for) share one budget (`mfa:email:`) wherever the two coincide, on top of the sign-in budget each still spends |
+| `accountMfa` | 10 / 15 min per operator | "Generate new codes" in Account & security (it also charges `authLoginAccount` per email, because it proves a password) |
 | `authRefresh` | 30 / 15 min per IP | refresh and logout |
 | `customerTwoFactorReset` | 5 / hour per operator | turning off a customer's two-factor authentication |
 | `health` | 30 / minute per IP | the health probe |
@@ -74,10 +76,11 @@ Default rules as seeded; all editable on the Access Map.
 | --- | --- | --- | --- |
 | `admin.me` | `GET /api/v1/admin/me` | Caller's capabilities: id, email, super-admin flag, actions. | any operator |
 | `admin.me.password.change` | `POST /api/v1/admin/me/password` | Changes the caller's own password (Cognito `ChangePassword` with the caller's access token). Per-operator and per-IP `authReset` budget. | any operator |
-| `admin.me.mfa.get` | `GET /api/v1/admin/me/mfa` | Whether an authenticator app is on for the caller, plus `passkeyMfaEnabled` (`WEB_AUTHN_MFA` listed) and `passkeySignInPaused` (TOTP on, a passkey, flag off). A read; never sets the flag. | any operator |
+| `admin.me.mfa.get` | `GET /api/v1/admin/me/mfa` | Whether an authenticator app is on for the caller, plus `passkeyMfaEnabled` (`WEB_AUTHN_MFA` listed), `passkeySignInPaused` (TOTP on, a passkey, flag off) and `recoveryCodes: { remaining, total, usedAt }` from `admin_user_recovery_codes`. A read; never sets the flag. | any operator |
 | `admin.me.mfa.totp.start` | `POST /api/v1/admin/me/mfa/totp` | Starts authenticator enrolment: the secret and `otpauth://` URI (issuer "FairSums Admin"). 503 `mfa_not_enabled` on a pool without software-token MFA. | any operator |
-| `admin.me.mfa.totp.verify` | `PUT /api/v1/admin/me/mfa/totp` | Verifies the first code and turns the authenticator on; sets passkey MFA when a passkey exists. | any operator |
-| `admin.me.mfa.totp.disable` | `DELETE /api/v1/admin/me/mfa/totp` | Turns the authenticator off (and passkey MFA with it). | any operator |
+| `admin.me.mfa.totp.verify` | `PUT /api/v1/admin/me/mfa/totp` | Verifies the first code and turns the authenticator on; sets passkey MFA when a passkey exists. Answers the ten recovery codes once (`issuedRecoveryCodes`, `null` when they could not be written — the enrolment stands). | any operator |
+| `admin.me.mfa.totp.disable` | `DELETE /api/v1/admin/me/mfa/totp` | Turns the authenticator off (and passkey MFA with it); deletes the recovery codes once Cognito accepted, best effort. | any operator |
+| `admin.me.mfa.recovery_codes` | `POST /api/v1/admin/me/mfa/recovery-codes` | "Generate new codes": `{ password }` re-checked (401 `password_incorrect`), 422 while the authenticator is off; replaces the set and answers `{ recoveryCodes }` once. `authLoginAccount` per email + `accountMfa` per operator + `authReset` per IP. | any operator |
 | `admin.me.passkeys.list` | `GET /api/v1/admin/me/passkeys` | The caller's registered passkeys. 503 `passkeys_not_enabled` on a pool without a WebAuthn relying party (the admin pool has one). | any operator |
 | `admin.me.passkeys.start` | `POST /api/v1/admin/me/passkeys` | Starts a passkey registration: the WebAuthn creation options. | any operator |
 | `admin.me.passkeys.complete` | `PUT /api/v1/admin/me/passkeys` | Completes it with the authenticator's credential; sets passkey MFA when the authenticator app is on. | any operator |

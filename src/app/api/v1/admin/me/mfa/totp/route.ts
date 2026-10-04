@@ -16,12 +16,22 @@
  * also sets passkey MFA for an operator who already has a passkey, so the
  * authenticator app never costs them passkey sign-in (`passkey-mfa.ts`);
  * DELETE clears both in one call.
+ *
+ * Recovery codes (phase B of `docs/two-factor-plan.md`): PUT answers the ten
+ * codes once (`issuedRecoveryCodes`, null when they could not be written —
+ * the enrolment stands either way), DELETE deletes the rows once Cognito has
+ * accepted the switch-off, best effort. Both through
+ * `src/lib/account/recovery.ts`.
  */
 import { adminHandler } from "@/lib/admin-access/authorize";
 import { ok } from "@/lib/api/response";
 import { parseJsonBody } from "@/lib/api/validate";
 import { requireAccessToken } from "@/lib/auth/access-token";
 import { ensurePasskeyMfa } from "@/lib/account/passkey-mfa";
+import {
+  clearRecoveryCodesAfterDisable,
+  issueRecoveryCodesAfterEnrolment,
+} from "@/lib/account/recovery";
 import { verifyTotpSchema } from "@/lib/account/schemas";
 import {
   disableTotp,
@@ -55,7 +65,8 @@ export const PUT = adminHandler(
       input.deviceName,
     );
     if (!status.passkeySignInPaused) {
-      return ok(status);
+      // The factor is on: issue the codes and answer them once.
+      return ok(await issueRecoveryCodesAfterEnrolment(status, principal.user.id));
     }
     // The app just went on and a passkey is already registered: set the flag
     // that keeps passkey sign-in working, then answer with the fresh status.
@@ -63,16 +74,22 @@ export const PUT = adminHandler(
     // so does the response: if the re-read fails, answer from what is known
     // (the methods list is then one entry short, which the next read fixes).
     const check = await ensurePasskeyMfa(accessToken, { status, hasPasskeys: true });
+    let fresh;
     try {
-      return ok(await getMfaStatus(accessToken));
+      fresh = await getMfaStatus(accessToken);
     } catch {
-      return ok({ ...status, ...check });
+      fresh = { ...status, ...check };
     }
+    return ok(await issueRecoveryCodesAfterEnrolment(fresh, principal.user.id));
   },
   { endpoint: "admin.me.mfa.totp.verify", rateLimit: RATE_LIMITS.authReset },
 );
 
 export const DELETE = adminHandler(
-  async (request) => ok(await disableTotp(requireAccessToken(request))),
+  async (request, _ctx, principal) => {
+    const status = await disableTotp(requireAccessToken(request));
+    // Cognito has accepted: the codes go with the factor, best effort.
+    return ok(await clearRecoveryCodesAfterDisable(status, principal.user.id));
+  },
   { endpoint: "admin.me.mfa.totp.disable" },
 );

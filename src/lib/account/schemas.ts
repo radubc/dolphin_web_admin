@@ -46,6 +46,15 @@ export const verifyTotpSchema = z.object({
 
 export type VerifyTotpInput = z.infer<typeof verifyTotpSchema>;
 
+/** `POST /api/v1/admin/me/mfa/recovery-codes` — the password, re-checked. */
+export const regenerateRecoveryCodesSchema = z
+  .object({
+    password,
+  })
+  .strict();
+
+export type RegenerateRecoveryCodesInput = z.infer<typeof regenerateRecoveryCodesSchema>;
+
 /**
  * `PUT /api/v1/admin/me/passkeys` — the browser's `RegistrationResponseJSON`.
  *

@@ -143,6 +143,121 @@ the web repo and is not repeated here — only the admin differences:
 6. Shell nudge until re-enrolled, same rule as the web app (TOTP off and
    rows exist; `used_at` set → recovery, unused rows → support reset).
 
+*Phase B built 2026-10-04* (after C, so it took SQL **022**):
+
+- **QR code**: antd `QRCode` (SVG, 180 px, level M) over the existing
+  `otpauth://` URI in `two-factor-section.tsx`, caption "Scan with your
+  authenticator app, or enter the key below."; the secret and the link stay
+  as copyable text.
+- **Table**: `docs/sql/022_admin_user_recovery_codes.sql` —
+  `admin_user_recovery_codes` (`id`, `user_id` → `admin_users.id` ON DELETE
+  CASCADE, `code_hash` CHECK 64 lowercase hex, `created_at`, `used_at`;
+  unique `(user_id, code_hash)`, index on `user_id`, no RLS) plus the
+  endpoint row `admin.me.mfa.recovery_codes` registered like 018's (no
+  actions). **The code ships before the pull**: `src/lib/account/recovery-codes.ts`
+  uses `$queryRaw`/`$executeRaw` tagged templates (pinned to one `user_id`,
+  no string concatenation) with a comment to switch to the typed model after
+  the pull; until the table exists the reads answer "no codes", a claim
+  answers "no such code", and one warning names the SQL file.
+- **Codes**: `recovery-codes.ts` (generate / format / normalise / hash,
+  replace, summarise, claim / unclaim, delete others, delete all,
+  `hasRedeemedRecoveryCode`, `findEnabledOperatorBySub`);
+  `src/lib/account/recovery.ts` is where the pool's answer and the rows meet
+  (`service.ts` stays Cognito-only). `PUT …/mfa/totp` answers
+  `issuedRecoveryCodes` once (null when the write failed — the enrolment
+  stands); `GET …/mfa` adds `recoveryCodes: { remaining, total, usedAt }`
+  (`MfaStatusView` in `types.ts`); `DELETE …/mfa/totp` deletes the rows after
+  Cognito accepted; new `POST …/mfa/recovery-codes` (`{ password }`,
+  `verifyPasswordForSensitiveAction` ported into `src/lib/auth/cognito.ts`,
+  the session's allowlist address, `authLoginAccount` per email +
+  `accountMfa` per operator + `authReset` per IP, 401 `password_incorrect`,
+  422 while TOTP is off). Registry entry added.
+- **Drawer**: the once-only codes dialog (monospace grid, Copy, Download
+  `fairsums-admin-recovery-codes.txt`, "I've saved my codes" as the only
+  exit), the "Recovery codes — N of 10 left" row with "Generate new codes"
+  behind the password dialog, and the banner while TOTP is off and rows
+  remain (`used_at` → "turned off with a recovery code on <date>", unused
+  rows → "turned off by support").
+- **Shell nudge**: the `(app)` layout already resolves the principal, so it
+  gained one admin-database read, `hasRedeemedRecoveryCode(principal.user.id)`
+  (never a Cognito call on a render; a missing table or a fault is `false`),
+  passed to `AppShell` as `twoFactorResetPending`; `TwoFactorResetNotice`
+  (`src/components/shell/two-factor-reset-notice.tsx`) is an antd
+  notification with an "Open Account & security" button, on every full load
+  until the next enrolment, not remembered in `localStorage`.
+- **Redeem at sign-in**: "Use a recovery code instead" on the code step →
+  a third step with its own rc-form store (`key="recovery"`: address read-only, password,
+  code, "Back to the authenticator code", "Start over") →
+  `redeemRecoveryCode` in `src/app/login/actions.ts`: validation → the
+  sign-in pair + `authMfa` on `mfa:email:<address>`, each charged whatever
+  the other answers (the code step charges `mfa:email:<pool username>`
+  additively — the same key wherever the pool username is the address) →
+  `decideRecoveryRedeem` in
+  `src/lib/auth/recovery-redeem.ts` (password proof → `adminFindUser(email)`
+  on the ADMIN pool, bound to the proven address with the email-attribute
+  check → enabled `admin_users` row by `cognito_sub` → atomic claim →
+  `adminTurnOffSecondFactor` both settings off, claim undone on refusal →
+  delete the other nine best-effort → `signInWithPassword`) →
+  `createSession(tokens, undefined, "password")` → `redirect("/")`, fallback
+  `/login?recovery=used` with the notice "Two-factor authentication was
+  turned off with a recovery code. Sign in with your password, then set it
+  up again in Account & security." One neutral error for a wrong password /
+  unknown or disabled account / wrong code; a generic one for an AWS or
+  database fault. `src/lib/auth/cognito-admin.ts` is the only module that
+  addresses the admin pool with AWS credentials.
+- **IAM**: no existing policy granted anything on the admin pool (operators
+  are invited with the CLI, not the console), so a sibling policy
+  `operator-recovery` / Sid `AdminPoolRecoveryOnly` was added to the task
+  role with `cognito-idp:AdminGetUser` and `AdminSetUserMFAPreference` on
+  the admin pool ARN, built from the same SSM parameters the task definition
+  reads (`{{resolve:ssm:…ADMIN_COGNITO_REGION}}` and `…USER_POOL_ID`; the
+  environment stack exports an ARN only for the customers' pool). No
+  Description change.
+- **Rate limits**: `authMfa` (10 / 15 min) and `accountMfa` (10 / 15 min)
+  added; nothing removed.
+- **Tests**: `npm test` — the consumer app's `node --test` setup
+  (`scripts/test-loader.mjs`, `--conditions=react-server`) covering the pure
+  code helpers, `adminFindUser` / `adminTurnOffSecondFactor` against a
+  stubbed pool, and the redeem ordering against a scripted gateway
+  (`recovery-redeem.test.ts`).
+- **Docs**: `auth.md` ("Use a recovery code instead", "Recovery codes"),
+  `api.md`, `sql/README.md` (row 22), `CLAUDE.md`.
+- Not run locally: the admin calls need AWS credentials with the new
+  permission, and the table does not exist until 022 has run; the drawer
+  and the sign-in form were exercised through the type check, the lint and
+  the build only.
+
+Owner steps: run `022_admin_user_recovery_codes.sql` on the local and stage
+admin databases; `npx prisma db pull --config prisma-admin.config.ts && npx
+prisma generate` (then, optionally, switch `recovery-codes.ts` to the typed
+model); deploy (the IAM policy rides the push to stage); for a local run,
+give the AWS profile `cognito-idp:AdminGetUser` and
+`AdminSetUserMFAPreference` on the admin pool.
+
+Stage test (`admin.fairsums.app`, a throwaway operator account, after deploy):
+
+1. Enrol: the drawer shows the QR code, then ten codes; Copy and Download
+   work; the row says "10 of 10 left".
+2. Sign out; email + password; "Use a recovery code instead"; wrong password
+   + right code → neutral error; right password + a code with `O` typed for
+   `0` → "Enter the ten-character recovery code."; right password + a wrong
+   code → neutral error; eleven tries → "Too many attempts".
+3. Right password + right code → signed in, the shell notice appears, the
+   drawer shows the banner, `admin-get-user` on the admin pool shows
+   `UserMFASettingList` empty, the table holds one row with `used_at`; the
+   customer two-factor reset reads the session as password-only.
+4. Enrol again → ten new rows, banner and notice gone, `WEB_AUTHN_MFA` back
+   beside `SOFTWARE_TOKEN_MFA` when a passkey exists.
+5. "Generate new codes" with a wrong password → 401 and the field error;
+   right password → ten new codes, the old ones refused at sign-in.
+6. Turn the authenticator off from the drawer → zero rows.
+7. CLI `admin-set-user-mfa-preference … Enabled=false` on an enrolled
+   account → the "turned off by support" banner; enrol again.
+8. With a task role lacking the permission: the neutral-looking "couldn't
+   be turned off right now" message, the log naming
+   `cognito-idp:AdminSetUserMFAPreference` and `operator-recovery`, and the
+   code still unused in the table.
+
 ## Phase C — Customer support: "Turn off two-factor authentication" (medium)
 
 The brief `docs/admin-console/two-factor-reset.md` (web repo), made concrete:

@@ -3,6 +3,14 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { ensurePasskeyMfa } from "@/lib/account/passkey-mfa";
+import {
+  claimRecoveryCode,
+  deleteOtherRecoveryCodes,
+  findEnabledOperatorBySub,
+  hashRecoveryCode,
+  normaliseRecoveryCode,
+  unclaimRecoveryCode,
+} from "@/lib/account/recovery-codes";
 import { isTooManyRequestsError } from "@/lib/api/errors";
 import {
   completeNewPassword,
@@ -10,8 +18,11 @@ import {
   respondToWebAuthnChallenge,
   signInWithPassword,
   startWebAuthnSignIn,
+  verifyPasswordForSensitiveAction,
 } from "@/lib/auth/cognito";
+import { adminFindUser, adminTurnOffSecondFactor } from "@/lib/auth/cognito-admin";
 import { CognitoConfigError } from "@/lib/auth/config";
+import { decideRecoveryRedeem } from "@/lib/auth/recovery-redeem";
 import { createSession } from "@/lib/auth/session";
 import {
   attributeSpec,
@@ -51,6 +62,24 @@ const LOST_CHALLENGE_MESSAGE = "Your sign-in session expired. Start again.";
  */
 const PASSKEY_UNREADABLE_MESSAGE =
   "That passkey response could not be read. Try again.";
+
+/**
+ * One sentence for a wrong password, an unknown or disabled account and a
+ * code that matches nothing: the recovery form must not say which half failed.
+ */
+const RECOVERY_NEUTRAL_ERROR =
+  "That password or recovery code isn't right. Check both and try again.";
+
+/** Cognito refused to turn the factor off; the code was put back. */
+const RECOVERY_UNAVAILABLE_ERROR =
+  "Two-factor authentication couldn't be turned off right now. Try again in a moment.";
+
+/** Cognito or AWS could not be reached or refused; nothing was judged. */
+const GENERIC_RECOVERY_ERROR =
+  "Something went wrong while signing in. Please try again.";
+
+/** Where the person lands when the factor is off but the sign-in still did not produce tokens. */
+const RECOVERY_USED_PATH = "/login?recovery=used";
 
 export interface LoginState {
   /** Non-field error, rendered as an alert above the form. */
@@ -119,6 +148,18 @@ export interface MfaState {
     code?: string;
   };
   /** The challenge is dead: the form must go back to email and password. */
+  restart?: boolean;
+}
+
+/** Shaped for `useActionState` on the recovery-code step. */
+export interface RedeemRecoveryCodeState {
+  /** Non-field error, rendered as an alert above the form. */
+  error?: string;
+  fieldErrors?: {
+    password?: string;
+    code?: string;
+  };
+  /** The step cannot continue: the form must go back to email and password. */
   restart?: boolean;
 }
 
@@ -209,6 +250,38 @@ async function checkLoginRateLimit(email: string): Promise<string | undefined> {
       `login:email:${email.toLowerCase()}`,
       RATE_LIMITS.authLoginAccount,
     );
+    return undefined;
+  } catch (error) {
+    if (isTooManyRequestsError(error)) {
+      return TOO_MANY_ATTEMPTS_MESSAGE;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Consumes the second-factor budget for one account: `RATE_LIMITS.authMfa`
+ * on `mfa:email:<pool username>` (falling back to the typed address), both
+ * lowercased. Charged by the authenticator-code step *and* the recovery-code
+ * step, so the two kinds of code share one ten-per-quarter-hour budget per
+ * account and the recovery form is not a cheaper place to guess. Additive:
+ * both steps still spend the sign-in budget above as before.
+ *
+ * The recovery-code step passes `null` for the username: it keys on the
+ * address the password is about to be proven for, never on the hidden field
+ * the browser posted — the same key as the code step wherever the pool
+ * username is the address.
+ *
+ * @returns the neutral refusal message when the caller is limited, otherwise
+ * `undefined`.
+ */
+async function checkMfaRateLimit(
+  username: string | null,
+  email: string,
+): Promise<string | undefined> {
+  const accountKey = (username === null || username === "" ? email : username).toLowerCase();
+  try {
+    await enforceRateLimit(`mfa:email:${accountKey}`, RATE_LIMITS.authMfa);
     return undefined;
   } catch (error) {
     if (isTooManyRequestsError(error)) {
@@ -460,8 +533,10 @@ export async function verifyMfaCode(
   }
 
   // A code guess finishes an authentication, so it spends the same budget as
-  // a password attempt rather than being a way around it.
-  const limited = await checkLoginRateLimit(email);
+  // a password attempt rather than being a way around it — and the
+  // second-factor budget it shares with the recovery-code step.
+  const limited =
+    (await checkLoginRateLimit(email)) ?? (await checkMfaRateLimit(username, email));
   if (limited) {
     return { error: limited };
   }
@@ -495,6 +570,123 @@ export async function verifyMfaCode(
   await createSession(result, undefined, "password+totp");
 
   // Throws; must stay outside the try/catch above.
+  redirect("/");
+}
+
+/**
+ * Alternative second step for an operator with an authenticator app: the
+ * password again and one of the ten recovery codes, in one request
+ * (`docs/two-factor-plan.md`, phase B; the design is the consumer app's
+ * `docs/recovery-codes.md`, section 3). Shaped for `useActionState`.
+ *
+ * The password and the code travel together on purpose. The password is
+ * proven by `InitiateAuth` in this very request and held nowhere else — the
+ * same "within one request" `login()` does — so a recovery code alone can
+ * never switch two-factor off, and there is no artefact to steal or replay.
+ *
+ * What this action owns is the request side: validation, both rate limits,
+ * the session and the redirects. The order of everything after that —
+ * password, who, claim, Cognito off, the other codes, sign in — is
+ * `decideRecoveryRedeem` in `src/lib/auth/recovery-redeem.ts`, which the tests
+ * cover. Two lessons carried over from the web app, both enforced there:
+ * the account acted on is resolved by **the address the password was proven
+ * for**, never by the hidden `username` the browser posted; and the code is
+ * claimed atomically **before** Cognito is asked, and put back if it refuses.
+ *
+ * One neutral sentence for a wrong password, an unknown account and a wrong
+ * code; a generic one for an AWS or database fault. Logging names ids and
+ * Cognito error names only — never the address, the password, the code or
+ * its hash.
+ */
+export async function redeemRecoveryCode(
+  _prevState: RedeemRecoveryCodeState,
+  formData: FormData,
+): Promise<RedeemRecoveryCodeState> {
+  const email = asString(formData.get("email")).trim();
+  const password = asString(formData.get("password"));
+  const typedCode = asString(formData.get("code"));
+
+  if (email === "" || email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) {
+    return { error: LOST_CHALLENGE_MESSAGE, restart: true };
+  }
+
+  const fieldErrors: NonNullable<RedeemRecoveryCodeState["fieldErrors"]> = {};
+  if (password === "") {
+    fieldErrors.password = "Enter your password.";
+  } else if (password.length > MAX_PASSWORD_LENGTH) {
+    fieldErrors.password = "That password is too long.";
+  }
+  // Lowercased, dashes and spaces dropped; anything not exactly ten symbols
+  // of the alphabet is refused here, before any lookup.
+  const code = normaliseRecoveryCode(typedCode);
+  if (code === null) {
+    fieldErrors.code = "Enter the ten-character recovery code.";
+  }
+  if (Object.keys(fieldErrors).length > 0 || code === null) {
+    return { fieldErrors };
+  }
+
+  // Both budgets, before anything else and whatever the outcome — each one
+  // charged even when the other refuses, so neither is a free probe: the
+  // sign-in pair because a password is checked, and the second-factor budget
+  // keyed on the address the password is proven for, never on the hidden
+  // `username` the browser posted.
+  const loginLimited = await checkLoginRateLimit(email);
+  const mfaLimited = await checkMfaRateLimit(null, email);
+  const limited = loginLimited ?? mfaLimited;
+  if (limited) {
+    return { error: limited };
+  }
+
+  let outcome;
+  try {
+    outcome = await decideRecoveryRedeem(
+      { email, password, code },
+      {
+        verifyPassword: verifyPasswordForSensitiveAction,
+        findPoolUser: (address) => adminFindUser(address),
+        findEnabledOperatorBySub,
+        hashCode: hashRecoveryCode,
+        claimCode: claimRecoveryCode,
+        unclaimCode: unclaimRecoveryCode,
+        deleteOtherCodes: deleteOtherRecoveryCodes,
+        turnOffSecondFactor: (poolUsername) => adminTurnOffSecondFactor(poolUsername),
+        signIn: signInWithPassword,
+      },
+    );
+  } catch (error) {
+    // Missing/invalid Cognito environment configuration.
+    return { error: describeUnconfigured(error) };
+  }
+
+  switch (outcome.kind) {
+    case "neutral":
+      return { error: RECOVERY_NEUTRAL_ERROR };
+    case "unavailable":
+      return { error: GENERIC_RECOVERY_ERROR };
+    case "restart":
+      // The factor is already off, or the account is still on a temporary
+      // password: back to step one, where the ordinary sign-in takes over.
+      return { error: LOST_CHALLENGE_MESSAGE, restart: true };
+    case "turn_off_refused":
+      return { error: RECOVERY_UNAVAILABLE_ERROR };
+    case "recovered":
+      break;
+  }
+
+  if (!outcome.signIn.ok) {
+    // A challenge (propagation delay) or a refusal: the factor is off, so the
+    // password alone works on the next attempt, and the page says so. Throws.
+    redirect(RECOVERY_USED_PATH);
+  }
+
+  // The factor is off and only the password was presented: password-only,
+  // exactly as `login()` records it, so the customer two-factor reset refuses
+  // this session until the operator enrols again and signs in with a code.
+  await createSession(outcome.signIn, undefined, "password");
+
+  // Throws; must stay outside the try/catch above. The shell's two-factor
+  // notice takes over from here.
   redirect("/");
 }
 

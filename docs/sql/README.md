@@ -31,6 +31,7 @@ result afterwards.
 | 19 | [`019_currency_pair_backfill.sql`](./019_currency_pair_backfill.sql) | Registers the currency pair **history backfill** endpoint (`admin.integrations.currency_pairs.backfill`, the "Fetch 6 months" button beside Refresh in the pair's download-history drawer) against `can_write_integrations`, the action 008 seeded for every integrations write. Creates no table and no action, and touches no watch row or rate. The other half of the same change — a manual add fetching six months on the spot — needed no SQL at all: it is the existing create endpoint doing more, and only its response body grew. | Once, after step 18. Re-running is safe. |
 | 20 | [`020_quote_symbol_history.sql`](./020_quote_symbol_history.sql) | Registers the quote symbol **download-history** endpoint (`admin.integrations.quote_symbols.quotes`, behind the drawer a row click opens on Integrations > Quote symbols) against the two integration actions 008 seeded — the quotes counterpart of 017's pair history. Creates no table and no action, and touches no watch row or quote: the runs have stored one `admin_quotes` row per symbol and trading day all along, this only lets the page show them. | Once, after step 19. Re-running is safe. |
 | 21 | [`021_customer_two_factor_reset.sql`](./021_customer_two_factor_reset.sql) | Registers support's **"Turn off two-factor authentication"** endpoint (`admin.customers.two_factor_reset`, the button in the customer detail drawer) against `can_write_user`, and widens the audit trail's `target_type` check so the action can be audited (`'customer_two_factor_reset'`). Creates no table and no action. The route adds its own guards the Access Map does not express: the operator must be signed in with a second factor, five per hour per operator. The IAM half (`cognito-idp:AdminSetUserMFAPreference` on the customer pool, `infra/service-admin.yaml`) rides the deploy and is not SQL. | Once, after step 20. Re-running is safe. |
+| 22 | [`022_admin_user_recovery_codes.sql`](./022_admin_user_recovery_codes.sql) | **Operator two-factor recovery codes** (`docs/two-factor-plan.md`, phase B): the table `admin_user_recovery_codes` (SHA-256 hashes of the ten single-use codes an operator gets when they turn the authenticator app on; `user_id` → `admin_users.id` ON DELETE CASCADE, unique per operator and hash, `used_at` on the one redeemed row), and the one new endpoint `admin.me.mfa.recovery_codes` ("Generate new codes"), registered like 018's rows with no actions. Creates no action, page or grant. The app ships with raw, parameterised queries against the table, so it runs before this file does (the reads answer "no codes" and one warning names this file); **run `npx prisma db pull --config prisma-admin.config.ts` and `npm run prisma:generate` afterwards** so the typed model exists. The IAM half (`cognito-idp:AdminGetUser` + `AdminSetUserMFAPreference` on the **admin** pool, the `operator-recovery` policy in `infra/service-admin.yaml`) rides the deploy and is not SQL. | Once, after step 21. Re-running is safe. |
 
 Until step 7 has run, the Constants list, compare, push and job endpoints
 answer 503 `admin_schema_missing`: the app does not fake a ledger it does not
@@ -148,8 +149,8 @@ before the SQL has run).
 
 ## Adding a table or column later
 
-1. Write the change as a new numbered file here (`021_….sql`), transactional,
-   with comments saying what and why. (The next free number, always: 020 is
+1. Write the change as a new numbered file here (`023_….sql`), transactional,
+   with comments saying what and why. (The next free number, always: 022 is
    taken.)
 2. Run it in pgAdmin.
 3. `npx prisma db pull --config prisma-admin.config.ts`, then

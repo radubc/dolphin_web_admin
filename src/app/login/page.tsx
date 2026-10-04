@@ -19,6 +19,15 @@ export const metadata: Metadata = {
 const RESET_PARAM = "reset";
 const RESET_SUCCESS = "success";
 
+/**
+ * Set by `redeemRecoveryCode` when the authenticator was turned off with a
+ * recovery code but the sign-in that followed still did not produce tokens
+ * (a propagation delay at Cognito). The password alone works from here on;
+ * this explains why, and what to do next (`docs/two-factor-plan.md`, phase B).
+ */
+const RECOVERY_PARAM = "recovery";
+const RECOVERY_USED = "used";
+
 /** Minutes of inactivity that end a session, for the notice below. */
 const IDLE_TIMEOUT_MINUTES = Math.round(IDLE_TIMEOUT_SECONDS / 60);
 
@@ -29,10 +38,14 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   }
 
   // `searchParams` is a promise in Next 16.
-  const { [RESET_PARAM]: reset, [EXPIRED_SESSION_PARAM]: sessionNotice } =
-    await searchParams;
+  const {
+    [RESET_PARAM]: reset,
+    [EXPIRED_SESSION_PARAM]: sessionNotice,
+    [RECOVERY_PARAM]: recovery,
+  } = await searchParams;
   // A repeated param arrives as an array, which is not `RESET_SUCCESS`.
   const passwordWasReset = reset === RESET_SUCCESS;
+  const recoveryCodeWasUsed = recovery === RECOVERY_USED;
   // `?session=idle`: the refresh endpoint or the keepalive ended the session
   // because nothing happened in this browser for half an hour. (`expired` is
   // the proxy's business — it clears the stale cookies and redirects here
@@ -59,6 +72,15 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
           type="success"
           showIcon
           title="Your password has been reset. Sign in with your new password."
+          role="status"
+          style={{ marginBottom: 20 }}
+        />
+      ) : null}
+      {recoveryCodeWasUsed ? (
+        <Alert
+          type="info"
+          showIcon
+          title="Two-factor authentication was turned off with a recovery code. Sign in with your password, then set it up again in Account & security."
           role="status"
           style={{ marginBottom: 20 }}
         />

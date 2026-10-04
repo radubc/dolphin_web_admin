@@ -79,6 +79,66 @@ The pool's `MfaConfiguration` is `OPTIONAL` with software tokens enabled, so
 this branch is live: anyone who enrols an app in
 [Account & security](#authenticator-app) gets the code step from then on.
 
+Since phase B of [`two-factor-plan.md`](./two-factor-plan.md) the code step
+also charges `authMfa` on `mfa:email:<pool username>` — the budget it shares
+with the recovery-code step below — on top of the sign-in budget.
+
+### Use a recovery code instead
+
+Under the code step's button, **Use a recovery code instead** swaps the step
+for a third step with its own form: the address read-only, the **password** again, and one of
+the ten [recovery codes](#recovery-codes) the operator saved when they set
+the authenticator up. "Back to the authenticator code" swaps back; the
+Cognito challenge itself is untouched and its session is not sent.
+
+`redeemRecoveryCode()` in `src/app/login/actions.ts` takes the password and
+the code **in one request** (the design is the consumer app's
+`docs/recovery-codes.md`, section 3): the password is proven by
+`InitiateAuth` right there and held nowhere else, so a recovery code alone
+can never switch two-factor off and there is no cookie or token to steal or
+replay. The order, which `src/lib/auth/recovery-redeem.ts` owns and
+`npm test` covers:
+
+1. **Validate** — address, password length, and the code normalised
+   (lowercased, everything outside the 31-symbol alphabet dropped; not ten
+   symbols → "Enter the ten-character recovery code.").
+2. **Rate limits**, charged whatever the outcome — each one even when the
+   other refuses: the sign-in pair (`authLogin` per IP, `authLoginAccount`
+   per email) because a password is checked, and `authMfa` on
+   `mfa:email:<address>` — the address the password is about to be proven
+   for, never the hidden `username` the browser posted; the same key the
+   code step uses wherever the pool username is the address.
+3. **Password** — `verifyPasswordForSensitiveAction()` in
+   `src/lib/auth/cognito.ts`: a bare `USER_PASSWORD_AUTH` whose
+   `SOFTWARE_TOKEN_MFA` challenge counts as proof and is left unanswered.
+   Tokens (no second factor asked: the factor is already off) and
+   `NEW_PASSWORD_REQUIRED` both send the form back to step one.
+4. **Who** — `AdminGetUser` by **the address the password was just proven
+   for**, never by the hidden `username` the browser posted, and the answer's
+   `email` attribute is compared with it (`adminFindUser()` in
+   `src/lib/auth/cognito-admin.ts`); then the enabled `admin_users` row by
+   `cognito_sub`.
+5. **Claim the code first** — one atomic `UPDATE … WHERE used_at IS NULL`,
+   so two requests carrying the same code cannot both pass.
+6. **Cognito off** — `adminTurnOffSecondFactor()`: `AdminSetUserMFAPreference`
+   on the **admin** pool with the authenticator app and passkey MFA both off,
+   signed with the task role's `operator-recovery` policy. A refusal puts the
+   code back and answers "Two-factor authentication couldn't be turned off
+   right now. Try again in a moment."
+7. The other nine rows are deleted (best effort); the redeemed one stays as
+   the record the drawer banner and the shell nudge are derived from.
+8. **Sign in** with the same password — tokens now — and `createSession(…,
+   "password")`: a password-only session, so the customer two-factor reset
+   refuses it until the operator enrols again. Should Cognito still answer a
+   challenge, `/login?recovery=used` explains and the password alone works.
+
+One neutral sentence covers a wrong password, an unknown or disabled account
+and a wrong code — "That password or recovery code isn't right. Check both
+and try again." — and every path spends the same budgets, so the recovery
+form is no cheaper an oracle than the code step. Logging names ids and
+Cognito error names only; never the address, the password, the code or its
+hash.
+
 ## Signing in with a passkey
 
 Under the password button, step one offers **Sign in with a passkey**. It uses
@@ -346,18 +406,22 @@ else to reach. Nothing is stored in either database; the pool is the record.
 | Start authenticator enrolment | `AssociateSoftwareToken` | `POST /api/v1/admin/me/mfa/totp` |
 | Verify and turn on | `VerifySoftwareToken` + `SetUserMFAPreference` | `PUT /api/v1/admin/me/mfa/totp` |
 | Turn off | `SetUserMFAPreference` | `DELETE /api/v1/admin/me/mfa/totp` |
+| Generate new recovery codes | `InitiateAuth` (the password re-check) + `GetUser` | `POST /api/v1/admin/me/mfa/recovery-codes` |
 | List passkeys | `ListWebAuthnCredentials` | `GET /api/v1/admin/me/passkeys` |
 | Add a passkey | `StartWebAuthnRegistration` + `CompleteWebAuthnRegistration` | `POST` then `PUT /api/v1/admin/me/passkeys` |
 | Remove a passkey | `DeleteWebAuthnCredential` | `DELETE /api/v1/admin/me/passkeys/[id]` |
 
-All nine go through `adminHandler` and are registered in
+All ten go through `adminHandler` and are registered in
 `src/lib/admin-access/endpoint-registry.ts` and in
 [`docs/sql/018_account_security_endpoints.sql`](./sql/018_account_security_endpoints.sql)
+(the tenth in [`022`](./sql/022_admin_user_recovery_codes.sql))
 with **no linked actions**, which the access map reads as "any enabled
 operator" — the same way `admin.me` is registered. The password change and the
 code verification also charge the `authReset` budget against the operator's id,
 not only against the client IP, because the per-IP limit is switched off
 whenever `TRUST_PROXY_HEADERS` is unset and neither may become an oracle.
+"Generate new recovery codes" proves a password, so it charges
+`authLoginAccount` per email and `accountMfa` per operator as well.
 
 **Changing a password does not sign other devices out.** Cognito leaves the
 refresh tokens it has already issued alone; revoking them everywhere means
@@ -376,10 +440,51 @@ can never be used to sign in. The issuer shown in the authenticator app is
 Admin"). Only new enrolments carry the new name — an entry already in
 someone's app keeps the one it was created with.
 
-There is no QR image. `qrcode` is not a dependency of this app, and rendering a
-picture of a string the person can already copy was not worth adding one — every
-authenticator accepts a pasted URI or a typed secret. Drawing the URI as a QR is
-a follow-up if the owner wants it.
+Since phase B (2026-10-04) the URI is also drawn as a **QR code** with antd's
+own `QRCode` component (no new dependency), rendered in the browser from the
+URI the server returned, so the secret still travels exactly once; the secret
+and the link stay as copyable text beneath it for a phone that cannot scan the
+screen it is on.
+
+### Recovery codes
+
+Phase B of [`two-factor-plan.md`](./two-factor-plan.md), a port of the
+consumer app's `docs/recovery-codes.md`. Cognito has no backup codes, so when
+the authenticator app is turned on the console issues **ten single-use codes**
+(`xxxxx-xxxxx`, ten symbols from a 31-symbol alphabet without `0`/`o`/`1`/`i`/`l`;
+`src/lib/account/recovery-codes.ts`) and shows them **once**, in a dialog with
+Copy and Download whose only exit is "I've saved my codes". SHA-256 hashes go
+to `admin_user_recovery_codes`
+([`docs/sql/022`](./sql/022_admin_user_recovery_codes.sql); `user_id` is
+`admin_users.id`, no RLS, every query pinned to one operator); the clear code
+is never stored or logged. Until that SQL has run the reads answer "no codes"
+and one warning line names the file — the module uses raw, parameterised
+queries so it ships before the schema pull, and switches to the typed model
+after `npx prisma db pull --config prisma-admin.config.ts`.
+
+- **One set at a time.** Enrolment (`PUT …/mfa/totp`) and **Generate new
+  codes** (`POST …/mfa/recovery-codes`, behind the password — a bare
+  `USER_PASSWORD_AUTH` whose second-factor challenge counts as proof;
+  refused with 422 while the app is off) replace the set. Turning the app
+  off deletes it. Enrolment never fails because of codes: a failed write is
+  logged and the drawer offers "Generate them now".
+- **The drawer** shows "Recovery codes — N of 10 left" under the
+  authenticator row while the app is on, and a banner while it is **off and
+  rows remain**: `used_at` set → "turned off with a recovery code on <date>",
+  unused rows → "turned off by support" (a CLI `admin-set-user-mfa-preference`
+  reset touches no row). The next enrolment clears both.
+- **The shell nudge.** The `(app)` layout adds one admin-database read —
+  `hasRedeemedRecoveryCode(admin_users.id)`, never a Cognito call on a render —
+  and `AppShell` mounts `TwoFactorResetNotice`, an antd notification with an
+  "Open Account & security" button on every full load until the rows are
+  replaced. Not remembered in `localStorage`: it should keep coming back.
+- **Redeeming** one is the sign-in form's business:
+  [Use a recovery code instead](#use-a-recovery-code-instead).
+- **IAM.** The redeem step signs two admin calls on the **admin** pool with
+  the task role: `cognito-idp:AdminGetUser` and `AdminSetUserMFAPreference`,
+  the `operator-recovery` policy in `infra/service-admin.yaml` (its own policy,
+  because nothing else on that role names the admin pool). Locally, the AWS
+  profile the console runs with needs the same two on the pool.
 
 ### Passkeys
 

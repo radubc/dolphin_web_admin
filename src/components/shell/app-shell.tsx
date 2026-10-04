@@ -9,6 +9,7 @@ import EntryDrawer from "./entry-drawer";
 import NavBar from "./nav-bar";
 import NotificationCenter from "./notification-center";
 import SideRail from "./side-rail";
+import TwoFactorResetNotice from "./two-factor-reset-notice";
 import type { AdminCapabilities } from "@/lib/admin-access/types";
 import type {
   QuickActionKind,
@@ -31,6 +32,12 @@ interface AppShellProps {
   settingsEntries: readonly ShellSettingsEntry[];
   /** Quick actions the operator may use, in order, per the access map. */
   quickActions: readonly ShellQuickAction[];
+  /**
+   * The operator signed in with a two-factor recovery code and has not set the
+   * authenticator app up again: the shell nudges them on every full load
+   * until the next enrolment (`./two-factor-reset-notice.tsx`).
+   */
+  twoFactorResetPending?: boolean;
   /** The active page, rendered in the scrolling content area. */
   children: ReactNode;
 }
@@ -56,12 +63,15 @@ export default function AppShell({
   tabs,
   settingsEntries,
   quickActions,
+  twoFactorResetPending = false,
   children,
 }: AppShellProps) {
   const [entryKind, setEntryKind] = useState<QuickActionKind | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
-  // The operator's own Cognito settings, raised from the avatar menu.
+  // The operator's own Cognito settings, raised from the avatar menu — and by
+  // the two-factor notice, which is why this is a stable callback.
   const [accountOpen, setAccountOpen] = useState(false);
+  const openAccount = useCallback(() => setAccountOpen(true), []);
   const [notificationCenterOpen, setNotificationCenterOpen] = useState(false);
   // Empty until the admin notifications API exists; see ./notifications.
   const [notifications, setNotifications] = useState<ShellNotification[]>(
@@ -100,7 +110,7 @@ export default function AppShell({
         settingsEntries={settingsEntries}
         onQuickAction={setEntryKind}
         onOpenHelp={() => setHelpOpen(true)}
-        onOpenAccount={() => setAccountOpen(true)}
+        onOpenAccount={openAccount}
         onOpenNotificationCenter={() => setNotificationCenterOpen(true)}
         onMarkNotificationRead={markRead}
         onMarkNotificationUnread={markUnread}
@@ -141,6 +151,9 @@ export default function AppShell({
         onClose={() => setAccountOpen(false)}
         email={email}
       />
+
+      {/* After a recovery-code sign-in: nudges until the app is set up again. */}
+      <TwoFactorResetNotice pending={twoFactorResetPending} onOpenAccount={openAccount} />
 
       <EntryDrawer
         kind={entryKind}
