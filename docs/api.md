@@ -73,13 +73,13 @@ Default rules as seeded; all editable on the Access Map.
 | --- | --- | --- | --- |
 | `admin.me` | `GET /api/v1/admin/me` | Caller's capabilities: id, email, super-admin flag, actions. | any operator |
 | `admin.me.password.change` | `POST /api/v1/admin/me/password` | Changes the caller's own password (Cognito `ChangePassword` with the caller's access token). Per-operator and per-IP `authReset` budget. | any operator |
-| `admin.me.mfa.get` | `GET /api/v1/admin/me/mfa` | Whether an authenticator app is on for the caller. | any operator |
-| `admin.me.mfa.totp.start` | `POST /api/v1/admin/me/mfa/totp` | Starts authenticator enrolment: the secret and `otpauth://` URI. 503 `mfa_not_enabled` until the pool allows software-token MFA. | any operator |
-| `admin.me.mfa.totp.verify` | `PUT /api/v1/admin/me/mfa/totp` | Verifies the first code and turns the authenticator on. | any operator |
-| `admin.me.mfa.totp.disable` | `DELETE /api/v1/admin/me/mfa/totp` | Turns the authenticator off. | any operator |
-| `admin.me.passkeys.list` | `GET /api/v1/admin/me/passkeys` | The caller's registered passkeys. 503 `passkeys_not_enabled` until the pool has a WebAuthn relying party. | any operator |
+| `admin.me.mfa.get` | `GET /api/v1/admin/me/mfa` | Whether an authenticator app is on for the caller, plus `passkeyMfaEnabled` (`WEB_AUTHN_MFA` listed) and `passkeySignInPaused` (TOTP on, a passkey, flag off). A read; never sets the flag. | any operator |
+| `admin.me.mfa.totp.start` | `POST /api/v1/admin/me/mfa/totp` | Starts authenticator enrolment: the secret and `otpauth://` URI (issuer "FairSums Admin"). 503 `mfa_not_enabled` on a pool without software-token MFA. | any operator |
+| `admin.me.mfa.totp.verify` | `PUT /api/v1/admin/me/mfa/totp` | Verifies the first code and turns the authenticator on; sets passkey MFA when a passkey exists. | any operator |
+| `admin.me.mfa.totp.disable` | `DELETE /api/v1/admin/me/mfa/totp` | Turns the authenticator off (and passkey MFA with it). | any operator |
+| `admin.me.passkeys.list` | `GET /api/v1/admin/me/passkeys` | The caller's registered passkeys. 503 `passkeys_not_enabled` on a pool without a WebAuthn relying party (the admin pool has one). | any operator |
 | `admin.me.passkeys.start` | `POST /api/v1/admin/me/passkeys` | Starts a passkey registration: the WebAuthn creation options. | any operator |
-| `admin.me.passkeys.complete` | `PUT /api/v1/admin/me/passkeys` | Completes it with the authenticator's credential. | any operator |
+| `admin.me.passkeys.complete` | `PUT /api/v1/admin/me/passkeys` | Completes it with the authenticator's credential; sets passkey MFA when the authenticator app is on. | any operator |
 | `admin.me.passkeys.delete` | `DELETE /api/v1/admin/me/passkeys/[id]` | Removes one passkey. | any operator |
 | `admin.users.list` | `GET /api/v1/admin/users` | All admin users with role keys. | `can_manage_admin_users` |
 | `admin.users.create` | `POST /api/v1/admin/users` | Invite: `{ email, displayName?, roleKeys, isSuperAdmin }`. | super-admin |

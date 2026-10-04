@@ -2,6 +2,7 @@
 
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { ensurePasskeyMfa } from "@/lib/account/passkey-mfa";
 import { isTooManyRequestsError } from "@/lib/api/errors";
 import {
   completeNewPassword,
@@ -480,6 +481,12 @@ export async function verifyMfaCode(
     }
     return { error: result.error, restart: result.restart };
   }
+
+  // The code was accepted, so TOTP is on: an operator who registered
+  // passkeys before passkey MFA existed gets their flag here (one `GetUser`;
+  // more only when the flag is off). Best-effort and never throws: the
+  // sign-in below happens whatever it answers.
+  await ensurePasskeyMfa(result.accessToken);
 
   await createSession(result);
 

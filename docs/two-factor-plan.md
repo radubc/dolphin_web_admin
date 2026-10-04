@@ -1,6 +1,8 @@
 # Two-factor authentication — admin console plan
 
-**Status: plan only, awaiting the owner's approval (2026-10-04). Nothing built.**
+**Status: approved by the owner on 2026-10-04** (order A → C → B → D; the
+issuer label becomes "FairSums Admin"; the operator step-up rule in phase C
+is in). Phase A built 2026-10-04, stage test pending.
 
 Mirrors phases 1 and 2 of the web app's `docs/two-factor-plan.md`
 (`~/Developer/projects/penny-squeeze-web`), plus the customer-support action
@@ -69,13 +71,42 @@ Port of the web app's phase 1, same shape, same lessons:
    `.../passkeys/route.ts:13–15`, `src/lib/auth/cognito.ts:67–69` and
    `:1219–1220`, `docs/api.md:77,80`, `docs/sql/018_…:34–37`; `docs/auth.md`
    gets the real passkey/TOTP rule and a "Passkey MFA" subsection.
-6. **Owner decision:** the TOTP issuer label is still `"Penny Squeeze Admin"`
-   (`src/lib/account/service.ts:50`); change to `"FairSums Admin"`? Only
-   new enrolments are affected.
+6. The TOTP issuer label `"Penny Squeeze Admin"` (`src/lib/account/service.ts:50`)
+   becomes `"FairSums Admin"` (owner, 2026-10-04). Only new enrolments are
+   affected; an existing authenticator entry keeps its old name.
 
 No SQL, no IAM, no pool change. Test on stage with the operator account:
 TOTP on + passkey → both sign-ins work; TOTP off → list empty, passkey
 still works.
+
+*Phase A built 2026-10-04:* `src/lib/account/passkey-mfa.ts`
+(`ensurePasskeyMfa`, best-effort, never throws), `setPasskeyMfaPreference` /
+`isPasskeyMfaListed` / the combined off-call in `src/lib/account/service.ts`,
+the three trigger points (`PUT …/mfa/totp`, `PUT …/passkeys`, `verifyMfaCode`
+before `createSession`), `passkeyMfaEnabled` + `passkeySignInPaused` on
+`GET /api/v1/admin/me/mfa` and in `types.ts`, the sentence and the paused
+warning in `two-factor-section.tsx` (re-read on `PASSKEYS_CHANGED_EVENT` from
+`passkeys-section.tsx`), the issuer "FairSums Admin", the stale comments and
+`docs/auth.md` ("Passkey MFA (2026-10-04)"). Not run locally: passkeys do
+not work from `localhost`, and the pool calls need a deployed host.
+
+Stage test (`admin.fairsums.app`, the operator account, after deploy):
+
+1. With TOTP on and a passkey registered from before, sign in with email +
+   password + code: the sign-in sets the flag. `admin-get-user` lists
+   `WEB_AUTHN_MFA` beside `SOFTWARE_TOKEN_MFA`; the drawer shows no "paused"
+   warning and "Factors Cognito has on file" names both.
+2. Sign out, "Sign in with a passkey": Touch ID / PIN prompt, signed in, no
+   code step.
+3. Sign out, email + password: the code step still appears.
+4. Account & security: turn TOTP off → `UserMFASettingList` empty (the log
+   shows no `disable authenticator app and passkey MFA: Cognito refused`
+   line, so the combined call was accepted); passkey sign-in works; password
+   sign-in asks no code.
+5. Turn TOTP on again (new enrolment, issuer "FairSums Admin" in the app):
+   `WEB_AUTHN_MFA` is listed straight after the code is accepted, without a
+   sign-in. Remove the passkey, add one back: the warning appears and
+   disappears with it.
 
 ## Phase B — QR code and operator recovery codes (medium)
 
@@ -159,7 +190,7 @@ The brief `docs/admin-console/two-factor-reset.md` (web repo), made concrete:
 
 | # | Phase | Size | Owner steps |
 |---|---|---|---|
-| A | Passkeys count as two factors | small | deploy; stage test; decide the issuer label |
+| A | Passkeys count as two factors | small | deploy; stage test |
 | C | Customer two-factor reset | medium | run SQL for the endpoint grant; deploy (IAM) |
 | B | QR code + operator recovery codes | medium | run SQL 021; `prisma db pull` (admin config); deploy (IAM) |
 | D | Tests and docs | small | — |

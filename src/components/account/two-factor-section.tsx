@@ -11,11 +11,16 @@
  *   proves it arrived (`VerifySoftwareToken`) before the factor is switched on
  *   (`SetUserMFAPreference`).
  * - **On** — a "Turn off" button, which is `SetUserMFAPreference` again with
- *   the factor disabled.
- * - **Refused** — the admin pool's `MfaConfiguration` is `OFF` today, so AWS
- *   declines. The section stays visible and shows Cognito's own sentence: it
- *   names the pool setting that is missing, which is what the owner needs. See
- *   `docs/auth.md` for the commands that switch it on.
+ *   the factor disabled (and passkey MFA with it).
+ * - **Refused** — a pool with `MfaConfiguration OFF` declines (the admin pool
+ *   has been `OPTIONAL` since 2026-09-12). The section stays visible and shows
+ *   Cognito's own sentence: it names the pool setting that is missing, which
+ *   is what the owner needs. See `docs/auth.md` for the commands.
+ *
+ * A passkey counts as both factors once the per-user flag is set
+ * (`src/lib/account/passkey-mfa.ts`); while an account has the app on, a
+ * passkey and no flag, `passkeySignInPaused` shows a warning, re-read when the
+ * section below adds or removes a passkey (`PASSKEYS_CHANGED_EVENT`).
  *
  * No QR image: `qrcode` is not a dependency of this app, and adding one to
  * render a picture of a string the user can already copy was not worth it.
@@ -35,6 +40,7 @@ import { accountApi, fieldErrorsFrom } from "@/lib/account/client";
 import type { MfaStatus, TotpEnrolment } from "@/lib/account/types";
 import { errorMessage } from "@/lib/format";
 import { surfaceColors } from "@/lib/theme/colors";
+import { PASSKEYS_CHANGED_EVENT } from "./passkeys-section";
 
 interface CodeFields {
   code: string;
@@ -78,6 +84,27 @@ export default function TwoFactorSection() {
       });
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  // A passkey added or removed in the section below can start or end the
+  // paused state, so the status is read again. Every state update happens in
+  // a promise callback from an event handler, never in the effect's own pass.
+  useEffect(() => {
+    const onPasskeysChanged = () => {
+      void accountApi.mfa
+        .status()
+        .then((next) => {
+          setStatus(next);
+          setError(null);
+        })
+        .catch((cause: unknown) => {
+          setError(errorMessage(cause));
+        });
+    };
+    window.addEventListener(PASSKEYS_CHANGED_EVENT, onPasskeysChanged);
+    return () => {
+      window.removeEventListener(PASSKEYS_CHANGED_EVENT, onPasskeysChanged);
     };
   }, []);
 
@@ -167,12 +194,23 @@ export default function TwoFactorSection() {
         />
       ) : null}
 
+      {status?.passkeySignInPaused === true ? (
+        <Alert
+          type="warning"
+          showIcon
+          title="Passkey sign-in is paused while two-factor authentication is on. Until an upcoming update, sign in with your password and authenticator code."
+          role="alert"
+        />
+      ) : null}
+
       {enrolment === null ? (
         <>
           <Typography.Text type="secondary" className="text-sm">
             {on
-              ? "You are asked for a six-digit code from your authenticator app every time you sign in."
-              : "Add a second step to sign-in: a six-digit code from an authenticator app such as 1Password, Authy or Google Authenticator."}
+              ? "You are asked for a six-digit code from your authenticator app every time you sign in with your password. "
+              : "Add a second step to password sign-in: a six-digit code from an authenticator app such as 1Password, Authy or Google Authenticator. "}
+            A passkey signs you in on its own and counts as two factors. The
+            authenticator app protects password sign-in.
           </Typography.Text>
           <Space>
             {on ? (

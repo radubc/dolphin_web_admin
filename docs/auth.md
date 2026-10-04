@@ -350,7 +350,10 @@ copyable text and as an `otpauth://totp/...` URI, and stores it nowhere. A
 six-digit code then proves the app has it (`VerifySoftwareToken`), and only
 after that does `SetUserMFAPreference` switch the factor on and make it
 preferred. Abandoning the form simply abandons the secret: an unverified one
-can never be used to sign in.
+can never be used to sign in. The issuer shown in the authenticator app is
+**"FairSums Admin"** since 2026-10-04 (owner decision; it was "Penny Squeeze
+Admin"). Only new enrolments carry the new name — an entry already in
+someone's app keeps the one it was created with.
 
 There is no QR image. `qrcode` is not a dependency of this app, and rendering a
 picture of a string the person can already copy was not worth adding one — every
@@ -379,6 +382,53 @@ see [Signing in with a passkey](#signing-in-with-a-passkey). The two ceremonies
 share `src/lib/account/webauthn.ts` — `createPasskey()` for registration,
 `getPasskeyAssertion()` for authentication — and nothing else.
 
+### Passkey MFA (2026-10-04)
+
+The rule, as Cognito applies it: a passkey is a **first** factor. An operator
+with the authenticator app on is refused a passkey sign-in outright
+(`NotAuthorizedException`, not a challenge) unless the pool's WebAuthn
+configuration is `FactorConfiguration: MULTI_FACTOR_WITH_USER_VERIFICATION`
+**and** the account has `WebAuthnMfaSettings` on; then a passkey with user
+verification (Touch ID, Face ID, PIN) counts as both factors on its own, and
+password sign-in still asks for the code. The per-user flag is only allowed
+beside another factor, so the console sets it exactly when the account has
+TOTP on and at least one passkey. This is phase A of
+[`two-factor-plan.md`](./two-factor-plan.md), a port of the web app's phase 1.
+
+- **Pool prerequisite**, applied by the owner on 2026-10-04:
+  `UserVerification: required` and `MULTI_FACTOR_WITH_USER_VERIFICATION` on
+  the admin pool (the command is step 2(b) below). The code works with either
+  setting; on a pool without it the flag is refused and logged.
+- **Three trigger points**, all through `ensurePasskeyMfa()` in
+  `src/lib/account/passkey-mfa.ts` (best-effort, never throws): after
+  `PUT /api/v1/admin/me/mfa/totp` turns the app on, after
+  `PUT /api/v1/admin/me/passkeys` registers a passkey, and in `verifyMfaCode`
+  (`src/app/login/actions.ts`) after a password sign-in's code is accepted and
+  before the session is written — which heals operators who had both before
+  this existed: one `GetUser` per TOTP sign-in, `ListWebAuthnCredentials` and
+  `SetUserMFAPreference` only when the flag is off.
+- **The same-request lesson.** `SetUserMFAPreference` with
+  `WebAuthnMfaSettings { Enabled: true }` alone is refused with
+  `InvalidParameterException: WebAuthn MFA requires enabling an additional MFA
+  setting.` even when TOTP is already on (stage, 2026-10-03). Enabling therefore
+  sends `SoftwareTokenMfaSettings { Enabled: true, PreferredMfa: true }` in the
+  same request (`setPasskeyMfaPreference()` in `src/lib/account/service.ts`).
+  Turning the app off sends both settings off in one call, which Cognito
+  accepts and which empties the list; if it is ever refused, the TOTP-only call
+  that ran before this change is sent instead.
+- **The value.** Once set, `GetUser.UserMFASettingList` holds `WEB_AUTHN_MFA`
+  beside `SOFTWARE_TOKEN_MFA`; `isPasskeyMfaListed()` in `service.ts` is the
+  one place that reads it. `GET /api/v1/admin/me/mfa` answers
+  `passkeyMfaEnabled` and `passkeySignInPaused` (TOTP on, a passkey, flag off;
+  that one case adds a `ListWebAuthnCredentials` to the read) and never sets
+  the flag.
+- **The drawer** says "A passkey signs you in on its own and counts as two
+  factors. The authenticator app protects password sign-in." and, while
+  paused, warns "Passkey sign-in is paused while two-factor authentication is
+  on. Until an upcoming update, sign in with your password and authenticator
+  code." The warning is re-read when the Passkeys section adds or removes one
+  (`PASSKEYS_CHANGED_EVENT` on `window`).
+
 ## What the user pool needs
 
 **Done for the admin pool `us-west-2_0WO5mp4bn` ("Dolphin - Admin") as of
@@ -386,7 +436,10 @@ share `src/lib/account/webauthn.ts` — `createPasskey()` for registration,
 WebAuthn relying party is `admin.fairsums.app`, `AllowedFirstAuthFactors` is
 `[PASSWORD, WEB_AUTHN]`, and the app client has `ALLOW_USER_AUTH` alongside the
 password and refresh flows. Two-factor enrolment, passkey registration and
-passkey sign-in all work against it.
+passkey sign-in all work against it. **Since 2026-10-04** the WebAuthn
+configuration is also `UserVerification: required` with
+`FactorConfiguration: MULTI_FACTOR_WITH_USER_VERIFICATION`, which is what lets
+a passkey count as both factors ([Passkey MFA](#passkey-mfa-2026-10-04)).
 
 The steps below are kept as the runbook for **every other environment** — a
 `testing.fairsums.app` pool, or a local one. A pool has exactly one relying
@@ -441,7 +494,7 @@ own user pool if more than one is to use passkeys.
       --user-pool-id "$POOL_ID" \
       --mfa-configuration OPTIONAL \
       --software-token-mfa-configuration Enabled=true \
-      --web-authn-configuration RelyingPartyId=admin.fairsums.app,UserVerification=preferred
+      --web-authn-configuration RelyingPartyId=admin.fairsums.app,UserVerification=required,FactorConfiguration=MULTI_FACTOR_WITH_USER_VERIFICATION
 
     # c. WEB_AUTHN as an allowed first auth factor for the pool
     aws cognito-idp update-user-pool \

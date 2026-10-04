@@ -15,12 +15,24 @@
 export interface MfaStatus {
   /** True when a verified authenticator app is switched on for the account. */
   totpEnabled: boolean;
+  /**
+   * True when passkey MFA (`WebAuthnMfaSettings`) is on: a passkey with user
+   * verification then counts as both factors, so an operator with the
+   * authenticator app keeps passkey sign-in. Set by `./passkey-mfa.ts`.
+   */
+  passkeyMfaEnabled: boolean;
+  /**
+   * TOTP on, at least one passkey registered, passkey MFA still off: Cognito
+   * refuses this account a passkey sign-in until the flag is set.
+   */
+  passkeySignInPaused: boolean;
   /** Cognito's `PreferredMfaSetting`, or null when nothing is preferred. */
   preferred: string | null;
   /**
-   * Every factor Cognito lists as active: `SOFTWARE_TOKEN_MFA`, `SMS_MFA`,
-   * `EMAIL_OTP`. Shown as-is so a factor this console cannot manage is still
-   * visible rather than silently missing.
+   * Every factor Cognito lists as active: `SOFTWARE_TOKEN_MFA`,
+   * `WEB_AUTHN_MFA` (passkey MFA, the value seen on stage 2026-10-03),
+   * `SMS_MFA`, `EMAIL_OTP`. Shown as-is so a factor this console cannot
+   * manage is still visible rather than silently missing.
    */
   methods: string[];
 }

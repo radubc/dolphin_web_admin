@@ -10,13 +10,14 @@ import "server-only";
  *
  * ## What the pool has to allow
  *
- * The admin pool is currently tier LITE with `MfaConfiguration OFF` and no
- * WebAuthn relying party, so the MFA and passkey calls below are refused by
- * AWS today. That is deliberate: the code is complete and the UI stays
- * visible, and every refusal is turned into a 503 that **quotes Cognito's own
- * sentence** rather than a generic apology, so the person reading it can see
- * what the pool is missing. `docs/auth.md` lists the settings and the CLI
- * commands that switch them on; nothing here needs to change afterwards.
+ * The admin pool has been Essentials tier with `MfaConfiguration OPTIONAL`,
+ * software tokens on and the relying party `admin.fairsums.app` since
+ * 2026-09-12, and `MULTI_FACTOR_WITH_USER_VERIFICATION` since 2026-10-04, so
+ * every call below works there. A pool missing a piece (another environment)
+ * still refuses, and every refusal is turned into a 503 that **quotes
+ * Cognito's own sentence** rather than a generic apology, so the person
+ * reading it can see what the pool is missing. `docs/auth.md` lists the
+ * settings and the CLI commands that switch them on.
  */
 import {
   AssociateSoftwareTokenCommand,
@@ -46,8 +47,12 @@ import type {
   TotpEnrolment,
 } from "./types";
 
-/** Shown on the authenticator app's entry, and in the otpauth URI. */
-const TOTP_ISSUER = "Penny Squeeze Admin";
+/**
+ * Shown on the authenticator app's entry, and in the otpauth URI. Renamed from
+ * "Penny Squeeze Admin" on 2026-10-04 (owner); only new enrolments see it, an
+ * existing authenticator entry keeps the name it was created with.
+ */
+const TOTP_ISSUER = "FairSums Admin";
 
 /** Cognito's cap on how many credentials one list call returns. */
 const PASSKEY_PAGE_SIZE = 20;
@@ -249,7 +254,24 @@ export async function changeOwnPassword(
 /*                        Two-factor: authenticator app                       */
 /* -------------------------------------------------------------------------- */
 
-/** Reads the factors Cognito has switched on for this operator. */
+/**
+ * Whether `GetUser.UserMFASettingList` says passkey MFA is on.
+ *
+ * The SDK documents `SOFTWARE_TOKEN_MFA` for the authenticator app but not the
+ * value Cognito lists for `WebAuthnMfaSettings`; on stage (2026-10-03) it was
+ * `WEB_AUTHN_MFA`. Any entry containing `WEB_AUTHN` is taken as the flag, in
+ * this one helper, in case the spelling ever moves.
+ */
+export function isPasskeyMfaListed(methods: readonly string[]): boolean {
+  return methods.some((method) => method.toUpperCase().includes("WEB_AUTHN"));
+}
+
+/**
+ * Reads the factors Cognito has switched on for this operator. A read only:
+ * it writes nothing to Cognito. `passkeySignInPaused` needs the passkey list,
+ * which is fetched only for an account with TOTP on and passkey MFA off; the
+ * flag itself is switched on elsewhere (`./passkey-mfa.ts`).
+ */
 export async function getMfaStatus(accessToken: string): Promise<MfaStatus> {
   let response;
   try {
@@ -263,8 +285,25 @@ export async function getMfaStatus(accessToken: string): Promise<MfaStatus> {
   }
 
   const methods = response.UserMFASettingList ?? [];
+  const totpEnabled = methods.includes("SOFTWARE_TOKEN_MFA");
+  const passkeyMfaEnabled = isPasskeyMfaListed(methods);
+  let passkeySignInPaused = false;
+  if (totpEnabled && !passkeyMfaEnabled) {
+    try {
+      passkeySignInPaused = (await listPasskeys(accessToken)).length > 0;
+    } catch (error) {
+      // The status is still true; only the "paused" hint is unknown.
+      console.warn(
+        `[account] MFA status: could not list passkeys (${
+          error instanceof ApiError ? error.code : errorName(error)
+        }).`,
+      );
+    }
+  }
   return {
-    totpEnabled: methods.includes("SOFTWARE_TOKEN_MFA"),
+    totpEnabled,
+    passkeyMfaEnabled,
+    passkeySignInPaused,
     preferred: response.PreferredMfaSetting ?? null,
     methods,
   };
@@ -343,9 +382,13 @@ export async function startTotpEnrolment(
  *
  * The two calls are separate on the AWS side and cannot be one transaction, so
  * a verified-but-not-enabled account is possible if `SetUserMFAPreference`
- * fails — which is exactly what happens while the pool's `MfaConfiguration` is
- * `OFF`. That refusal is reported as its own 503 quoting Cognito, and the next
+ * fails — which is what happens on a pool whose `MfaConfiguration` is `OFF`.
+ * That refusal is reported as its own 503 quoting Cognito, and the next
  * attempt starts cleanly from a fresh secret.
+ *
+ * Passkey MFA is not set here: the PUT route calls `ensurePasskeyMfa()`
+ * (`./passkey-mfa.ts`) once this has succeeded, so an operator who already has
+ * a passkey keeps passkey sign-in.
  */
 export async function verifyTotpEnrolment(
   accessToken: string,
@@ -399,9 +442,26 @@ export async function verifyTotpEnrolment(
   return getMfaStatus(accessToken);
 }
 
-/** Switches the authenticator app off. The registered secret stays verified. */
+/**
+ * Switches the authenticator app off. The registered secret stays verified.
+ *
+ * Passkey MFA goes off in the same call (Cognito wants another factor on while
+ * it is). If Cognito refuses that, the TOTP-only call that ran before passkey
+ * MFA existed is sent instead — except for a rejected token or throttling,
+ * which a retry would only repeat.
+ */
 export async function disableTotp(accessToken: string): Promise<MfaStatus> {
-  await setTotpPreference(accessToken, false);
+  try {
+    await disableTotpAndPasskeyMfa(accessToken);
+  } catch (error) {
+    if (
+      error instanceof ApiError &&
+      (error.code === "token_expired" || error.code === "rate_limited")
+    ) {
+      throw error;
+    }
+    await setTotpPreference(accessToken, false);
+  }
   return getMfaStatus(accessToken);
 }
 
@@ -455,15 +515,106 @@ async function setTotpPreference(
 }
 
 /* -------------------------------------------------------------------------- */
+/*                    Two-factor: passkeys as both factors                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The failure of a passkey-MFA call: logged as a warning with Cognito's error
+ * name only, never as an error, because the expected cause is a pool without
+ * `MULTI_FACTOR_WITH_USER_VERIFICATION` and nothing the operator did. The
+ * callers treat the call as best-effort (`./passkey-mfa.ts`, `disableTotp`).
+ */
+function passkeyMfaRefused(error: unknown, where: string): ApiError {
+  const name = errorName(error);
+  console.warn(`[account] ${where}: Cognito refused (${name || "unknown"}).`);
+  switch (name) {
+    case "NotAuthorizedException":
+      return new ApiError(
+        401,
+        "token_expired",
+        "Session expired; refresh and retry.",
+      );
+    case "TooManyRequestsException":
+    case "LimitExceededException":
+      return throttled();
+    default:
+      return new ServiceUnavailableError(
+        "mfa_not_enabled",
+        `Cognito would not ${where}.`,
+      );
+  }
+}
+
+/**
+ * Switches passkey MFA on or off: with it on, a passkey with user verification
+ * satisfies both factors on its own, so an operator with an authenticator app
+ * keeps passkey sign-in. There is no `PreferredMfa` for it.
+ *
+ * Cognito accepts it only when the pool's `WebAuthnConfiguration` is
+ * `MULTI_FACTOR_WITH_USER_VERIFICATION`, and the user must have another factor
+ * on (TOTP here). Having TOTP on is not enough: a request with
+ * `WebAuthnMfaSettings` alone is refused with `InvalidParameterException:
+ * WebAuthn MFA requires enabling an additional MFA setting.` even for an
+ * account whose `UserMFASettingList` already holds `SOFTWARE_TOKEN_MFA`
+ * (stage, 2026-10-03). The other factor has to be stated in the same request,
+ * so enabling re-asserts the TOTP preference the caller has already checked
+ * is on. Disabling sends the WebAuthn setting alone.
+ */
+export async function setPasskeyMfaPreference(
+  accessToken: string,
+  enabled: boolean,
+): Promise<void> {
+  try {
+    await cognitoClient().send(
+      new SetUserMFAPreferenceCommand({
+        AccessToken: accessToken,
+        ...(enabled
+          ? { SoftwareTokenMfaSettings: { Enabled: true, PreferredMfa: true } }
+          : {}),
+        WebAuthnMfaSettings: { Enabled: enabled },
+      }),
+    );
+  } catch (error) {
+    throw passkeyMfaRefused(
+      error,
+      enabled ? "enable passkey MFA" : "disable passkey MFA",
+    );
+  }
+}
+
+/**
+ * Turns the authenticator app off and passkey MFA with it, in one
+ * `SetUserMFAPreference`: Cognito wants another factor on while passkey MFA
+ * is, so it must not be left dangling. Accepted on stage (2026-10-04), the
+ * list comes back empty; `disableTotp` falls back to the TOTP-only call on a
+ * refusal.
+ */
+async function disableTotpAndPasskeyMfa(accessToken: string): Promise<void> {
+  try {
+    await cognitoClient().send(
+      new SetUserMFAPreferenceCommand({
+        AccessToken: accessToken,
+        SoftwareTokenMfaSettings: { Enabled: false, PreferredMfa: false },
+        WebAuthnMfaSettings: { Enabled: false },
+      }),
+    );
+  } catch (error) {
+    throw passkeyMfaRefused(error, "disable authenticator app and passkey MFA");
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /*                                  Passkeys                                  */
 /* -------------------------------------------------------------------------- */
 
 /**
  * Every WebAuthn refusal that means "the pool is not set up for passkeys".
  *
- * `WebAuthnConfigurationMissingException` is the one the admin pool answers
- * today: no relying party id is configured. `FeatureUnavailableInTierException`
- * is the LITE tier saying passkeys are an Essentials feature.
+ * `WebAuthnConfigurationMissingException` is what a pool without a relying
+ * party id answers; `FeatureUnavailableInTierException` is a LITE-tier pool
+ * saying passkeys are an Essentials feature. The admin pool has had both
+ * since 2026-09-12, so neither is expected today; kept for a misconfigured
+ * environment.
  */
 const PASSKEYS_UNCONFIGURED = new Set([
   "WebAuthnConfigurationMissingException",

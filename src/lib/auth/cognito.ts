@@ -64,9 +64,9 @@ export interface NewPasswordChallenge {
  * The second-factor challenge: the operator has registered an authenticator
  * app and Cognito wants the six-digit code before it issues any token.
  *
- * Only raised once the pool's `MfaConfiguration` is `OPTIONAL` (or `ON`) with
- * software tokens enabled — see `docs/auth.md`. Until then Cognito never asks
- * and this branch is dead code that costs nothing.
+ * Raised on a password sign-in by an operator with the app on; the admin pool
+ * (`MfaConfiguration OPTIONAL`, software tokens on since 2026-09-12) does ask.
+ * A passkey sign-in never gets it: with the per-user flag it is both factors.
  */
 export interface SoftwareTokenMfaChallenge {
   name: "SOFTWARE_TOKEN_MFA";
@@ -1216,8 +1216,12 @@ export async function respondToWebAuthnChallenge(
   }
 
   if (response.ChallengeName) {
-    // A passkey is a strong factor and the pool does not normally ask for a
-    // second one, but if it ever does, say so rather than fail silently.
+    // A passkey is a first factor; with the pool's
+    // MULTI_FACTOR_WITH_USER_VERIFICATION and the per-user flag
+    // (`src/lib/account/passkey-mfa.ts`) one with user verification counts as
+    // both, so no second challenge is expected. Without the flag an operator
+    // with TOTP on is refused outright (an error above), not challenged. If a
+    // challenge ever does come, say so rather than fail silently.
     console.error(
       `[auth] Unsupported Cognito challenge after WEB_AUTHN: ${response.ChallengeName}`,
     );

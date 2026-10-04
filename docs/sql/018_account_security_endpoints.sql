@@ -30,13 +30,14 @@
 --   super-admin only, so before this file runs the drawer works for the owner
 --   and answers 403 for everyone else.
 --
--- What still has to happen in Cognito
---   The MFA and passkey endpoints are complete but AWS refuses them until the
---   admin user pool is reconfigured — MfaConfiguration OPTIONAL with software
---   tokens on, and for passkeys the Essentials tier plus a WebAuthn relying
---   party. They answer 503 (mfa_not_enabled / passkeys_not_enabled) quoting
---   Cognito's own sentence until then. The settings and the aws cli commands
---   are in docs/auth.md. This SQL is unaffected either way.
+-- What Cognito has to allow (done for the admin pool)
+--   The MFA and passkey endpoints need the admin user pool configured —
+--   MfaConfiguration OPTIONAL with software tokens on, the Essentials tier
+--   plus the WebAuthn relying party admin.fairsums.app (2026-09-12), and
+--   MULTI_FACTOR_WITH_USER_VERIFICATION so a passkey counts as both factors
+--   (2026-10-04). A pool missing a piece answers 503 (mfa_not_enabled /
+--   passkeys_not_enabled) quoting Cognito's own sentence. The settings and
+--   the aws cli commands are in docs/auth.md. This SQL is unaffected either way.
 
 BEGIN;
 

@@ -16,9 +16,10 @@
  * is what people expect to be asked, and because a stored label would need a
  * table of our own; that is a follow-up, noted in `docs/auth.md`.
  *
- * The admin pool has no WebAuthn relying party configured and is below the
- * Essentials tier, so every call is refused today. The section stays visible
- * and shows Cognito's own sentence rather than hiding itself.
+ * The admin pool is Essentials tier with the relying party `admin.fairsums.app`
+ * (2026-09-12), so every call works there — though not from `localhost`. On a
+ * pool missing either, the section stays visible and shows Cognito's own
+ * sentence rather than hiding itself.
  */
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
@@ -48,6 +49,12 @@ import { errorMessage, formatDateTimeOrDash } from "@/lib/format";
 interface AddFields {
   name?: string;
 }
+
+/**
+ * Fired on `window` after a passkey is added or removed, so the two-factor
+ * section above can re-read whether passkey sign-in is paused.
+ */
+export const PASSKEYS_CHANGED_EVENT = "fairsums-admin:passkeys-changed";
 
 /** No-op subscribe: whether WebAuthn exists never changes within a page. */
 const NEVER_CHANGES = () => () => {};
@@ -140,6 +147,7 @@ export default function PasskeysSection() {
       form.resetFields();
       const name = values.name?.trim();
       message.success(name ? `${name} added.` : "Passkey added.");
+      window.dispatchEvent(new Event(PASSKEYS_CHANGED_EVENT));
       await load();
     } catch (cause) {
       if (wasCancelled(cause)) {
@@ -158,6 +166,7 @@ export default function PasskeysSection() {
     try {
       await accountApi.passkeys.remove(passkey.id);
       message.success(`${passkey.name} removed.`);
+      window.dispatchEvent(new Event(PASSKEYS_CHANGED_EVENT));
       await load();
     } catch (cause) {
       setError(errorMessage(cause));
