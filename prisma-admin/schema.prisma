@@ -255,6 +255,7 @@ model admin_users {
   admin_role_actions                                        admin_role_actions[]
   admin_roles_admin_roles_created_byToadmin_users           admin_roles[]                   @relation("admin_roles_created_byToadmin_users")
   admin_roles_admin_roles_updated_byToadmin_users           admin_roles[]                   @relation("admin_roles_updated_byToadmin_users")
+  admin_user_recovery_codes                                 admin_user_recovery_codes[]
   admin_user_roles_admin_user_roles_created_byToadmin_users admin_user_roles[]              @relation("admin_user_roles_created_byToadmin_users")
   admin_user_roles                                          admin_user_roles[]
   admin_users_admin_users_created_byToadmin_users           admin_users?                    @relation("admin_users_created_byToadmin_users", fields: [created_by], references: [id], onUpdate: NoAction)
@@ -888,4 +889,18 @@ model admin_pool_metrics_daily {
   /// SignInThrottles, Sum. Anything but 0 is worth an operator's attention.
   throttles        Int      @default(0)
   fetched_at       DateTime @default(now()) @db.Timestamptz(6)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model admin_user_recovery_codes {
+  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id     String      @db.Uuid
+  code_hash   String
+  created_at  DateTime    @default(now()) @db.Timestamptz(6)
+  used_at     DateTime?   @db.Timestamptz(6)
+  admin_users admin_users @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([user_id, code_hash], map: "admin_user_recovery_codes_user_hash_key")
+  @@index([user_id], map: "idx_admin_user_recovery_codes_user_id")
 }
