@@ -392,13 +392,79 @@ ARN (`arn:aws:cognito-idp:<region>:<account>:userpool/<CUSTOMER_COGNITO_USER_POO
 | --- | --- |
 | `cognito-idp:ListUsers` | the status column and the Invited / Disabled counts |
 | `cognito-idp:AdminCreateUser` | sending an invitation, and resending it |
-| `cognito-idp:AdminGetUser` | checking an account is still unused before a revoke |
+| `cognito-idp:AdminGetUser` | checking an account is still unused before a revoke; the "Two-factor authentication" line of the detail drawer |
 | `cognito-idp:AdminDeleteUser` | revoking an invitation |
+| `cognito-idp:AdminSetUserMFAPreference` | "Turn off two-factor authentication" in the detail drawer (below) |
 
 Nothing here needs `AdminSetUserPassword`, `AdminDisableUser` or
 `AdminUpdateUserAttributes`, and the policy should not grant them: this console
 cannot change a customer's password, disable their account or edit their
-profile, and the permissions should say so.
+profile, and the permissions should say so. The one write it can make to an
+account is the two-factor reset, and that call changes nothing else.
+
+## Turning off a customer's two-factor authentication
+
+The support case (`docs/two-factor-plan.md`, phase C; the brief is the web
+repo's `docs/admin-console/two-factor-reset.md`): a person has lost both their
+authenticator app and the recovery codes the consumer app gave them. There is
+no self-service "email me a reset" and there will not be — an email link that
+turns a second factor off is a second factor an attacker can phish — so this
+is the only recovery path besides the person's own codes.
+
+The detail drawer's "Cognito account" section shows **Two-factor
+authentication: On (authenticator app, passkey) / Off / Unavailable**, read
+with one `AdminGetUser` per drawer open (`UserMFASettingList`;
+`SOFTWARE_TOKEN_MFA` is the authenticator app, `WEB_AUTHN_MFA` the passkey-MFA
+flag the consumer app sets beside it). The cached directory listing does not
+carry it, and a pool that cannot be asked reads "Unavailable" without failing
+the drawer. While it is On, the section offers **Turn off two-factor
+authentication** (danger-styled), a dialog that requires the customer's email
+address typed back, and then `POST /api/v1/admin/customers/[id]/two-factor/reset`:
+one `AdminSetUserMFAPreference` on the customer pool with
+`SoftwareTokenMfaSettings { Enabled: false, PreferredMfa: false }` **and**
+`WebAuthnMfaSettings { Enabled: false }` in the same call — Cognito allows the
+passkey flag only beside another factor, so the pair goes together (verified on
+stage 2026-10-04: the list comes back empty). The code is
+`src/lib/customers/two-factor.ts` and `resetTwoFactor` in
+`src/lib/customers/cognito.ts`.
+
+Afterwards the person's password sign-in asks for no code and a passkey
+sign-in still works (a passkey is a first factor). The consumer app notices
+its leftover recovery-code rows, tells the person support turned the factor
+off, and replaces the codes when they enrol again. This console **never
+reads or writes `user_recovery_codes`**: that table is the web app's, and
+the next enrolment is what resets it. The account's password, passkeys,
+attributes and enabled state are untouched.
+
+The guards, in order:
+
+- **The operator must be signed in with a second factor.** The session
+  records how it was signed in (`password`, `password+totp` or `passkey`; see
+  [auth.md](./auth.md)) and the route refuses a password-only session with
+  403 "Sign in with your authenticator app or a passkey to use this." The
+  drawer prints that sentence where the button would be
+  (`operatorCanReset` on the detail read), so nobody opens a dialog the
+  server will refuse.
+- **Rate limit**: five per hour per operator (`customerTwoFactorReset`),
+  charged before Cognito. Support does this for one person at a time; a
+  script that flips it for many is what the limit is for.
+- **Access Map**: `admin.customers.two_factor_reset`, registered by
+  [`docs/sql/021_customer_two_factor_reset.sql`](./sql/021_customer_two_factor_reset.sql)
+  against `can_write_user`; super-admin only until that file has run.
+- **Audit**: one `admin_permission_audit_events` row per attempt that reaches
+  Cognito — `customer_two_factor_reset` on success,
+  `customer_two_factor_reset_failed` with the error code when AWS refused —
+  `target_type = 'customer_two_factor_reset'`, `target_id` the customer's
+  `users.id`, the email, the sub and `methodsBefore` in the metadata. Best
+  effort, like the invitation audit. The server log names the sub and
+  Cognito's error name, never the address.
+
+A `NotAuthorizedException` or `AccessDeniedException` is the task role lacking
+`AdminSetUserMFAPreference` (the `customer-user-pool` policy in
+`infra/service-admin.yaml`); it answers 503 `cognito_unavailable` and changes
+nothing. Locally the call is signed by the SDK default chain, like
+invitations. An email to the customer is phase 3 of the web app's plan and is
+not sent from here.
 
 The pool must also be able to send email (Cognito's default sender is
 rate-limited; a real deployment configures SES).

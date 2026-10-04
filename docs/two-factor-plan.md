@@ -22,7 +22,7 @@ enrolment (text key only), passkey register / list / delete
 admin calls on the customer pool (`src/lib/customers/cognito.ts`, IAM policy
 `customer-user-pool` in `infra/service-admin.yaml`), the audit table
 `admin_permission_audit_events`, and the numbered-SQL schema workflow
-(`docs/database.md`; next file `021_…`).
+(`docs/database.md`; next file `022_…` — `021` is phase C's).
 
 Absent: any `WebAuthnMfaSettings` call or `WEB_AUTHN_MFA` reading, a QR
 code, recovery codes, a customer "turn off two-factor" action, knowledge of
@@ -118,7 +118,7 @@ the web repo and is not repeated here — only the admin differences:
 2. **Table** `admin_user_recovery_codes` (`user_id` → `admin_users.id`,
    uuid, ON DELETE CASCADE; `code_hash`, `created_at`, `used_at`; unique
    `(user_id, code_hash)`; no RLS, like the other admin tables) as
-   `docs/sql/021_admin_user_recovery_codes.sql`; owner runs it on the local
+   `docs/sql/022_admin_user_recovery_codes.sql`; owner runs it on the local
    and stage admin databases, then `npx prisma db pull --config
    prisma-admin.config.ts && npx prisma generate`.
 3. **Codes**: ten, shown once after `verifyTotpEnrolment` (PUT
@@ -161,7 +161,7 @@ The brief `docs/admin-console/two-factor-reset.md` (web repo), made concrete:
    `user_recovery_codes` (the console never reads that database); the
    customer re-enrols in FairSums and gets new codes.
 3. **Guards**: endpoint key `admin.customers.two_factor_reset` in the
-   registry + Access Map grant (`docs/sql/022_…` or the same file as B2);
+   registry + Access Map grant (`docs/sql/021_…`, since C runs before B);
    audit row `admin_permission_audit_events` with
    `target_type: "customer_two_factor_reset"` (union in
    `src/lib/admin-access/types.ts`), best-effort as `invites.ts` does;
@@ -176,6 +176,78 @@ The brief `docs/admin-console/two-factor-reset.md` (web repo), made concrete:
    `CustomerPoolOnly`); `docs/customers.md:398–401` updated (it currently
    says the policy grants nothing beyond the four actions).
 5. **Email to the customer** is phase 3 of the web plan; not sent here.
+
+*Phase C built 2026-10-04* (C went before B, so it took SQL **021**; B's
+`admin_user_recovery_codes` becomes `022_…`):
+
+- Session: `SignInMethod` + `Session.signInMethod` in `src/lib/auth/session.ts`
+  (signed `psa_sign_in_method` cookie, `src/lib/auth/cookies.ts`; HMAC over
+  `sub` + `origin_jti` keyed from `ADMIN_COGNITO_CLIENT_SECRET`, per-process
+  random key without one, fails closed to `password`); the three
+  `createSession` call sites in `src/app/login/actions.ts` (`password`,
+  `password+totp`, `passkey`; the invitation step also `password`);
+  `src/lib/api/auth.ts` passes the cookie for browser callers; `refresh.ts`
+  reads it against the proof token and re-signs it with the new tokens.
+- Customers: `CustomerTwoFactor` / `CustomerDetail` /
+  `CustomerTwoFactorResetResponse` in `types.ts`; `readTwoFactor` +
+  `resetTwoFactor` (`AdminGetUser`, `AdminSetUserMFAPreference` both settings
+  off, addressed by the sub) in `cognito.ts`; the new `two-factor.ts`
+  (step-up 403, `customerTwoFactorReset` 5/hour per operator in
+  `rate-limit.ts`, 404/503, audit rows `customer_two_factor_reset` /
+  `customer_two_factor_reset_failed` with `methodsBefore`, best effort);
+  `getCustomer(id, operatorSignInMethod)` adds `twoFactor` (best effort,
+  `null` → "Unavailable") and `operatorCanReset`; `GET /customers/[id]`
+  reads the caller's method from the cookie session; new route
+  `POST /api/v1/admin/customers/[id]/two-factor/reset`; `customersApi.twoFactor.reset`.
+- Drawer: `TwoFactorRow` in `customer-detail-drawer.tsx` — the line, the
+  danger button only while On *and* `operatorCanReset`, else the server's
+  sentence; the confirm `Modal` with the email typed back (case-insensitive,
+  button disabled until it matches).
+- Registry: `admin.customers.two_factor_reset` (rate limit
+  `customerTwoFactorReset`, default `can_write_user`); `AuditTargetType`
+  gains `customer_two_factor_reset`; `docs/sql/021_customer_two_factor_reset.sql`
+  registers the endpoint, links `can_write_user`, widens the audit check.
+- IAM: `cognito-idp:AdminSetUserMFAPreference` in `customer-user-pool` /
+  `CustomerPoolOnly` (`infra/service-admin.yaml`); no Description change.
+- Docs: `customers.md` (IAM table + the new section), `access-control.md`
+  ("Step-up"), `api.md` (preset + endpoint rows, the `get` row), `auth.md`
+  (the cookie + the sign-in method), `sql/README.md` (row 21), `CLAUDE.md`
+  (the customer-pool permissions line).
+- Not run locally: the pool calls need AWS credentials with the new
+  permission, and passkeys do not work from `localhost`. `operatorCanReset`
+  and the cookie were exercised only through the type check and the build.
+
+Owner steps: run `021_customer_two_factor_reset.sql` on the local and stage
+admin databases; deploy (the IAM grant rides the push to stage); on the
+Access Map, grant `admin.customers.two_factor_reset` to the roles that
+should have it (it ships linked to `can_write_user`; super-admin only until
+the SQL has run). Existing sessions keep working and read as password-only
+until their next sign-in.
+
+Stage test (`admin.fairsums.app`, after deploy):
+
+1. Operator signed in with email + password only (an account with no
+   authenticator app, or a session from before the deploy): open a customer
+   whose authenticator is on → the line reads "On (authenticator app…)" and,
+   where the button would be, "Sign in with your authenticator app or a
+   passkey to use this." `POST …/two-factor/reset` by hand answers 403 with
+   that sentence.
+2. Sign out; sign in with a passkey (or email + password + code): the button
+   is there. A throwaway customer with TOTP on in `testing.fairsums.app` →
+   Turn off → the dialog's button stays disabled until the address matches
+   (any case) → Turn off. `aws cognito-idp admin-get-user --user-pool-id
+   <customer pool> --username <sub>` shows no `UserMFASettingList`; the
+   drawer reads "Off"; User Management → Audit log has a
+   `customer_two_factor_reset` row with `methodsBefore`. The customer signs
+   in to `testing.fairsums.app` with the password alone and sees the
+   "turned off by FairSums support" notice; re-enrolling clears it.
+3. Refresh the tab after five minutes (the id token has rolled over): the
+   button is still offered — the method survived the refresh.
+4. Five resets inside an hour from one operator: the sixth is 429 with
+   `Retry-After`; the drawer shows the usual rate-limit message.
+5. With a task role lacking the permission (or a local profile without it):
+   503 `cognito_unavailable`, a `customer_two_factor_reset_failed` audit row,
+   nothing changed at Cognito.
 
 ## Phase D — Tests and docs (small)
 
@@ -192,7 +264,7 @@ The brief `docs/admin-console/two-factor-reset.md` (web repo), made concrete:
 |---|---|---|---|
 | A | Passkeys count as two factors | small | deploy; stage test |
 | C | Customer two-factor reset | medium | run SQL for the endpoint grant; deploy (IAM) |
-| B | QR code + operator recovery codes | medium | run SQL 021; `prisma db pull` (admin config); deploy (IAM) |
+| B | QR code + operator recovery codes | medium | run SQL 022; `prisma db pull` (admin config); deploy (IAM) |
 | D | Tests and docs | small | — |
 
 A first (it closes the live lockout). C before B because it is the support

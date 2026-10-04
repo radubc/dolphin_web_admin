@@ -291,7 +291,9 @@ export async function login(
     return { error: result.message };
   }
 
-  await createSession(result);
+  // No second step was asked for, so this session is password-only: the
+  // customer two-factor reset will refuse it (docs/access-control.md).
+  await createSession(result, undefined, "password");
 
   // Throws; must stay outside the try/catch above. The authenticated layout
   // sends an operator with no allowlist row on to /no-access.
@@ -414,7 +416,8 @@ export async function completeInvitation(
     return { error: result.error, restart: result.restart };
   }
 
-  await createSession(result);
+  // A freshly invited operator has no authenticator app yet: password-only.
+  await createSession(result, undefined, "password");
 
   // Throws; must stay outside the try/catch above.
   redirect("/");
@@ -488,7 +491,8 @@ export async function verifyMfaCode(
   // sign-in below happens whatever it answers.
   await ensurePasskeyMfa(result.accessToken);
 
-  await createSession(result);
+  // Password plus the authenticator code: a second factor was presented.
+  await createSession(result, undefined, "password+totp");
 
   // Throws; must stay outside the try/catch above.
   redirect("/");
@@ -624,7 +628,8 @@ export async function completePasskeySignIn(
     return { error: result.error };
   }
 
-  await createSession(result);
+  // A passkey with user verification is both factors on the admin pool.
+  await createSession(result, undefined, "passkey");
 
   // Throws; must stay outside the try/catch above. The authenticated layout
   // sends an operator with no allowlist row on to /no-access.

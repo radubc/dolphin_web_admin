@@ -120,6 +120,14 @@ export const RATE_LIMITS = {
   authLogout: { name: "auth_logout", limit: 30, windowMs: 15 * 60_000 },
 
   /**
+   * Turning off a customer's two-factor authentication, per operator (keyed
+   * `two-factor-reset:user:<admin user id>`), charged before Cognito is
+   * called. Support does this for one person at a time after talking to
+   * them; a script that flips it for many is exactly what the limit is for.
+   */
+  customerTwoFactorReset: { name: "customer_two_factor_reset", limit: 5, windowMs: 60 * 60_000 },
+
+  /**
    * The health probe. One monitor polls every 10-30 s; 30/min leaves room for
    * several of them without letting the endpoint become a free DB pinger.
    */

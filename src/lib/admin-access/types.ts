@@ -154,7 +154,12 @@ export type AuditTargetType =
   /** A reference catalog (Constants); the row names the kind in `target_label`. */
   | "catalog"
   /** An invitation to the consumer app; `target_label` is the email address. */
-  | "customer_invite";
+  | "customer_invite"
+  /**
+   * A customer's two-factor authentication turned off by support;
+   * `target_id` is the customer's `users.id`, `target_label` the email.
+   */
+  | "customer_two_factor_reset";
 
 export interface AuditEvent {
   id: string;

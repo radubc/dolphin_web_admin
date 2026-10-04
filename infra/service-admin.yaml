@@ -332,6 +332,11 @@ Resources:
                   - cognito-idp:AdminDeleteUser
                   - cognito-idp:AdminGetUser
                   - cognito-idp:ListUsers
+                  # Support's "Turn off two-factor authentication" on the
+                  # Customers page (docs/customers.md): both per-user MFA
+                  # settings off in one call. Still no AdminDisableUser,
+                  # AdminSetUserPassword or AdminUpdateUserAttributes.
+                  - cognito-idp:AdminSetUserMFAPreference
                 Resource: !ImportValue
                   Fn::Sub: fairsums-${Environment}-CustomerUserPoolArn
 

@@ -174,10 +174,18 @@ function toApiError(error: unknown): unknown {
 /**
  * `protectedHandler` plus the admin-access checks: allowlist, then the
  * endpoint's rule from the database. `fn` receives the principal in place of
- * the bare session.
+ * the bare session, and the session itself fourth — the one `authenticate`
+ * resolved from the credential it actually chose (bearer token or cookie
+ * jar), so a handler that needs `signInMethod` reads it from there instead
+ * of verifying the cookie session a second time.
  */
 export function adminHandler<Ctx = unknown>(
-  fn: (request: NextRequest, ctx: Ctx, principal: AdminPrincipal) => Promise<Response>,
+  fn: (
+    request: NextRequest,
+    ctx: Ctx,
+    principal: AdminPrincipal,
+    session: Session,
+  ) => Promise<Response>,
   options: AdminHandlerOptions,
 ): (request: NextRequest, ctx: Ctx) => Promise<Response> {
   const { endpoint, ...handlerOptions } = options;
@@ -194,7 +202,7 @@ export function adminHandler<Ctx = unknown>(
       if (evaluateRule(capabilitiesOf(principal), rule) !== "allow") {
         throw new ForbiddenError();
       }
-      return await fn(request, ctx, principal);
+      return await fn(request, ctx, principal, session);
     } catch (error) {
       const translated = toApiError(error);
       if (translated instanceof ApiError) throw translated;

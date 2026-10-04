@@ -158,7 +158,7 @@ the button into a free account-existence oracle.
 
 ## The session
 
-On success five httpOnly cookies are written (`src/lib/auth/session.ts`), and
+On success six httpOnly cookies are written (`src/lib/auth/session.ts`), and
 every one of them is dated from the tokens themselves:
 
 | Cookie | Path | Lifetime | Holds |
@@ -166,12 +166,33 @@ every one of them is dated from the tokens themselves:
 | `psa_id_token` | `/` | the id token's own `exp` minus 60 s | the id token: the credential every check verifies |
 | `psa_access_token` | `/` | the access token's own `exp` minus 60 s | the access token, for the Account & security calls |
 | `psa_session` | `/` | id token `exp` + 30 minutes | a marker saying a refresh token exists |
+| `psa_sign_in_method` | `/` | id token `exp` + 30 minutes | how this session was signed in — `password`, `password+totp` or `passkey` — with an HMAC binding it to the token's `sub` and `origin_jti` |
 | `psa_refresh_token` | `/api/auth` | id token `exp` + 30 minutes | the refresh token |
 | `psa_refresh_proof` | `/api/auth` | id token `exp` + 30 minutes | the id token just issued — the proof of when this browser was last active |
 
 Each token cookie gets its *own* expiry, never the response's `ExpiresIn`: that
 field describes the access token, and the pool gives the id and access tokens
 different validities (5 and 15 minutes once the planned settings are applied).
+
+**The sign-in method (2026-10-04).** Each of the three sign-in paths in
+`src/app/login/actions.ts` tells `createSession` how it authenticated: the
+plain password step (and the invitation's set-password step) write
+`password`, the authenticator-code step `password+totp`, the passkey assertion
+`passkey`. The value is surfaced as `Session.signInMethod` and read by the one
+action that insists on a second factor — turning off a customer's two-factor
+authentication ([access-control.md](./access-control.md), "Step-up"). It was
+chosen over the id token's `amr` claim, which the pool is not known to emit.
+The cookie is signed (HMAC-SHA256 over `sub`, `origin_jti` and the method;
+an id token without `origin_jti` — a client with token revocation off — gets
+no cookie and reads as `password`)
+with a key derived from `ADMIN_COGNITO_CLIENT_SECRET`, so every deployed task
+verifies what another signed; without a client secret (a local `.env`) the key
+is random per process, and a restart makes the session read as `password`
+until the next sign-in. The cookie fails closed: an unverifiable or missing
+value — a session minted before it existed, a bearer-token caller — is
+`password`. The refresh endpoint reads it against the proof token it was
+signed for and re-signs it against the new id token, so a refresh never loses
+or weakens it.
 
 `psa_refresh_user` is no longer written. `GetTokensFromRefreshToken` needs no
 username, so there is nothing for it to carry; the name is still in

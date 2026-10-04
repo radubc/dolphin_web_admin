@@ -103,6 +103,55 @@ export interface Customer {
   status: CustomerStatus;
 }
 
+/**
+ * A second factor Cognito lists for a customer: `SOFTWARE_TOKEN_MFA` is the
+ * authenticator app, `WEB_AUTHN_MFA` the per-user passkey-MFA flag the
+ * consumer app sets beside it so a passkey counts as both factors.
+ */
+export type CustomerTwoFactorMethod = "authenticator" | "passkey";
+
+/**
+ * What the customer pool says about a person's two-factor authentication,
+ * read live with `AdminGetUser` (the cached directory listing does not carry
+ * it). `enabled` is "the list is not empty"; `preferred` is Cognito's
+ * `PreferredMfaSetting`, when it names one of the two.
+ */
+export interface CustomerTwoFactor {
+  enabled: boolean;
+  methods: CustomerTwoFactorMethod[];
+  preferred: CustomerTwoFactorMethod | null;
+}
+
+/**
+ * `GET /api/v1/admin/customers/[id]`: the list row plus what only the detail
+ * read fetches.
+ *
+ * `twoFactor` is `null` when the pool could not be asked (not configured, no
+ * credentials, the call failed, or no account for this sub) — the drawer
+ * says "Unavailable" and the rest of the page is unaffected.
+ * `operatorCanReset` says whether the *caller's own session* was signed in
+ * with a second factor, which is what the reset endpoint insists on; the
+ * drawer uses it to show the button or the sentence explaining why not.
+ */
+export interface CustomerDetail extends Customer {
+  twoFactor: CustomerTwoFactor | null;
+  operatorCanReset: boolean;
+}
+
+/** What `POST /api/v1/admin/customers/[id]/two-factor/reset` answers. */
+export interface CustomerTwoFactorResetResponse {
+  /** The block re-read from the pool after the call; null if the re-read failed. */
+  twoFactor: CustomerTwoFactor | null;
+}
+
+/**
+ * The 403 the reset answers a password-only session with; the drawer prints
+ * the same sentence where the button would be. One copy, here, so the server
+ * and the client can never drift apart.
+ */
+export const SECOND_FACTOR_REQUIRED_MESSAGE =
+  "Sign in with your authenticator app or a passkey to use this.";
+
 export const CUSTOMER_PAGE_SIZE_DEFAULT = 50;
 export const CUSTOMER_PAGE_SIZE_MAX = 200;
 

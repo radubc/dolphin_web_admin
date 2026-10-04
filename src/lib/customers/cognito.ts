@@ -9,8 +9,9 @@ import { randomInt } from "node:crypto";
  * fall back to `ADMIN_COGNITO_USER_POOL_ID`. Everything below is an `Admin…`
  * API, which means SigV4 and IAM: the deployment's AWS credentials (from the
  * SDK's default provider chain) must be allowed `cognito-idp:ListUsers`,
- * `AdminCreateUser`, `AdminGetUser` and `AdminDeleteUser` on the pool ARN. We
- * never read, hold or log a credential.
+ * `AdminCreateUser`, `AdminGetUser`, `AdminDeleteUser` and
+ * `AdminSetUserMFAPreference` on the pool ARN. We never read, hold or log a
+ * credential.
  *
  * Two decisions worth knowing:
  *
@@ -34,6 +35,7 @@ import {
   AdminCreateUserCommand,
   AdminDeleteUserCommand,
   AdminGetUserCommand,
+  AdminSetUserMFAPreferenceCommand,
   CognitoIdentityProviderClient,
   ListUsersCommand,
   type AttributeType,
@@ -47,7 +49,7 @@ import {
   TooManyRequestsError,
   ValidationError,
 } from "@/lib/api/errors";
-import type { CustomerCognitoAccount } from "./types";
+import type { CustomerCognitoAccount, CustomerTwoFactor, CustomerTwoFactorMethod } from "./types";
 import {
   getCustomerCognitoConfig,
   tryCustomerCognitoConfig,
@@ -502,6 +504,94 @@ export async function deleteUnconfirmedUser(username: string): Promise<void> {
     invalidatePoolDirectory();
   } catch (error) {
     throw translateCognitoError(error, "deleting a customer account");
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                         Two-factor authentication                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Cognito's `UserMFASettingList` entries as the UI names them. The SDK
+ * documents `SOFTWARE_TOKEN_MFA`; `WEB_AUTHN_MFA` is what a pool lists for
+ * the per-user `WebAuthnMfaSettings` flag (verified on stage, 2026-10-04).
+ * Anything else is left out rather than guessed at.
+ */
+function twoFactorMethod(setting: string): CustomerTwoFactorMethod | null {
+  switch (setting) {
+    case "SOFTWARE_TOKEN_MFA":
+      return "authenticator";
+    case "WEB_AUTHN_MFA":
+      return "passkey";
+    default:
+      return null;
+  }
+}
+
+/** `UserMFASettingList` / `PreferredMfaSetting` as the drawer shows them. */
+function toTwoFactor(settings: string[] | undefined, preferred: string | undefined): CustomerTwoFactor {
+  const methods: CustomerTwoFactorMethod[] = [];
+  for (const setting of settings ?? []) {
+    const method = twoFactorMethod(setting);
+    if (method !== null && !methods.includes(method)) methods.push(method);
+  }
+  return {
+    enabled: (settings ?? []).length > 0,
+    methods,
+    preferred: preferred === undefined ? null : twoFactorMethod(preferred),
+  };
+}
+
+/**
+ * Reads one account's second factors with `AdminGetUser`, addressed by the
+ * `sub` (the pool accepts it as `Username`, and it is what `users.cognito_sub`
+ * holds). Not cached: this is the one fact the detail drawer has to have
+ * fresh, and it is read for a single account at a time.
+ *
+ * @throws {ApiError} translated from Cognito (404 when the sub is not in the
+ * pool, 503 when the deployment may not read it).
+ */
+export async function readTwoFactor(sub: string): Promise<CustomerTwoFactor> {
+  const config = getCustomerCognitoConfig();
+  try {
+    const found = await getClient(config).send(
+      new AdminGetUserCommand({ UserPoolId: config.userPoolId, Username: sub }),
+    );
+    return toTwoFactor(found.UserMFASettingList, found.PreferredMfaSetting);
+  } catch (error) {
+    throw translateCognitoError(error, "reading a customer's two-factor settings");
+  }
+}
+
+/**
+ * Turns a customer's two-factor authentication off: `AdminSetUserMFAPreference`
+ * with the authenticator app and passkey MFA both disabled in the one call —
+ * Cognito only allows the passkey flag beside another factor, so turning the
+ * authenticator off alone would be refused or leave a state the pool itself
+ * does not permit. Verified on stage (2026-10-04): the list comes back empty.
+ *
+ * This is the whole of what support can do to an account: the person's
+ * password, passkeys, attributes and enabled state are untouched, and the
+ * consumer app's recovery codes are its own (it replaces them when the person
+ * enrols again). Afterwards a password sign-in asks for no code; a passkey
+ * sign-in still works, a passkey being a first factor.
+ *
+ * @throws {ApiError} translated from Cognito; a `NotAuthorizedException` or
+ * `AccessDeniedException` is the task role lacking the permission (503).
+ */
+export async function resetTwoFactor(sub: string): Promise<void> {
+  const config = getCustomerCognitoConfig();
+  try {
+    await getClient(config).send(
+      new AdminSetUserMFAPreferenceCommand({
+        UserPoolId: config.userPoolId,
+        Username: sub,
+        SoftwareTokenMfaSettings: { Enabled: false, PreferredMfa: false },
+        WebAuthnMfaSettings: { Enabled: false },
+      }),
+    );
+  } catch (error) {
+    throw translateCognitoError(error, "turning off a customer's two-factor authentication");
   }
 }
 

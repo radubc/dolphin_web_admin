@@ -73,6 +73,18 @@ export const REFRESH_PROOF_COOKIE = "psa_refresh_proof";
  */
 export const SESSION_MARKER_COOKIE = "psa_session";
 
+/**
+ * How this session was signed in: `password`, `password+totp` or `passkey`,
+ * followed by an HMAC that ties the value to the id token's subject and
+ * sign-in (`sub` + `origin_jti`), so a jar cannot be edited into a stronger
+ * sign-in than it had. Written at sign-in, re-signed on every refresh, and
+ * read by the one action that insists on a second factor (turning off a
+ * customer's two-factor authentication). A session without it — minted
+ * before the cookie existed — reads as `password`. Path `/`, same lifetime
+ * as the marker.
+ */
+export const SIGN_IN_METHOD_COOKIE = "psa_sign_in_method";
+
 /** Path the refresh-token cookies are scoped to. */
 export const AUTH_COOKIE_PATH = "/api/auth";
 
@@ -102,6 +114,7 @@ export const SESSION_COOKIES: readonly SessionCookie[] = [
   { name: ID_TOKEN_COOKIE, path: "/" },
   { name: ACCESS_TOKEN_COOKIE, path: "/" },
   { name: SESSION_MARKER_COOKIE, path: "/" },
+  { name: SIGN_IN_METHOD_COOKIE, path: "/" },
   { name: REFRESH_TOKEN_COOKIE, path: AUTH_COOKIE_PATH },
   { name: REFRESH_PROOF_COOKIE, path: AUTH_COOKIE_PATH },
   { name: REFRESH_USER_COOKIE, path: AUTH_COOKIE_PATH },

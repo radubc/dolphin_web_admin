@@ -15,12 +15,13 @@
  */
 import { apiFetch } from "@/lib/api/client";
 import type {
-  Customer,
   CustomerActivity,
+  CustomerDetail,
   CustomerInvite,
   CustomerListQuery,
   CustomerListResponse,
   CustomerStatistics,
+  CustomerTwoFactorResetResponse,
   CreateInviteInput,
   InviteListQuery,
   InviteListResponse,
@@ -88,8 +89,26 @@ export const customersApi = {
   list: (query: CustomerListQuery = {}) =>
     apiFetch<CustomerListResponse>(`${BASE}${customerSearch(query)}`),
 
-  /** One customer, freshly read, for the detail drawer. */
-  get: (id: string) => apiFetch<Customer>(`${BASE}/${encodeURIComponent(id)}`),
+  /**
+   * One customer, freshly read, for the detail drawer: the list row plus
+   * their two-factor settings and whether this operator may turn them off.
+   */
+  get: (id: string) => apiFetch<CustomerDetail>(`${BASE}/${encodeURIComponent(id)}`),
+
+  twoFactor: {
+    /**
+     * Turns the customer's two-factor authentication off and answers the
+     * block re-read from the pool. 403 (`forbidden`, with the sentence to
+     * show) when this session was signed in with a password alone; 429 after
+     * five in an hour; 503 `cognito_unavailable` when the deployment may not
+     * make the call. Nothing in the list changes, so no scope is announced.
+     */
+    reset: (id: string) =>
+      apiFetch<CustomerTwoFactorResetResponse>(
+        `${BASE}/${encodeURIComponent(id)}/two-factor/reset`,
+        { method: "POST" },
+      ),
+  },
 
   /**
    * The Activity view's figures. `months` sizes the monthly series (churn,

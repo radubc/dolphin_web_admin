@@ -17,7 +17,7 @@ import "server-only";
  * bearer token has to be put there deliberately by the caller and is exempt.
  */
 import type { NextRequest } from "next/server";
-import { ID_TOKEN_COOKIE, SESSION_MARKER_COOKIE } from "@/lib/auth/cookies";
+import { ID_TOKEN_COOKIE, SESSION_MARKER_COOKIE, SIGN_IN_METHOD_COOKIE } from "@/lib/auth/cookies";
 import { verifyIdToken, type Session } from "@/lib/auth/session";
 import { trustProxyHeaders } from "@/lib/security/client-ip";
 import { ApiError, ServiceUnavailableError, UnauthorizedError } from "./errors";
@@ -162,7 +162,12 @@ export async function authenticate(request: NextRequest): Promise<Session> {
 
   let session: Session | null;
   try {
-    session = await verifyIdToken(token);
+    // The sign-in method rides only with the cookie session: a bearer caller
+    // holds no such claim and reads as a password sign-in.
+    session = await verifyIdToken(
+      token,
+      bearer === null ? request.cookies.get(SIGN_IN_METHOD_COOKIE)?.value : undefined,
+    );
   } catch {
     // `verifyIdToken` has already logged the underlying cause.
     throw new ServiceUnavailableError(

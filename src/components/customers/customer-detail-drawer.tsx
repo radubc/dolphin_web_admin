@@ -18,7 +18,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Alert, Drawer, Spin, Tag, Tooltip, Typography } from "antd";
+import { Alert, App, Button, Drawer, Input, Modal, Spin, Tag, Tooltip, Typography } from "antd";
 import {
   CloudOutlined,
   ContactsOutlined,
@@ -32,7 +32,15 @@ import CustomerCostSection from "@/components/cost-center/cost-per-client-figure
 import FormSection from "@/components/form-section";
 import { ENTRY_DRAWER_WIDTH } from "@/components/shell/definitions";
 import { customersApi } from "@/lib/customers/client";
-import type { Customer, CustomerActivity, CustomerEvent } from "@/lib/customers/types";
+import {
+  SECOND_FACTOR_REQUIRED_MESSAGE,
+  type Customer,
+  type CustomerActivity,
+  type CustomerDetail,
+  type CustomerEvent,
+  type CustomerTwoFactor,
+  type CustomerTwoFactorMethod,
+} from "@/lib/customers/types";
 import {
   errorMessage,
   formatBytes,
@@ -261,6 +269,158 @@ function ActivitySection({ customerId }: { customerId: string }) {
   );
 }
 
+/* -------------------------------------------------------------------------- */
+/* Two-factor authentication                                                  */
+/* -------------------------------------------------------------------------- */
+
+/** How each factor Cognito lists reads in the row. */
+const TWO_FACTOR_METHOD_LABELS: Readonly<Record<CustomerTwoFactorMethod, string>> = {
+  authenticator: "authenticator app",
+  passkey: "passkey",
+};
+
+/**
+ * The "Two-factor authentication" line of the Cognito account section, with
+ * support's one action on it: turning it off for a person who has lost both
+ * their authenticator app and their recovery codes
+ * (`POST /customers/[id]/two-factor/reset`).
+ *
+ * `detail` is the fresh read, which is the only place the factors come from
+ * (the list row does not carry them); `null` while it is still loading or
+ * when it failed. The button appears only while the factor is on *and* this
+ * operator's own session was signed in with a second factor — otherwise the
+ * server's refusal is printed where the button would be, so nobody opens a
+ * dialog the server will refuse. The dialog asks for the customer's address
+ * typed back, the console's pattern for an action that cannot be undone from
+ * here: it changes nothing about the person's password or passkeys, but it
+ * is exactly what an attacker who has their password would ask support for.
+ */
+function TwoFactorRow({
+  detail,
+  loading,
+  onChanged,
+}: {
+  detail: CustomerDetail | null;
+  loading: boolean;
+  onChanged: (twoFactor: CustomerTwoFactor | null) => void;
+}) {
+  const { message } = App.useApp();
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const twoFactor = detail?.twoFactor ?? null;
+  const email = detail?.email ?? "";
+  const matches = typed.trim().toLowerCase() === email.trim().toLowerCase();
+
+  const close = () => {
+    if (busy) return;
+    setOpen(false);
+    setTyped("");
+    setError(null);
+  };
+
+  const confirm = async () => {
+    if (detail === null || !matches) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await customersApi.twoFactor.reset(detail.id);
+      onChanged(result.twoFactor);
+      message.success(`Two-factor authentication turned off for ${detail.email}.`);
+      setOpen(false);
+      setTyped("");
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  let value: React.ReactNode;
+  if (twoFactor === null) {
+    value = (
+      <span style={{ color: surfaceColors.textTertiary }}>
+        {detail === null && loading ? "Reading…" : "Unavailable"}
+      </span>
+    );
+  } else if (!twoFactor.enabled) {
+    value = "Off";
+  } else {
+    const names = twoFactor.methods.map((method) => TWO_FACTOR_METHOD_LABELS[method]);
+    value = names.length === 0 ? "On" : `On (${names.join(", ")})`;
+  }
+
+  return (
+    <>
+      <Field label="Two-factor authentication">{value}</Field>
+      {detail !== null && twoFactor?.enabled === true && (
+        <div className="flex flex-col gap-1">
+          {detail.operatorCanReset ? (
+            <div>
+              <Button danger onClick={() => setOpen(true)}>
+                Turn off two-factor authentication
+              </Button>
+            </div>
+          ) : (
+            <span className="text-[13px]" style={{ color: surfaceColors.textSecondary }}>
+              {SECOND_FACTOR_REQUIRED_MESSAGE}
+            </span>
+          )}
+          <span className="text-[13px]" style={{ color: surfaceColors.textTertiary }}>
+            For a person who has lost both their authenticator app and their recovery codes.
+            Their password alone signs them in until they set it up again in FairSums.
+          </span>
+        </div>
+      )}
+
+      <Modal
+        open={open}
+        title={`Turn off two-factor authentication for ${email}?`}
+        okText="Turn off"
+        cancelText="Cancel"
+        okButtonProps={{ danger: true, disabled: !matches || busy }}
+        confirmLoading={busy}
+        onOk={() => {
+          void confirm();
+        }}
+        onCancel={close}
+        destroyOnHidden
+      >
+        <div className="flex flex-col gap-3">
+          <Typography.Paragraph className="text-sm" style={{ marginBottom: 0 }}>
+            Their password alone will sign them in until they set an authenticator app up again.
+            Any recovery codes they had stop working. Their password and passkeys are not
+            changed.
+          </Typography.Paragraph>
+          <Typography.Paragraph className="text-sm" style={{ marginBottom: 0 }}>
+            Only do this after you have confirmed who you are talking to — there is no way to
+            tell a lost phone from an attacker from here.
+          </Typography.Paragraph>
+          {error !== null && <Alert type="error" showIcon title={error} />}
+          <label className="flex flex-col gap-1">
+            <span className="text-xs" style={{ color: surfaceColors.textSecondary }}>
+              Type the customer&rsquo;s email address to confirm
+            </span>
+            <Input
+              value={typed}
+              onChange={(event) => setTyped(event.target.value)}
+              placeholder={email}
+              autoComplete="off"
+              spellCheck={false}
+              disabled={busy}
+              onPressEnter={() => {
+                if (matches && !busy) void confirm();
+              }}
+            />
+          </label>
+        </div>
+      </Modal>
+    </>
+  );
+}
+
 export interface CustomerDetailDrawerProps {
   /** The row that was clicked, or null when the drawer is closed. */
   customer: Customer | null;
@@ -274,7 +434,7 @@ export default function CustomerDetailDrawer({
   cognitoAvailable,
   onClose,
 }: CustomerDetailDrawerProps) {
-  const [fresh, setFresh] = useState<Customer | null>(null);
+  const [fresh, setFresh] = useState<CustomerDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [staleReason, setStaleReason] = useState<string | null>(null);
 
@@ -304,7 +464,8 @@ export default function CustomerDetailDrawer({
   // The fresh copy is only worth showing while it is a copy of *this* row;
   // matching on the id is how the last customer's detail is dropped when a
   // different one is opened, without a reset that would blank the drawer.
-  const shown = fresh !== null && fresh.id === id ? fresh : customer;
+  const detail = fresh !== null && fresh.id === id ? fresh : null;
+  const shown = detail ?? customer;
 
   return (
     <Drawer
@@ -436,6 +597,15 @@ export default function CustomerDetailDrawer({
                 </Field>
                 <Field label="Created">{formatDateTimeOrDash(shown.cognito.createdAt)}</Field>
                 <Field label="Last modified">{formatDateTimeOrDash(shown.cognito.updatedAt)}</Field>
+                <TwoFactorRow
+                  detail={detail}
+                  loading={loading}
+                  onChanged={(twoFactor) =>
+                    setFresh((current) =>
+                      current !== null && current.id === id ? { ...current, twoFactor } : current,
+                    )
+                  }
+                />
               </>
             )}
           </FormSection>

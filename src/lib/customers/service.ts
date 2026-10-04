@@ -26,6 +26,7 @@ import "server-only";
  *   asks for them alone.
  */
 import { NotFoundError } from "@/lib/api/errors";
+import type { SignInMethod } from "@/lib/auth/session";
 import { availability, describeAccounts, getPoolDirectory } from "./cognito";
 import {
   createInvite,
@@ -43,11 +44,13 @@ import {
   type CustomerBase,
 } from "./repository";
 import type { ResolvedCustomerListQuery, ResolvedInviteListQuery } from "./schemas";
+import { describeTwoFactor, operatorCanResetTwoFactor } from "./two-factor";
 import {
   ACTIVE_WINDOW_DAYS,
   type CreateInviteInput,
   type Customer,
   type CustomerCognitoAccount,
+  type CustomerDetail,
   type CustomerInvite,
   type CustomerListResponse,
   type CustomerStatus,
@@ -202,12 +205,27 @@ export async function listCustomers(query: ResolvedCustomerListQuery): Promise<C
   };
 }
 
-/** One customer by `users.id`. */
-export async function getCustomer(id: string): Promise<Customer> {
+/**
+ * One customer by `users.id`, with the two things only the detail read
+ * fetches: the account's second factors (one `AdminGetUser`, best effort —
+ * `null` when the pool could not be asked) and whether the operator asking
+ * may turn them off, which depends on how their own session was signed in.
+ */
+export async function getCustomer(
+  id: string,
+  operatorSignInMethod: SignInMethod = "password",
+): Promise<CustomerDetail> {
   const base = await findCustomerById(id);
   if (base === null) throw new NotFoundError("That customer does not exist.");
-  const { available, accounts } = await describeAccounts([base.cognitoSub]);
-  return withPool(base, accounts, available);
+  const [{ available, accounts }, twoFactor] = await Promise.all([
+    describeAccounts([base.cognitoSub]),
+    describeTwoFactor(base.cognitoSub),
+  ]);
+  return {
+    ...withPool(base, accounts, available),
+    twoFactor,
+    operatorCanReset: operatorCanResetTwoFactor(operatorSignInMethod),
+  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -245,3 +263,9 @@ export async function revokeCustomerInvite(
 ): Promise<CustomerInvite> {
   return revokeInvite(id, actorUserId);
 }
+
+/* -------------------------------------------------------------------------- */
+/*                         Two-factor authentication                          */
+/* -------------------------------------------------------------------------- */
+
+export { resetCustomerTwoFactor } from "./two-factor";

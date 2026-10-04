@@ -127,7 +127,27 @@ Until step 3 the page or endpoint is reachable by super-admins only.
 `admin_permission_audit_events` receives a row for every membership, grant and
 rule change, with the actor, a verb, the target and details. It is shown on
 User Management → Audit log. It is append-only; nothing in the app deletes
-from it.
+from it. Two customer actions write to it as well: invitations
+(`customer_invite`) and support's two-factor reset
+(`customer_two_factor_reset`, see [customers.md](./customers.md)).
+
+## Step-up: actions that need a second factor
+
+One operation is gated by *how* the operator signed in, on top of the
+allowlist and the access map: turning off a customer's two-factor
+authentication (`admin.customers.two_factor_reset`). The session records its
+sign-in method — `password`, `password+totp` or `passkey` — in a signed cookie
+written at sign-in and carried across refreshes ([auth.md](./auth.md), "The
+session"), and the route refuses a `password` session with 403 "Sign in with
+your authenticator app or a passkey to use this." A passkey counts because the
+admin pool treats a passkey with user verification as both factors. The
+Customers drawer shows the same sentence instead of the button when
+`GET /customers/[id]` says `operatorCanReset: false`, so the refusal is never a
+surprise. A session minted before the cookie existed, or a bearer-token
+caller, reads as `password`. The rule is the owner's (2026-10-04): an
+attacker holding an operator's password alone must not be able to turn a
+customer's second factor off, and the operator's own second factor is what
+proves it is not them.
 
 ## Safety rails in the repositories
 

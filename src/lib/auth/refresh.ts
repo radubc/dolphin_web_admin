@@ -29,6 +29,7 @@ import {
   IDLE_TIMEOUT_SECONDS,
   REFRESH_PROOF_COOKIE,
   REFRESH_TOKEN_COOKIE,
+  SIGN_IN_METHOD_COOKIE,
 } from "./cookies";
 import { refreshTokens, revokeRefreshToken } from "./cognito";
 import { CognitoConfigError } from "./config";
@@ -138,9 +139,17 @@ export async function refreshSession(
     return idleOutcome(refreshToken, "missing", endSession);
   }
 
+  // The sign-in method cookie was signed against the proof token (the id token
+  // issued last), so this is where it is read; `createSession` below re-signs
+  // it against the new one. A session without the cookie reads as `password`
+  // and stays that way until the next sign-in.
   let proofSession: Session | null;
   try {
-    proofSession = await verifyRecentIdToken(proof, IDLE_TIMEOUT_SECONDS);
+    proofSession = await verifyRecentIdToken(
+      proof,
+      IDLE_TIMEOUT_SECONDS,
+      cookieStore.get(SIGN_IN_METHOD_COOKIE)?.value,
+    );
   } catch {
     // The JWKS endpoint is unreachable — an outage, not an idle browser. Leave
     // every cookie alone; the next attempt can still succeed.
@@ -197,7 +206,12 @@ export async function refreshSession(
   }
 
   // The token already on file is passed back so the sliding cookies can be
-  // re-dated even when rotation is off and Cognito returned no new one.
-  await createSession(result, refreshToken);
-  return { status: "refreshed", session, expiresIn: result.expiresIn };
+  // re-dated even when rotation is off and Cognito returned no new one; the
+  // sign-in method is carried over so a refresh never weakens the session.
+  await createSession(result, refreshToken, proofSession.signInMethod);
+  return {
+    status: "refreshed",
+    session: { ...session, signInMethod: proofSession.signInMethod },
+    expiresIn: result.expiresIn,
+  };
 }

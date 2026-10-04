@@ -806,6 +806,18 @@ export const ENDPOINT_REGISTRY: readonly EndpointRegistryEntry[] = [
     defaults: any("can_read_user_list", "can_read_user_detail", "can_invite_users"),
   },
   {
+    key: "admin.customers.two_factor_reset",
+    method: "POST",
+    path: "/api/v1/admin/customers/[id]/two-factor/reset",
+    name: "Turn off a customer's two-factor authentication",
+    description:
+      "AdminSetUserMFAPreference on the customer pool with the authenticator app and passkey MFA both off, for a person who has lost their authenticator and their recovery codes. No body. The operator must be signed in with a second factor (authenticator code or passkey), else 403; 5 per hour per operator; one audit row per attempt. Changes nothing else about the account and never touches the consumer app's recovery codes. Answers the fresh twoFactor block.",
+    category: "customers",
+    authKind: "admin",
+    rateLimit: "customerTwoFactorReset",
+    defaults: any("can_write_user"),
+  },
+  {
     key: "admin.costs.summary",
     method: "GET",
     path: "/api/v1/admin/costs",
