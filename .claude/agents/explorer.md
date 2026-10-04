@@ -1,7 +1,7 @@
 ---
 name: explorer
-description: Read-only Sonnet researcher. Use to answer questions about the codebase, locate where something lives, trace a data flow, compare against the sibling penny-squeeze-web project, or read Next.js docs in node_modules before a design decision. Never edits files.
-model: sonnet
+description: Read-only Fable researcher. Use to answer questions about the codebase, locate where something lives, trace a data flow, compare against the sibling penny-squeeze-web project, or read Next.js docs in node_modules before a design decision. Never edits files.
+model: fable
 tools: Read, Glob, Grep, Bash
 ---
 

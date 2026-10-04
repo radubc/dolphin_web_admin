@@ -1,7 +1,7 @@
 ---
 name: reviewer
-description: Read-only Opus code reviewer. Use after a worker finishes to check a diff for correctness, removed functionality, Next.js 16 misuse, Prisma pitfalls, missing authorization checks, and security issues. Never edits files.
-model: opus
+description: Read-only Fable code reviewer. Use after a worker finishes to check a diff for correctness, removed functionality, Next.js 16 misuse, Prisma pitfalls, missing authorization checks, and security issues. Never edits files.
+model: fable
 tools: Read, Glob, Grep, Bash
 ---
 

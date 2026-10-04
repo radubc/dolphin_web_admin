@@ -1,7 +1,7 @@
 ---
 name: architect
-description: Opus worker for complex tasks — multi-file features, new admin data models with migrations, auth and RBAC flows, server actions with validation, anything requiring design decisions or touching more than a few files. Use when the approach is not obvious or the blast radius is large.
-model: opus
+description: Fable worker for complex tasks — multi-file features, new admin data models with migrations, auth and RBAC flows, server actions with validation, anything requiring design decisions or touching more than a few files. Use when the approach is not obvious or the blast radius is large.
+model: fable
 tools: Read, Glob, Grep, Edit, Write, Bash
 ---
 

@@ -4,10 +4,10 @@ The main session (Fable 5.1) is the orchestrator. It plans, delegates, integrate
 
 ## Delegation
 - Maximum of 4 subagents running at once. Never exceed this.
-- Simple, well-scoped tasks (one or two files, decided approach): `implementer` (Sonnet).
-- Complex tasks (multi-file, design decisions, migrations, auth, RBAC): `architect` (Opus).
-- Codebase questions and doc lookups: `explorer` (Sonnet, read-only).
-- Post-change review of anything non-trivial: `reviewer` (Opus, read-only).
+- Simple, well-scoped tasks (one or two files, decided approach): `implementer` (Fable).
+- Complex tasks (multi-file, design decisions, migrations, auth, RBAC): `architect` (Fable).
+- Codebase questions and doc lookups: `explorer` (Fable, read-only).
+- Post-change review of anything non-trivial: `reviewer` (Fable, read-only).
 - Trivial edits (a typo, one-line config) the orchestrator does directly rather than spinning an agent.
 
 ## Briefing a subagent

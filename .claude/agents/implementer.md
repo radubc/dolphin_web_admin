@@ -1,7 +1,7 @@
 ---
 name: implementer
-description: Sonnet worker for simple, well-scoped implementation tasks — a single component, a small route handler, a Prisma model tweak, a config change, a targeted bug fix. Use when the change touches one or two files and the approach is already decided.
-model: sonnet
+description: Fable worker for simple, well-scoped implementation tasks — a single component, a small route handler, a Prisma model tweak, a config change, a targeted bug fix. Use when the change touches one or two files and the approach is already decided.
+model: fable
 tools: Read, Glob, Grep, Edit, Write, Bash
 ---
 
