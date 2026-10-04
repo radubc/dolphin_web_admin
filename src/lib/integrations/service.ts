@@ -53,6 +53,7 @@ import {
   findCurrencyPairPage,
   findExchangeRatePage,
   findIntegrationRow,
+  findQuotePage,
   findQuoteSymbolByCanonical,
   findQuoteSymbolById,
   findQuoteSymbolPage,
@@ -66,6 +67,7 @@ import {
   toCurrencyPair,
   toExchangeRate,
   toIntegration,
+  toQuote,
   toQuoteSymbol,
   updateCurrencyPair,
   updateIntegrationRow,
@@ -91,6 +93,7 @@ import {
   type IntegrationListResponse,
   type IntegrationPatch,
   type IntegrationRun,
+  type QuoteListResponse,
   type QuoteSymbol,
   type QuoteSymbolInput,
   type QuoteSymbolListResponse,
@@ -446,6 +449,30 @@ export async function patchQuoteSymbol(id: string, patch: QuoteSymbolPatch): Pro
   });
   const quotes = await latestQuotesFor([row.canonical]);
   return toQuoteSymbol(row, quotes.get(row.canonical) ?? null);
+}
+
+/**
+ * One page of what has been downloaded for a symbol, newest trading day first:
+ * the close (and open / high / low when the provider gave them), the day's
+ * change, which provider served it and when it was fetched.
+ *
+ * Addressed by the watch row's id, as the pair history is: the drawer asks
+ * with what the list already gave it, and a symbol that has been removed from
+ * the watch list is a 404 even though its quotes are still stored.
+ */
+export async function listQuoteSymbolQuotes(
+  id: string,
+  query: RateHistoryQuery,
+): Promise<QuoteListResponse> {
+  requireUuid(id, "symbol");
+  const symbol = await findQuoteSymbolById(id);
+  if (!symbol) throw new NotFoundError("That symbol is not on the watch list.");
+  const { page, pageSize, skip } = paging({
+    ...query,
+    pageSize: query.pageSize ?? RATE_HISTORY_PAGE_SIZE_DEFAULT,
+  });
+  const { rows, total } = await findQuotePage(symbol.canonical, { skip, take: pageSize });
+  return { items: rows.map(toQuote), total, page, pageSize };
 }
 
 /** Removes the watch row. Cached quotes are kept: they cost credits. */

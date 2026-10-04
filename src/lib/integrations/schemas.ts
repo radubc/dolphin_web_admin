@@ -336,11 +336,12 @@ export const currencyPairPatchSchema: z.ZodType<CurrencyPairPatch> = z
   .refine((value) => Object.keys(value).length > 0, "Nothing to change.");
 
 /**
- * `GET /api/v1/admin/integrations/currency-pairs/[id]/rates?page=&pageSize=`.
+ * `GET /api/v1/admin/integrations/currency-pairs/[id]/rates?page=&pageSize=`
+ * and `GET /api/v1/admin/integrations/quote-symbols/[id]/quotes?…`.
  *
- * The same page-size ceiling as the watch lists: one pair's history is far
- * smaller than either of them, and one rule for "how big may a page be" is
- * easier to reason about than two.
+ * The same page-size ceiling as the watch lists: one pair's or one symbol's
+ * history is far smaller than either of them, and one rule for "how big may a
+ * page be" is easier to reason about than two.
  */
 export const rateHistoryQuerySchema: z.ZodType<RateHistoryQuery> = z.object({
   page: z.coerce.number().int().min(1).default(1),

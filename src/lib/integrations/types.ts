@@ -553,12 +553,15 @@ export type QuoteSymbolListResponse = WatchListPage<QuoteSymbol>;
 export type CurrencyPairListResponse = WatchListPage<CurrencyPair>;
 
 /**
- * How many days of one pair's download history a page holds by default. A
- * month of business days, which is what the drawer opens on.
+ * How many days of one pair's or one symbol's download history a page holds by
+ * default. A month of business days, which is what the drawers open on.
  */
 export const RATE_HISTORY_PAGE_SIZE_DEFAULT = 30;
 
-/** Paging for one pair's rate history. Nothing to search or filter: it is one pair. */
+/**
+ * Paging for one pair's rate history, and for one symbol's quote history.
+ * Nothing to search or filter: it is one pair, or one symbol.
+ */
 export interface RateHistoryQuery {
   page?: number;
   pageSize?: number;
@@ -569,6 +572,12 @@ export interface RateHistoryQuery {
  * stored for one pair, newest observation day first.
  */
 export type ExchangeRateListResponse = WatchListPage<ExchangeRate>;
+
+/**
+ * `GET /api/v1/admin/integrations/quote-symbols/[id]/quotes` — everything
+ * stored for one symbol, newest trading day first.
+ */
+export type QuoteListResponse = WatchListPage<Quote>;
 
 /* -------------------------------------------------------------------------- */
 /*                       Currency pair history backfill                       */

@@ -20,6 +20,9 @@
  * is kept, with its quote history, and is simply skipped by the daily run.
  * Delete is offered too, because a symbol added by a typo has no business
  * sitting in the list forever, and it asks first.
+ *
+ * Clicking a row opens the symbol's download history: every quote stored for
+ * it, newest trading day first, with the provider and the fetch time.
  */
 
 import { useState } from "react";
@@ -50,6 +53,7 @@ import {
   SourceTag,
 } from "./integrations-meta";
 import QuoteSymbolDrawer from "./quote-symbol-drawer";
+import QuoteSymbolQuotesDrawer from "./quote-symbol-quotes-drawer";
 import { useQuoteSymbolsStore, WATCH_PAGE_SIZE_OPTIONS, type ActiveFilter, type KindFilter } from "./use-watch-lists";
 
 /**
@@ -83,6 +87,8 @@ export default function QuoteSymbolsView({
   const { message } = App.useApp();
   const store = useQuoteSymbolsStore();
   const [adding, setAdding] = useState(false);
+  /** The symbol whose download history is open; null closes the drawer. */
+  const [history, setHistory] = useState<QuoteSymbol | null>(null);
   /** The row whose write is in flight, so only its switch spins. */
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -177,19 +183,22 @@ export default function QuoteSymbolsView({
       width: 90,
       render: (_value, row) =>
         canWrite ? (
-          <Tooltip
-            title={row.isActive ? "Deactivate: kept, but skipped by the daily run" : "Activate it"}
-          >
-            <Switch
-              size="small"
-              checked={row.isActive}
-              loading={busyId === row.id}
-              onChange={(next) => {
-                void setActive(row, next);
-              }}
-              aria-label={`${row.isActive ? "Deactivate" : "Activate"} ${row.canonical}`}
-            />
-          </Tooltip>
+          // The row opens the history drawer; operating the switch must not.
+          <span onClick={(event) => event.stopPropagation()}>
+            <Tooltip
+              title={row.isActive ? "Deactivate: kept, but skipped by the daily run" : "Activate it"}
+            >
+              <Switch
+                size="small"
+                checked={row.isActive}
+                loading={busyId === row.id}
+                onChange={(next) => {
+                  void setActive(row, next);
+                }}
+                aria-label={`${row.isActive ? "Deactivate" : "Activate"} ${row.canonical}`}
+              />
+            </Tooltip>
+          </span>
         ) : (
           <span style={{ color: row.isActive ? featureColors.loan : surfaceColors.textTertiary }}>
             {row.isActive ? "Yes" : "No"}
@@ -247,26 +256,30 @@ export default function QuoteSymbolsView({
       width: 60,
       align: "right",
       render: (_value, row) => (
-        <Popconfirm
-          title="Remove from the watch list"
-          description={`${row.canonical} is removed from the watch list; quotes already cached for it are kept. The consumer app can add it back by asking for it.`}
-          okText="Remove"
-          cancelText="Cancel"
-          onConfirm={() => {
-            void remove(row);
-          }}
-        >
-          <Tooltip title={`Remove ${row.canonical}`}>
-            <Button
-              type="text"
-              size="small"
-              danger
-              aria-label={`Remove ${row.canonical}`}
-              icon={<DeleteOutlined />}
-              disabled={busyId === row.id}
-            />
-          </Tooltip>
-        </Popconfirm>
+        // Same as the switch: the confirmation and its trigger belong to the
+        // row's controls, not to the row itself.
+        <span onClick={(event) => event.stopPropagation()}>
+          <Popconfirm
+            title="Remove from the watch list"
+            description={`${row.canonical} is removed from the watch list; quotes already cached for it are kept. The consumer app can add it back by asking for it.`}
+            okText="Remove"
+            cancelText="Cancel"
+            onConfirm={() => {
+              void remove(row);
+            }}
+          >
+            <Tooltip title={`Remove ${row.canonical}`}>
+              <Button
+                type="text"
+                size="small"
+                danger
+                aria-label={`Remove ${row.canonical}`}
+                icon={<DeleteOutlined />}
+                disabled={busyId === row.id}
+              />
+            </Tooltip>
+          </Popconfirm>
+        </span>
       ),
     });
   }
@@ -478,6 +491,10 @@ export default function QuoteSymbolsView({
                   size="middle"
                   loading={store.refreshing}
                   scroll={{ x: 1320, y }}
+                  onRow={(row) => ({
+                    onClick: () => setHistory(row),
+                    style: { cursor: "pointer" },
+                  })}
                   compact={{ title: (row) => renderSymbolCell(row), titleColumn: "canonical" }}
                   pagination={{
                     current: store.page,
@@ -518,6 +535,8 @@ export default function QuoteSymbolsView({
         onClose={() => setAdding(false)}
         onSaved={(summary) => message.success(summary)}
       />
+
+      <QuoteSymbolQuotesDrawer symbol={history} onClose={() => setHistory(null)} />
     </>
   );
 }

@@ -632,6 +632,18 @@ export const ENDPOINT_REGISTRY: readonly EndpointRegistryEntry[] = [
     defaults: any("can_write_integrations"),
   },
   {
+    key: "admin.integrations.quote_symbols.quotes",
+    method: "GET",
+    path: "/api/v1/admin/integrations/quote-symbols/[id]/quotes",
+    name: "Quote symbol history",
+    description:
+      "One page of what has been downloaded for a watched symbol, newest trading day first: the close (and open, high and low when the provider gave them), the day's change, which provider served it and when it was fetched.",
+    category: "integrations",
+    authKind: "admin",
+    rateLimit: "api",
+    defaults: any("can_read_integrations", "can_write_integrations"),
+  },
+  {
     key: "admin.integrations.currency_pairs.list",
     method: "GET",
     path: "/api/v1/admin/integrations/currency-pairs",

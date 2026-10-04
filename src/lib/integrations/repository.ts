@@ -742,6 +742,31 @@ export async function latestQuotesFor(
   return latest;
 }
 
+/**
+ * One page of everything ever stored for a symbol, newest trading day first,
+ * then newest fetch. This is the download history behind a row on the quote
+ * watch list — the counterpart of `findExchangeRatePage`.
+ *
+ * Keyed by the canonical symbol, which is what `admin_quotes.symbol` holds:
+ * `SHOP:TSX` and a bare `SHOP` are two watch rows with two histories.
+ */
+export async function findQuotePage(
+  canonical: string,
+  page: { skip: number; take: number },
+): Promise<{ rows: QuoteRow[]; total: number }> {
+  const where = { symbol: canonical };
+  const [rows, total] = await Promise.all([
+    prismaAdmin.admin_quotes.findMany({
+      where,
+      orderBy: [{ quote_date: "desc" }, { fetched_at: "desc" }],
+      skip: page.skip,
+      take: page.take,
+    }),
+    prismaAdmin.admin_quotes.count({ where }),
+  ]);
+  return { rows, total };
+}
+
 /* -------------------------------------------------------------------------- */
 /*                               Currency pairs                               */
 /* -------------------------------------------------------------------------- */

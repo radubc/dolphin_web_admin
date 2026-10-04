@@ -22,6 +22,7 @@ import type {
   IntegrationListResponse,
   IntegrationPatch,
   IntegrationRun,
+  QuoteListResponse,
   QuoteSymbol,
   QuoteSymbolInput,
   QuoteSymbolListResponse,
@@ -134,6 +135,12 @@ export const integrationsApi = {
       await apiFetch<void>(`${quoteSymbolsPath}/${encodeURIComponent(id)}`, { method: "DELETE" });
       notifyIntegrationsChanged("quote_symbols");
     },
+
+    /** One page of what has been downloaded for the symbol, newest trading day first. */
+    quotes: (id: string, query: RateHistoryQuery = {}) =>
+      apiFetch<QuoteListResponse>(
+        `${quoteSymbolsPath}/${encodeURIComponent(id)}/quotes${historySearch(query)}`,
+      ),
   },
 
   /* ----------------------------- Currency pairs ----------------------------- */

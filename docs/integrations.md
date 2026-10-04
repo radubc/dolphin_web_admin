@@ -130,7 +130,14 @@ catalog spells it and `exchange` is the catalog's exchange name (null for
 crypto). The `canonical` form is what the provider is asked for and what the
 consumer app sends: `SYMBOL:EXCHANGE` when there is an exchange (`SHOP:TSX`),
 the bare symbol otherwise (`AAPL`, `BTC/USD`). When the symbol exists in the
-admin catalog its name and currency are copied over for display.
+admin catalog its name and currency are copied over for display. The list
+shows each symbol's newest quote; clicking a row opens its **download
+history** — every `admin_quotes` row stored for it, newest trading day first,
+with the close, the day's change, open / low / high when the provider gave
+them, the provider and the fetch time (`docs/sql/020_quote_symbol_history.sql`
+registers the endpoint). There is no backfill button here, unlike the pair
+drawer: a quote costs a provider credit per symbol per day, so history arrives
+one trading day at a time from the daily run.
 
 **Currency pairs** (`admin_currency_pairs`) — one row per `from → to` pair.
 The Bank of Canada publishes each currency against CAD only, so a pair with CAD

@@ -29,6 +29,7 @@ result afterwards.
 | 17 | [`017_currency_pair_history.sql`](./017_currency_pair_history.sql) | Registers the currency pair download-history endpoint (`admin.integrations.currency_pairs.rates`, behind the drawer a row click opens) against the two integration actions 008 seeded, and **deletes the stray rate rows**: every `admin_exchange_rates` row whose pair is not on `admin_currency_pairs`. Those are what the retired series cache wrote — about 27 `X → CAD` rows a day for pairs nobody watches. The app no longer writes them (the fetched document is now memoised in process instead), so this only clears what is already there. Creates no table and no action. **Read the header before running: it holds the SELECT that shows what the DELETE would remove.** | Once, after step 16, **before** any pair is removed from the watch list: the DELETE cannot tell a stray series row from the history of a pair an operator has since removed (the app keeps that history on Remove), so a later run would delete it too. Run the header's SELECT first. |
 | 18 | [`018_account_security_endpoints.sql`](./018_account_security_endpoints.sql) | Registers the nine **Account & security** endpoints (`admin.me.password.change`, the three `admin.me.mfa.totp.*`, `admin.me.mfa.get` and the four `admin.me.passkeys.*`) behind the drawer the avatar menu opens. Creates no table and no action, and links **no** actions on purpose: each one acts on the caller's own Cognito account only — the access token names the subject and no request carries a user id — so a registered endpoint with an empty action list ("any enabled operator") is the correct rule, exactly as `admin.me` is registered in 002. The MFA and passkey routes work only once the admin user pool is reconfigured (see [../auth.md](../auth.md)); until then they answer 503 quoting Cognito. | Once, after step 17. Re-running is safe. |
 | 19 | [`019_currency_pair_backfill.sql`](./019_currency_pair_backfill.sql) | Registers the currency pair **history backfill** endpoint (`admin.integrations.currency_pairs.backfill`, the "Fetch 6 months" button beside Refresh in the pair's download-history drawer) against `can_write_integrations`, the action 008 seeded for every integrations write. Creates no table and no action, and touches no watch row or rate. The other half of the same change — a manual add fetching six months on the spot — needed no SQL at all: it is the existing create endpoint doing more, and only its response body grew. | Once, after step 18. Re-running is safe. |
+| 20 | [`020_quote_symbol_history.sql`](./020_quote_symbol_history.sql) | Registers the quote symbol **download-history** endpoint (`admin.integrations.quote_symbols.quotes`, behind the drawer a row click opens on Integrations > Quote symbols) against the two integration actions 008 seeded — the quotes counterpart of 017's pair history. Creates no table and no action, and touches no watch row or quote: the runs have stored one `admin_quotes` row per symbol and trading day all along, this only lets the page show them. | Once, after step 19. Re-running is safe. |
 
 Until step 7 has run, the Constants list, compare, push and job endpoints
 answer 503 `admin_schema_missing`: the app does not fake a ledger it does not
@@ -146,8 +147,8 @@ before the SQL has run).
 
 ## Adding a table or column later
 
-1. Write the change as a new numbered file here (`020_….sql`), transactional,
-   with comments saying what and why. (The next free number, always: 019 is
+1. Write the change as a new numbered file here (`021_….sql`), transactional,
+   with comments saying what and why. (The next free number, always: 020 is
    taken.)
 2. Run it in pgAdmin.
 3. `npx prisma db pull --config prisma-admin.config.ts`, then
