@@ -6,7 +6,10 @@ import "server-only";
  * the console's own `admin_user_recovery_codes` rows (`./recovery-codes.ts`)
  * meet:
  *
- * - the status read gains the codes summary;
+ * - the status read gains the codes summary — best effort: a failed read is
+ *   logged and answered as "no codes", never a 500 that empties the whole
+ *   drawer (the stage test of 2026-10-04: a table the app's role could not
+ *   use, 42501, took the drawer down with it);
  * - enrolment issues the ten codes once the factor is on — and **never fails
  *   because of them**: a failed insert is logged, `issuedRecoveryCodes` is
  *   null, and the drawer offers "Generate them now";
@@ -16,7 +19,8 @@ import "server-only";
  *   database down the factor has still flipped at Cognito, so the route
  *   answers "no codes" rather than 500;
  * - "Generate new codes" replaces the set behind a password re-check; before
- *   SQL 022 it is a 503 `admin_schema_missing`, like every other feature.
+ *   SQL 022, or while the table belongs to another role (42501), it is a 503
+ *   `admin_schema_missing`, like every other feature.
  *
  * Redeeming a code happens at `/login` (`src/app/login/actions.ts`), not here.
  */
@@ -25,7 +29,7 @@ import { verifyPasswordForSensitiveAction } from "@/lib/auth/cognito";
 import { CognitoConfigError } from "@/lib/auth/config";
 import {
   deleteRecoveryCodes,
-  isMissingTableError,
+  isSchemaFaultError,
   RECOVERY_CODES_TABLE_SQL,
   replaceRecoveryCodes,
   summariseRecoveryCodes,
@@ -71,14 +75,13 @@ export async function withRecoveryCodes(status: MfaStatus, userId: string): Prom
 const NO_RECOVERY_CODES: RecoveryCodesSummary = { remaining: 0, total: 0, usedAt: null };
 
 /**
- * The summary once Cognito has already accepted a switch: a failed read (the
- * admin database down, say) is logged and answered as "no codes", because a
- * 500 here would tell the drawer the factor did not flip when it did.
+ * The summary, best effort: a failed read (the admin database down, a table
+ * the app's role may not use) is logged and answered as "no codes". Once
+ * Cognito has accepted a switch, a 500 here would tell the drawer the factor
+ * did not flip when it did; on the plain status read it would take the whole
+ * drawer down over one row of it.
  */
-async function summariseAfterCognitoAccepted(
-  userId: string,
-  gateway: RecoveryGateway,
-): Promise<RecoveryCodesSummary> {
+async function summariseOrEmpty(userId: string, gateway: RecoveryGateway): Promise<RecoveryCodesSummary> {
   try {
     return await gateway.summariseRecoveryCodes(userId);
   } catch (error) {
@@ -89,10 +92,17 @@ async function summariseAfterCognitoAccepted(
 }
 
 /**
- * The status read with the codes summary: one Cognito call, one database read.
+ * The status read with the codes summary: one Cognito call, one database
+ * read. The Cognito answer decides the drawer; the summary is best effort
+ * and never fails it.
  */
-export async function getMfaStatusView(accessToken: string, userId: string): Promise<MfaStatusView> {
-  return withRecoveryCodes(await getMfaStatus(accessToken), userId);
+export async function getMfaStatusView(
+  accessToken: string,
+  userId: string,
+  gateway: RecoveryGateway = defaultGateway,
+): Promise<MfaStatusView> {
+  const status = await gateway.getMfaStatus(accessToken);
+  return { ...status, recoveryCodes: await summariseOrEmpty(userId, gateway) };
 }
 
 /**
@@ -116,7 +126,7 @@ export async function issueRecoveryCodesAfterEnrolment(
   }
   return {
     ...status,
-    recoveryCodes: await summariseAfterCognitoAccepted(userId, gateway),
+    recoveryCodes: await summariseOrEmpty(userId, gateway),
     issuedRecoveryCodes,
   };
 }
@@ -139,7 +149,7 @@ export async function clearRecoveryCodesAfterDisable(
       error,
     );
   }
-  return { ...status, recoveryCodes: await summariseAfterCognitoAccepted(userId, gateway) };
+  return { ...status, recoveryCodes: await summariseOrEmpty(userId, gateway) };
 }
 
 /**
@@ -156,7 +166,8 @@ export async function clearRecoveryCodesAfterDisable(
  *
  * @throws {ApiError} 401 `password_incorrect`, 422 when the authenticator is
  * off, 503 `auth_unavailable`, 503 `admin_schema_missing` until
- * `docs/sql/022_admin_user_recovery_codes.sql` has been run.
+ * `docs/sql/022_admin_user_recovery_codes.sql` has been run — as the role
+ * that owns `admin_users`, else the table answers 42501 and the 503 stands.
  */
 export async function regenerateRecoveryCodes(
   accessToken: string,
@@ -202,13 +213,13 @@ export async function regenerateRecoveryCodes(
   try {
     return await gateway.replaceRecoveryCodes(operator.id);
   } catch (error) {
-    if (!isMissingTableError(error)) throw error;
+    if (!isSchemaFaultError(error)) throw error;
     console.warn(
-      `[account] generate recovery codes: admin_user_recovery_codes does not exist yet (run ${RECOVERY_CODES_TABLE_SQL}).`,
+      `[account] generate recovery codes: admin_user_recovery_codes does not exist yet or the app's role may not use it (run ${RECOVERY_CODES_TABLE_SQL}; if the table exists, its owner must match admin_users — see the DO block at the end of the file).`,
     );
     throw new ServiceUnavailableError(
       "admin_schema_missing",
-      `The admin database schema is not installed. Run the SQL in ${RECOVERY_CODES_TABLE_SQL}.`,
+      `The admin database is not ready for recovery codes. Run ${RECOVERY_CODES_TABLE_SQL} (the table must be owned by the same role as admin_users).`,
     );
   }
 }

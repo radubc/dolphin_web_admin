@@ -23,7 +23,9 @@ import "server-only";
  * prisma-admin.config.ts && npm run prisma:generate`), so the data access
  * below is `$queryRaw` / `$executeRaw` tagged templates (parameterised, no
  * string concatenation) against the table by name. That is what lets this
- * ship and compile before the pull: until the table exists the reads answer
+ * ship and compile before the pull: until the table exists — or while the
+ * app's role may not use it, `42501`, the table having been created by
+ * another role (see the DO block at the end of 022) — the reads answer
  * "no codes", a claim answers "no such code", and one warning line names the
  * SQL file. **Switch to the typed model (`prismaAdmin.admin_user_recovery_codes`)
  * once the schema has been pulled** — the shapes are written to make that a
@@ -141,19 +143,32 @@ export interface RecoveryCodesSummary {
 export const RECOVERY_CODES_TABLE_SQL = "docs/sql/022_admin_user_recovery_codes.sql";
 
 /**
- * Postgres `42P01` (undefined table) as Prisma reports it: `P2021` from a
- * typed query, `P2010` with `meta.code` from a raw one. Both are "SQL 022 has
- * not been run here", which the reads below answer as "no codes" rather than
+ * The Postgres SQLSTATEs that mean "the table is not usable from here" (both
+ * are fixed by SQL 022, never by a retry): `42P01` undefined table — the file
+ * has not been run — and `42501` permission denied — the file was run by a
+ * role other than the app's, so the table has the wrong owner (the stage
+ * test of 2026-10-04; the DO block at the end of 022 is the fix).
+ */
+const SCHEMA_FAULT_SQLSTATES: ReadonlySet<string> = new Set(["42P01", "42501"]);
+
+/**
+ * A schema fault as Prisma reports it: `P2021` (undefined table) from a typed
+ * query, or `P2010` with one of the SQLSTATEs above in `meta.code` from a raw
+ * one. Every one of them is "SQL 022 has not been run here, or not as the
+ * right role", which the reads below answer as "no codes" rather than
  * failing the Account drawer, the layout or a sign-in.
  */
-export function isMissingTableError(error: unknown): boolean {
+export function isSchemaFaultError(error: unknown): boolean {
   if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
   if (error.code === "P2021") return true;
   const meta = error.meta as { code?: unknown } | undefined;
-  return error.code === "P2010" && meta?.code === "42P01";
+  return error.code === "P2010" && typeof meta?.code === "string" && SCHEMA_FAULT_SQLSTATES.has(meta.code);
 }
 
-/** One warning per process: the table is missing and every read is empty. */
+/** The earlier name of {@link isSchemaFaultError}, kept for its callers. */
+export const isMissingTableError = isSchemaFaultError;
+
+/** One warning per process: the table is unusable and every read is empty. */
 const globalForRecoveryCodes = globalThis as unknown as {
   pennySqueezeAdminRecoveryCodesTableWarned?: boolean;
 };
@@ -162,7 +177,7 @@ function warnMissingTableOnce(): void {
   if (globalForRecoveryCodes.pennySqueezeAdminRecoveryCodesTableWarned) return;
   globalForRecoveryCodes.pennySqueezeAdminRecoveryCodesTableWarned = true;
   console.warn(
-    `[account] admin_user_recovery_codes does not exist yet; recovery codes read as empty until ${RECOVERY_CODES_TABLE_SQL} has been run.`,
+    `[account] admin_user_recovery_codes does not exist yet or the app's role may not use it (42501); recovery codes read as empty until ${RECOVERY_CODES_TABLE_SQL} has been run — if the table exists, its owner must match admin_users: see the DO block at the end of that file.`,
   );
 }
 
@@ -198,7 +213,7 @@ export async function summariseRecoveryCodes(userId: string): Promise<RecoveryCo
     rows = await prismaAdmin.$queryRaw<{ used_at: Date | null }[]>`
       SELECT used_at FROM admin_user_recovery_codes WHERE user_id = ${userId}::uuid`;
   } catch (error) {
-    if (!isMissingTableError(error)) throw error;
+    if (!isSchemaFaultError(error)) throw error;
     warnMissingTableOnce();
     rows = [];
   }
@@ -226,7 +241,7 @@ export async function deleteRecoveryCodes(userId: string): Promise<number> {
   try {
     return await prismaAdmin.$executeRaw`DELETE FROM admin_user_recovery_codes WHERE user_id = ${userId}::uuid`;
   } catch (error) {
-    if (!isMissingTableError(error)) throw error;
+    if (!isSchemaFaultError(error)) throw error;
     warnMissingTableOnce();
     return 0;
   }
@@ -247,7 +262,7 @@ export async function hasRedeemedRecoveryCode(userId: string): Promise<boolean> 
        LIMIT 1`;
     return rows.length > 0;
   } catch (error) {
-    if (isMissingTableError(error)) {
+    if (isSchemaFaultError(error)) {
       warnMissingTableOnce();
     } else {
       console.error(`[account] user ${userId}: the recovery-code nudge could not be read.`, error);
@@ -274,7 +289,7 @@ export async function claimRecoveryCode(
       UPDATE admin_user_recovery_codes SET used_at = ${now}
        WHERE user_id = ${userId}::uuid AND code_hash = ${codeHash} AND used_at IS NULL`;
   } catch (error) {
-    if (!isMissingTableError(error)) throw error;
+    if (!isSchemaFaultError(error)) throw error;
     warnMissingTableOnce();
     return false;
   }

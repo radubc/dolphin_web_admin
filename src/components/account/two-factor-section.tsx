@@ -105,13 +105,38 @@ function errorCode(error: unknown): string | null {
   return typeof code === "string" ? code : null;
 }
 
+/** What the section's one alert shows: the title names who refused. */
+interface SectionError {
+  title: string;
+  description: string;
+}
+
+/**
+ * Answers that are not Cognito's: the admin database (`admin_schema_missing`,
+ * a 503 until SQL 022 has run as the right role) and the generic 500 the
+ * handler answers for anything unexpected. Every other failure here is a
+ * sentence quoted from Cognito, so it keeps the "refused" title.
+ */
+const NOT_COGNITO_CODES: ReadonlySet<string> = new Set(["admin_schema_missing", "internal_error"]);
+
+function sectionError(cause: unknown): SectionError {
+  const code = errorCode(cause);
+  return {
+    title:
+      code !== null && NOT_COGNITO_CODES.has(code)
+        ? "Couldn't load two-factor settings"
+        : "Cognito refused that",
+    description: errorMessage(cause),
+  };
+}
+
 export default function TwoFactorSection() {
   const { message } = App.useApp();
   const [form] = Form.useForm<CodeFields>();
 
   const [status, setStatus] = useState<MfaStatusView | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<SectionError | null>(null);
 
   const [enrolment, setEnrolment] = useState<TotpEnrolment | null>(null);
   const [busy, setBusy] = useState(false);
@@ -146,7 +171,7 @@ export default function TwoFactorSection() {
         setError(null);
       })
       .catch((cause: unknown) => {
-        if (!cancelled) setError(errorMessage(cause));
+        if (!cancelled) setError(sectionError(cause));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -168,7 +193,7 @@ export default function TwoFactorSection() {
           setError(null);
         })
         .catch((cause: unknown) => {
-          setError(errorMessage(cause));
+          setError(sectionError(cause));
         });
     };
     window.addEventListener(PASSKEYS_CHANGED_EVENT, onPasskeysChanged);
@@ -187,7 +212,7 @@ export default function TwoFactorSection() {
     } catch (cause) {
       // Includes the "not switched on for this user pool" refusal, quoted from
       // Cognito by the server.
-      setError(errorMessage(cause));
+      setError(sectionError(cause));
     } finally {
       setBusy(false);
     }
@@ -215,7 +240,7 @@ export default function TwoFactorSection() {
       if (fieldErrors.code) {
         form.setFields([{ name: "code", errors: [fieldErrors.code] }]);
       } else {
-        setError(errorMessage(cause));
+        setError(sectionError(cause));
       }
     } finally {
       setBusy(false);
@@ -230,7 +255,7 @@ export default function TwoFactorSection() {
       setCodesMissing(false);
       message.success("Two-factor authentication is off.");
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(sectionError(cause));
     } finally {
       setBusy(false);
     }
@@ -375,8 +400,8 @@ export default function TwoFactorSection() {
         <Alert
           type="warning"
           showIcon
-          title="Cognito refused that"
-          description={error}
+          title={error.title}
+          description={error.description}
           role="alert"
         />
       ) : null}

@@ -1,13 +1,15 @@
 /**
  * Unit tests for the pure half of `./recovery-codes` — generation, display,
- * normalisation and hashing. The database half is exercised on stage
- * (`docs/two-factor-plan.md`, phase B stage test).
+ * normalisation, hashing, and which Prisma errors count as a schema fault.
+ * The database half is exercised on stage (`docs/two-factor-plan.md`, phase
+ * B stage test).
  *
  *     npm test
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
+import type * as PrismaAdminClient from "@/generated/prisma-admin/client";
 import type * as RecoveryCodes from "./recovery-codes";
 
 const {
@@ -18,8 +20,11 @@ const {
   generateRecoveryCode,
   generateRecoveryCodes,
   hashRecoveryCode,
+  isMissingTableError,
+  isSchemaFaultError,
   normaliseRecoveryCode,
 } = (await import("./recovery-codes" + ".ts")) as typeof RecoveryCodes;
+const { Prisma } = (await import("@/generated/prisma-admin/client" + ".ts")) as typeof PrismaAdminClient;
 
 describe("the alphabet", () => {
   it("has 31 symbols and none of the look-alikes", () => {
@@ -95,5 +100,43 @@ describe("hashRecoveryCode", () => {
     const expected = createHash("sha256").update("abcdefghjk").digest("hex");
     assert.equal(hashRecoveryCode("abcdefghjk"), expected);
     assert.match(hashRecoveryCode("abcdefghjk"), /^[0-9a-f]{64}$/);
+  });
+});
+
+describe("isSchemaFaultError", () => {
+  function prismaError(code: string, meta?: Record<string, unknown>): Error {
+    return new Prisma.PrismaClientKnownRequestError("database said no", {
+      code,
+      clientVersion: "test",
+      meta,
+    });
+  }
+
+  it("matches a missing table from a typed query (P2021)", () => {
+    assert.equal(isSchemaFaultError(prismaError("P2021")), true);
+  });
+
+  it("matches a missing table from a raw query (P2010 / 42P01)", () => {
+    assert.equal(isSchemaFaultError(prismaError("P2010", { code: "42P01" })), true);
+  });
+
+  it("matches permission denied from a raw query (P2010 / 42501): the table belongs to another role", () => {
+    assert.equal(isSchemaFaultError(prismaError("P2010", { code: "42501" })), true);
+  });
+
+  it("matches nothing else", () => {
+    assert.equal(isSchemaFaultError(prismaError("P2010", { code: "23505" })), false);
+    assert.equal(isSchemaFaultError(prismaError("P2010")), false);
+    assert.equal(isSchemaFaultError(prismaError("P2010", { code: 42501 })), false);
+    assert.equal(isSchemaFaultError(prismaError("P2002", { code: "42501" })), false);
+    assert.equal(isSchemaFaultError(prismaError("P2025")), false);
+    assert.equal(isSchemaFaultError(new Error("permission denied for table admin_user_recovery_codes")), false);
+    assert.equal(isSchemaFaultError({ code: "P2021" }), false);
+    assert.equal(isSchemaFaultError(null), false);
+    assert.equal(isSchemaFaultError(undefined), false);
+  });
+
+  it("keeps its earlier name as an alias", () => {
+    assert.equal(isMissingTableError, isSchemaFaultError);
   });
 });

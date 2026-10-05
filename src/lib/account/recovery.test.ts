@@ -14,9 +14,12 @@ import type * as Recovery from "./recovery";
 import type { RecoveryCodesSummary } from "./recovery-codes";
 import type { MfaStatus } from "./types";
 
-const { clearRecoveryCodesAfterDisable, issueRecoveryCodesAfterEnrolment, regenerateRecoveryCodes } = (await import(
-  "./recovery" + ".ts"
-)) as typeof Recovery;
+const {
+  clearRecoveryCodesAfterDisable,
+  getMfaStatusView,
+  issueRecoveryCodesAfterEnrolment,
+  regenerateRecoveryCodes,
+} = (await import("./recovery" + ".ts")) as typeof Recovery;
 const { CognitoConfigError } = (await import("@/lib/auth/config" + ".ts")) as typeof Config;
 const { Prisma } = (await import("@/generated/prisma-admin/client" + ".ts")) as typeof PrismaAdminClient;
 
@@ -67,12 +70,24 @@ function dbDown(): Error {
   return new Error("connection refused");
 }
 
-/** A Prisma "table does not exist" error, the shape `isMissingTableError` recognises. */
+/** A Prisma "table does not exist" error, the shape `isSchemaFaultError` recognises. */
 function missingTable(kind: "P2021" | "P2010"): Error {
   return new Prisma.PrismaClientKnownRequestError("relation does not exist", {
     code: kind,
     clientVersion: "test",
     meta: kind === "P2010" ? { code: "42P01" } : undefined,
+  });
+}
+
+/**
+ * Postgres 42501 from a raw query: the table exists but belongs to another
+ * role, so the app's role may not use it (the stage test of 2026-10-04).
+ */
+function permissionDenied(): Error {
+  return new Prisma.PrismaClientKnownRequestError("permission denied for table admin_user_recovery_codes", {
+    code: "P2010",
+    clientVersion: "test",
+    meta: { code: "42501" },
   });
 }
 
@@ -108,6 +123,48 @@ function assertNothingSensitiveLogged(): void {
     for (const code of CODES) assert.ok(!line.includes(code), `code logged: ${line}`);
   }
 }
+
+describe("getMfaStatusView", () => {
+  it("answers the Cognito status with the codes summary", async () => {
+    const { gateway, calls } = stubGateway();
+    const result = await getMfaStatusView(TOKEN, OPERATOR.id, gateway);
+    assert.deepEqual(result, { ...status(), recoveryCodes: SUMMARY });
+    assert.deepEqual(calls, ["getMfaStatus", "summariseRecoveryCodes"]);
+    assert.deepEqual(logged, []);
+  });
+
+  it("never fails the drawer over the summary: 42501 on the table answers the empty summary, logged once", async () => {
+    const { gateway } = stubGateway({
+      summariseRecoveryCodes: async () => {
+        throw permissionDenied();
+      },
+    });
+    const result = await getMfaStatusView(TOKEN, OPERATOR.id, gateway);
+    assert.deepEqual(result, { ...status(), recoveryCodes: NO_CODES });
+    assert.equal(logged.filter((line) => /summary unavailable/.test(line)).length, 1);
+  });
+
+  it("answers the empty summary on any other database fault too", async () => {
+    const { gateway } = stubGateway({
+      summariseRecoveryCodes: async () => {
+        throw dbDown();
+      },
+    });
+    const result = await getMfaStatusView(TOKEN, OPERATOR.id, gateway);
+    assert.deepEqual(result, { ...status(), recoveryCodes: NO_CODES });
+    assert.equal(logged.filter((line) => /summary unavailable/.test(line)).length, 1);
+  });
+
+  it("still fails when Cognito itself refuses the status read", async () => {
+    const { gateway, calls } = stubGateway({
+      getMfaStatus: async () => {
+        throw new TypeError("cognito down");
+      },
+    });
+    await assert.rejects(getMfaStatusView(TOKEN, OPERATOR.id, gateway), TypeError);
+    assert.deepEqual(calls, ["getMfaStatus"]);
+  });
+});
 
 describe("issueRecoveryCodesAfterEnrolment", () => {
   it("issues the codes once and answers the summary with the status", async () => {
@@ -317,6 +374,20 @@ describe("regenerateRecoveryCodes — refusals", () => {
     });
     const error = await rejectsApi(regenerateRecoveryCodes(TOKEN, OPERATOR, PASSWORD, gateway));
     assert.equal(error.code, "admin_schema_missing");
+  });
+
+  it("maps permission denied on the table (P2010 / 42501, wrong owner) to 503 admin_schema_missing naming the owner rule", async () => {
+    const { gateway } = stubGateway({
+      replaceRecoveryCodes: async () => {
+        throw permissionDenied();
+      },
+    });
+    const error = await rejectsApi(regenerateRecoveryCodes(TOKEN, OPERATOR, PASSWORD, gateway));
+    assert.equal(error.status, 503);
+    assert.equal(error.code, "admin_schema_missing");
+    assert.match(error.message, /022_admin_user_recovery_codes\.sql/);
+    assert.match(error.message, /owned by the same role as admin_users/);
+    assert.equal(logged.filter((line) => /owner must match admin_users/.test(line)).length, 1);
   });
 
   it("lets any other database fault propagate", async () => {

@@ -1,8 +1,9 @@
 -- Operator two-factor recovery codes, and the endpoint that regenerates them
 -- Target database: admin_penny_squeeze (ADMIN_DATABASE_URL)
 -- Run AFTER 021. Re-running is safe: the table and its indexes are created
--- IF NOT EXISTS and the insert is guarded by ON CONFLICT. Nothing is altered
--- or dropped.
+-- IF NOT EXISTS, the insert is guarded by ON CONFLICT, and the ownership
+-- step at the end only sets what is already the case on a healthy database.
+-- Nothing is dropped.
 --
 -- Why this file exists
 --   docs/two-factor-plan.md, phase B (owner-approved 2026-10-04): the port of
@@ -51,6 +52,20 @@
 --                               ride the endpoints 018 already registered,
 --                               and the redeem step is a Server Action on
 --                               /login, which has no endpoint row at all.
+--   ownership                   the new table is handed to whichever role
+--                               owns admin_users (the DO block at the end),
+--                               so the app's role can reach it wherever this
+--                               file is run. Found on stage 2026-10-04:
+--                               pgAdmin connected as a different role from
+--                               the app's, the table was created owned by
+--                               that role, and every query on it answered
+--                               42501 "permission denied" (the Account drawer
+--                               was a 500, enrolment showed no codes, and
+--                               "Generate new codes" failed). Earlier files
+--                               never created a table the app's role did not
+--                               own, so none of them carried this step. If
+--                               022 was run before this block existed, run
+--                               the DO block alone.
 --
 -- What this does NOT change
 --   No action, role, page or grant is added or changed. No row of any other
@@ -114,6 +129,27 @@ ON CONFLICT (key) DO NOTHING;
 
 -- No admin_endpoint_actions rows on purpose: see the header and 018.
 
+-- ---------------------------------------------------------------------------
+-- Ownership: the same role as the other admin tables
+-- ---------------------------------------------------------------------------
+-- A table belongs to the role that created it, and pgAdmin's connecting role
+-- is not always the app's (ADMIN_DATABASE_URL). When they differ, the app's
+-- role has no privilege on the new table and every query on it answers
+-- 42501 "permission denied for table admin_user_recovery_codes" — which is
+-- exactly what stage showed on 2026-10-04. Handing the table to the role that
+-- owns admin_users makes it like every other admin_* table. Idempotent: when
+-- the owner already matches, the statement changes nothing. Safe to run on
+-- its own, outside the transaction above, on a database where 022 ran before
+-- this block was added.
+DO $$
+DECLARE r text;
+BEGIN
+  SELECT tableowner INTO r FROM pg_tables WHERE schemaname = 'public' AND tablename = 'admin_users';
+  IF r IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE admin_user_recovery_codes OWNER TO %I', r);
+  END IF;
+END $$;
+
 COMMIT;
 
 -- ---------------------------------------------------------------------------
@@ -133,6 +169,15 @@ COMMIT;
 --
 -- Expect the primary key, the foreign key ON DELETE CASCADE, the code_hash
 -- CHECK and the (user_id, code_hash) UNIQUE.
+--
+-- SELECT tablename, tableowner
+--   FROM pg_tables
+--  WHERE schemaname = 'public'
+--    AND tablename IN ('admin_users', 'admin_user_recovery_codes')
+--  ORDER BY tablename;
+--
+-- Expect two rows with the SAME tableowner. If they differ, the app's role
+-- cannot reach the new table (42501): run the DO block above on its own.
 --
 -- SELECT e.key, e.method, e.path, e.is_enabled, e.rate_limit_policy,
 --        count(a.id) AS actions

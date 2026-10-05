@@ -228,7 +228,13 @@ the web repo and is not repeated here — only the admin differences:
   the build only.
 
 Owner steps: run `022_admin_user_recovery_codes.sql` on the local and stage
-admin databases; `npx prisma db pull --config prisma-admin.config.ts && npx
+admin databases — the file now ends with a `DO` block that hands the table
+to the role that owns `admin_users` (the stage test of 2026-10-04 found the
+table owned by pgAdmin's role, so the app's role got `42501 permission
+denied` on every query: the drawer was a 500, enrolment showed no codes,
+"Generate new codes" failed); **if 022 was run before this line was added,
+run the `DO` block alone** and check the verify query's two `tableowner`
+values match; `npx prisma db pull --config prisma-admin.config.ts && npx
 prisma generate` (then, optionally, switch `recovery-codes.ts` to the typed
 model); deploy (the IAM policy rides the push to stage); for a local run,
 give the AWS profile `cognito-idp:AdminGetUser` and
