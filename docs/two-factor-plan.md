@@ -143,6 +143,8 @@ the web repo and is not repeated here — only the admin differences:
 6. Shell nudge until re-enrolled, same rule as the web app (TOTP off and
    rows exist; `used_at` set → recovery, unused rows → support reset).
 
+*Phase B verified on stage 2026-10-05:* QR enrolment, ten codes shown once (after the table-ownership fix — the table had been created by pgAdmin's role, 42501 for the app; SQL 022 now aligns the owner), regenerate refused on a wrong password and issued ten new codes on the right one, a recovery code signed the operator in and cleared both factors (`UserMFASettingList` null; log `two-factor authentication turned off with a recovery code`). The shared five-per-15-minutes password budget was hit during the test and behaved as designed. **Admin phases A–D complete.**
+
 *Phase B built 2026-10-04* (after C, so it took SQL **022**):
 
 - **QR code**: antd `QRCode` (SVG, 180 px, level M) over the existing
