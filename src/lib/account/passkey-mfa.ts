@@ -24,6 +24,19 @@ import "server-only";
 import { getMfaStatus, listPasskeys, setPasskeyMfaPreference } from "./service";
 import type { MfaStatus } from "./types";
 
+/**
+ * The three Cognito calls the check can make, so the tests can stub them
+ * (`./passkey-mfa.test.ts`); production callers pass nothing and get the
+ * real functions from `./service`.
+ */
+export interface PasskeyMfaGateway {
+  getMfaStatus: typeof getMfaStatus;
+  listPasskeys: typeof listPasskeys;
+  setPasskeyMfaPreference: typeof setPasskeyMfaPreference;
+}
+
+const defaultGateway: PasskeyMfaGateway = { getMfaStatus, listPasskeys, setPasskeyMfaPreference };
+
 /** What the caller already knows; anything left out is read from Cognito. */
 export interface PasskeyMfaFacts {
   status?: Pick<MfaStatus, "totpEnabled" | "passkeyMfaEnabled">;
@@ -49,6 +62,7 @@ export interface PasskeyMfaCheck {
 export async function ensurePasskeyMfa(
   accessToken: string,
   facts: PasskeyMfaFacts = {},
+  gateway: PasskeyMfaGateway = defaultGateway,
 ): Promise<PasskeyMfaCheck> {
   const unchanged = (passkeyMfaEnabled: boolean): PasskeyMfaCheck => ({
     passkeyMfaEnabled,
@@ -58,7 +72,7 @@ export async function ensurePasskeyMfa(
     let status = facts.status;
     let hasPasskeys = facts.hasPasskeys;
     if (status === undefined) {
-      const read = await getMfaStatus(accessToken);
+      const read = await gateway.getMfaStatus(accessToken);
       status = read;
       // That read already lists the passkeys for exactly the case handled
       // below (TOTP on, flag off) and reports a failed list as "not paused",
@@ -70,14 +84,14 @@ export async function ensurePasskeyMfa(
     }
 
     if (hasPasskeys === undefined) {
-      hasPasskeys = (await listPasskeys(accessToken)).length > 0;
+      hasPasskeys = (await gateway.listPasskeys(accessToken)).length > 0;
     }
     if (!hasPasskeys) {
       return unchanged(false);
     }
 
     try {
-      await setPasskeyMfaPreference(accessToken, true);
+      await gateway.setPasskeyMfaPreference(accessToken, true);
     } catch {
       // Already logged with Cognito's error name by `passkeyMfaRefused`.
       return { passkeyMfaEnabled: false, passkeySignInPaused: true };

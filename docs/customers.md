@@ -459,6 +459,11 @@ The guards, in order:
   effort, like the invitation audit. The server log names the sub and
   Cognito's error name, never the address.
 
+`npm test` (`src/lib/customers/two-factor.test.ts`) checks those guards in
+that order against stubbed pools: the 403 spends none of the five, the sixth
+attempt in an hour is 429 before Cognito is asked, a throwing audit write never
+fails a reset, and the call sends both settings off in one request.
+
 A `NotAuthorizedException` or `AccessDeniedException` is the task role lacking
 `AdminSetUserMFAPreference` (the `customer-user-pool` policy in
 `infra/service-admin.yaml`); it answers 503 `cognito_unavailable` and changes

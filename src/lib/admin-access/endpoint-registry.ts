@@ -95,7 +95,7 @@ export const ENDPOINT_REGISTRY: readonly EndpointRegistryEntry[] = [
       "Revokes the refresh token at Cognito and clears every session cookie. A form POST gets a 303 to /login, a fetch gets 204.",
     category: "authentication",
     authKind: "public",
-    rateLimit: "authRefresh",
+    rateLimit: "authLogout",
     defaults: none,
   },
   {
@@ -106,7 +106,7 @@ export const ENDPOINT_REGISTRY: readonly EndpointRegistryEntry[] = [
     description: "Sign-out for a typed URL or bookmark. Same effect as the POST, always redirects to /login.",
     category: "authentication",
     authKind: "public",
-    rateLimit: "authRefresh",
+    rateLimit: "authLogout",
     defaults: none,
   },
   {

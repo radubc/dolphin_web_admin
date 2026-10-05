@@ -2,7 +2,7 @@
 
 **Status: approved by the owner on 2026-10-04** (order A → C → B → D; the
 issuer label becomes "FairSums Admin"; the operator step-up rule in phase C
-is in). Phase A live on stage and verified 2026-10-04 (operator account lists WEB_AUTHN_MFA beside SOFTWARE_TOKEN_MFA; passkey and password+code both sign in).
+is in). Phase A live on stage and verified 2026-10-04 (operator account lists WEB_AUTHN_MFA beside SOFTWARE_TOKEN_MFA; passkey and password+code both sign in). Phase C verified on stage 2026-10-04. Phase B built 2026-10-04 (owner steps and the stage test pending). Phase D built 2026-10-04: `npm test` covers the server paths of A, B and C (132 tests); docs brought up to date.
 
 Mirrors phases 1 and 2 of the web app's `docs/two-factor-plan.md`
 (`~/Developer/projects/penny-squeeze-web`), plus the customer-support action
@@ -375,6 +375,50 @@ Stage test (`admin.fairsums.app`, after deploy):
 - `docs/auth.md`, `docs/access-control.md` (step-up rule for the customer
   action), `docs/api.md`, `docs/customers.md`, `CLAUDE.md` line 24.
 
+*Phase D built 2026-10-04.* The runner is phase B's `node --test` setup
+(`npm test`, `scripts/test-loader.mjs`, `--conditions=react-server`); 37
+tests in 3 files became 132 in 8. Every test stubs the pool or a gateway and
+loads no module that imports `next/headers`, the pattern `recovery-redeem.ts`
+set. The inventory:
+
+| File | What it covers |
+| --- | --- |
+| `src/lib/account/passkey-mfa.test.ts` | Phase A, `ensurePasskeyMfa`: the flag is set only for TOTP on + at least one passkey + flag off; supplied facts are not re-read and the status read's own passkey answer is reused; a refused set answers `passkeySignInPaused`; a failed read or list answers unchanged; nothing throws. `isPasskeyMfaListed` matches `WEB_AUTHN_MFA` (any case) and not `SOFTWARE_TOKEN_MFA`. |
+| `src/lib/customers/two-factor.test.ts` | Phase C, `resetCustomerTwoFactor`: 403 for a `password` session before any other work and without spending the budget; five an hour per operator with the sixth 429 before Cognito is asked (the real in-process limiter, a fresh operator id per test); 404; 503 `cognito_unavailable` when the pool is unconfigured; the read-before / reset / re-read / audit order and the answer; the done and failed audit rows (`methodsBefore`, `methodsAfter`, `reason`); a throwing audit write never fails the reset or hides a refusal; a non-`ApiError` becomes 503. `describeTwoFactor`, `operatorCanResetTwoFactor`. `resetTwoFactor` / `readTwoFactor` against a stubbed pool: both settings off in one `AdminSetUserMFAPreference` addressed by the sub, the list-to-methods mapping, 404 / 503 translation with the AWS message kept out of the response. |
+| `src/lib/auth/sign-in-method.test.ts` | Phase C, the `psa_sign_in_method` cookie: round trip for the three methods; a forged value, a value signed for another `sub` or `origin_jti`, an unknown method with a real signature, and a wrong-length signature (the constant-time compare does not throw) all read as `password`; a payload without `origin_jti` reads as `password` and a token without one gets no cookie; the key is derived from `ADMIN_COGNITO_CLIENT_SECRET` (a rotated secret invalidates) with the per-process fallback. |
+| `src/lib/account/recovery.test.ts` | Phase B gaps: `issueRecoveryCodesAfterEnrolment` and `clearRecoveryCodesAfterDisable` never throw — a failed write or delete is logged, a failed summary read answers the empty summary; `regenerateRecoveryCodes`: the order, 401 `password_incorrect` (wrong and temporary password), 503 `auth_unavailable` (outage, `CognitoConfigError`), 422 while the app is off, a missing table (P2021, and P2010 / 42P01 from a raw query) → 503 `admin_schema_missing`. |
+| `src/lib/auth/cognito.test.ts` | Phase B, `verifyPasswordForSensitiveAction`: one `USER_PASSWORD_AUTH` with the SECRET_HASH over the address (none without a secret); tokens → proof `tokens`; `SOFTWARE_TOKEN_MFA` and the other second-factor challenges → proof `challenge`, unanswered; `NEW_PASSWORD_REQUIRED` and an unknown challenge → failure `challenge`; the credential verdicts → `incorrect`; a throttle, a network fault or an empty answer → `unavailable`; the password is never logged. |
+| `src/lib/account/recovery-codes.test.ts` | Phase B (existing): the alphabet, generation, display, normalisation, hashing. |
+| `src/lib/auth/cognito-admin.test.ts` | Phase B (existing): `adminFindUser` (the address binding) and `adminTurnOffSecondFactor` against a stubbed admin pool. |
+| `src/lib/auth/recovery-redeem.test.ts` | Phase B (existing): the order of a recovery-code sign-in against a scripted gateway. |
+
+Seams added for the tests, each an optional trailing parameter whose default
+is the real thing, so no caller and no behaviour changed: `PasskeyMfaGateway`
+on `ensurePasskeyMfa`; `TwoFactorResetGateway` on `resetCustomerTwoFactor`
+and `describeTwoFactor` (the rate limiter stays real) and `CustomerPoolAccess`
+on `readTwoFactor` / `resetTwoFactor` (the twin of `PoolAccess` in
+`cognito-admin.ts`); `RecoveryGateway` on the three `recovery.ts` functions;
+`PasswordCheckClient` on `verifyPasswordForSensitiveAction`. The sign-in
+method constants and the cookie's HMAC helpers moved verbatim from
+`session.ts` into `src/lib/auth/sign-in-method.ts` (which imports no
+`next/headers`); `session.ts` re-exports the public names and
+`customers/two-factor.ts` imports from the new module.
+
+What is **not** covered without a live pool (the stage tests above remain the
+check for these): Cognito's own acceptance or refusal of the calls (the
+same-request rule for `WebAuthnMfaSettings`, the combined off-call, the
+`MULTI_FACTOR_WITH_USER_VERIFICATION` requirement); the passkey ceremonies
+(not from `localhost`); the Route Handlers and `adminHandler` (auth, CSRF,
+the access-map rule, the per-IP budgets and `authLoginAccount` /
+`accountMfa` charged by the recovery-codes route); the Server Actions in
+`src/app/login/actions.ts` (`verifyMfaCode`'s `ensurePasskeyMfa` call,
+`redeemRecoveryCode`'s validation and budgets, the `createSession` methods);
+`createSession`, `verifyIdToken` and `refreshSession` (they need
+`next/headers` and the pool's JWKS); the raw-SQL half of
+`recovery-codes.ts` (the atomic claim, the missing-table reads before SQL
+022); the drawer, the shell notice and the login form; the two IAM policies;
+the audit table's check constraint (SQL 021).
+
 ## Order, effort, owner steps
 
 | # | Phase | Size | Owner steps |
@@ -382,7 +426,7 @@ Stage test (`admin.fairsums.app`, after deploy):
 | A | Passkeys count as two factors | small | deploy; stage test |
 | C | Customer two-factor reset | medium | run SQL for the endpoint grant; deploy (IAM) |
 | B | QR code + operator recovery codes | medium | run SQL 022; `prisma db pull` (admin config); deploy (IAM) |
-| D | Tests and docs | small | — |
+| D | Tests and docs | small | — (built 2026-10-04) |
 
 A first (it closes the live lockout). C before B because it is the support
 path the web app's recovery codes assume exists. Phases 3–7 of the web plan

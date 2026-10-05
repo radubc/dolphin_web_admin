@@ -20,7 +20,7 @@ paths:
 
 ## Session cookies
 
-Policy (`docs/auth.md`, "Session lifetime"): a browser is signed out after **30 minutes without activity** (`IDLE_TIMEOUT_SECONDS` in `cookies.ts`) and never while the operator keeps working. Cognito has no idle timeout and rotation does not extend a refresh token, so the sliding window is enforced here. Five httpOnly cookies, across two paths, every lifetime derived from the token's own `exp`:
+Policy (`docs/auth.md`, "Session lifetime"): a browser is signed out after **30 minutes without activity** (`IDLE_TIMEOUT_SECONDS` in `cookies.ts`) and never while the operator keeps working. Cognito has no idle timeout and rotation does not extend a refresh token, so the sliding window is enforced here. Six httpOnly cookies, across two paths, every lifetime derived from the token's own `exp`:
 
 | Cookie | Path | Lifetime | Contents |
 | --- | --- | --- | --- |
@@ -29,6 +29,7 @@ Policy (`docs/auth.md`, "Session lifetime"): a browser is signed out after **30 
 | `psa_session` | `/` | id `exp` + 30 min | `"1"`, no secret: tells the proxy a refresh token exists |
 | `psa_refresh_token` | `/api/auth` | id `exp` + 30 min | the refresh token |
 | `psa_refresh_proof` | `/api/auth` | id `exp` + 30 min | the id token issued with it: the tamper-proof "last activity" clock the refresh endpoint checks |
+| `psa_sign_in_method` | `/` | id `exp` + 30 min | how the session was signed in (`password`, `password+totp`, `passkey`), HMAC-bound to the id token's `sub` and `origin_jti`; unverifiable → `password` (`src/lib/auth/sign-in-method.ts`, since 2026-10-04) |
 
 `psa_refresh_user` is no longer written (the refresh call needs no username); it stays in `SESSION_COOKIES` so legacy copies are deleted.
 

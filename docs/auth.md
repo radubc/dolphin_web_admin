@@ -5,6 +5,23 @@ app's. Region, pool id, client id and (optionally) the client secret come from
 `.env`; `src/lib/auth/config.ts` reads `ADMIN_COGNITO_*` first and falls back
 to the `COGNITO_*` and `NEXT_PUBLIC_COGNITO_*` spellings.
 
+## Two-factor authentication — overview
+
+The pieces, each described in its own section below or in a sibling guide,
+and where each stands as of 2026-10-04 ([`two-factor-plan.md`](./two-factor-plan.md)
+is the plan and the build log):
+
+| Piece | What it is | Status |
+| --- | --- | --- |
+| [Passkey MFA](#passkey-mfa-2026-10-04) | a passkey counts as both factors for an operator with the authenticator app on; `ensurePasskeyMfa()` sets the per-user flag at enrolment, passkey registration and TOTP sign-in | phase A — built and verified on stage 2026-10-04 |
+| [Recovery codes](#recovery-codes), redeemed with [Use a recovery code instead](#use-a-recovery-code-instead) | ten single-use codes issued at enrolment; one of them, with the password, turns the factor off on the admin pool at `/login` | phase B — built 2026-10-04; the owner steps (SQL 022, `prisma db pull`, deploy) and the stage test are pending |
+| [The sign-in method cookie](#the-session) | `psa_sign_in_method`, signed against the id token's `sub` and `origin_jti`, says whether the session was signed in with a second factor; older sessions and bearer callers read as `password` | phase C — built and verified on stage 2026-10-04 |
+| The customer reset ([customers.md](./customers.md)) | support turns a customer's two-factor authentication off on the customer pool; the step-up guard is that cookie | phase C — built and verified on stage 2026-10-04 |
+
+`npm test` covers the server-side rules of all four against stubbed pools and
+gateways (phase D, 2026-10-04); what still needs a live pool is listed in the
+plan.
+
 ## Sign-in
 
 `/login` is a Server Action (`src/app/login/actions.ts`) calling Cognito's
@@ -242,7 +259,8 @@ plain password step (and the invitation's set-password step) write
 action that insists on a second factor — turning off a customer's two-factor
 authentication ([access-control.md](./access-control.md), "Step-up"). It was
 chosen over the id token's `amr` claim, which the pool is not known to emit.
-The cookie is signed (HMAC-SHA256 over `sub`, `origin_jti` and the method;
+The cookie is signed in `src/lib/auth/sign-in-method.ts` (HMAC-SHA256 over
+`sub`, `origin_jti` and the method;
 an id token without `origin_jti` — a client with token revocation off — gets
 no cookie and reads as `password`)
 with a key derived from `ADMIN_COGNITO_CLIENT_SECRET`, so every deployed task

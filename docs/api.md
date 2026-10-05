@@ -39,7 +39,8 @@ In-process sliding windows, per preset name (`src/lib/security/rate-limit.ts`):
 | `authReset` | 5 / 15 min | password reset |
 | `authMfa` | 10 / 15 min per account | the second-factor steps at sign-in — the authenticator code (keyed by pool username) and the recovery code (keyed by the address the password is proven for) share one budget (`mfa:email:`) wherever the two coincide, on top of the sign-in budget each still spends |
 | `accountMfa` | 10 / 15 min per operator | "Generate new codes" in Account & security (it also charges `authLoginAccount` per email, because it proves a password) |
-| `authRefresh` | 30 / 15 min per IP | refresh and logout |
+| `authRefresh` | 200 / 15 min per IP | token refresh (an active tab renews every few minutes) |
+| `authLogout` | 30 / 15 min per IP | sign-out; its own budget, so an exhausted refresh budget never blocks a revoke |
 | `customerTwoFactorReset` | 5 / hour per operator | turning off a customer's two-factor authentication |
 | `health` | 30 / minute per IP | the health probe |
 | `service` | 600 / minute per key | machine clients (`API_KEYS`): the two service lookups |

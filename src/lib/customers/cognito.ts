@@ -38,6 +38,7 @@ import {
   AdminSetUserMFAPreferenceCommand,
   CognitoIdentityProviderClient,
   ListUsersCommand,
+  type AdminGetUserCommandOutput,
   type AttributeType,
   type UserType,
 } from "@aws-sdk/client-cognito-identity-provider";
@@ -528,6 +529,31 @@ function twoFactorMethod(setting: string): CustomerTwoFactorMethod | null {
   }
 }
 
+type TwoFactorCommand = AdminGetUserCommand | AdminSetUserMFAPreferenceCommand;
+
+/**
+ * The customer pool and a way to send it one of the two two-factor commands.
+ * Same seam as `PoolAccess` in `src/lib/auth/cognito-admin.ts`: the tests
+ * stub it (`./two-factor.test.ts`); production callers pass nothing.
+ */
+export interface CustomerPoolAccess {
+  userPoolId: string;
+  send: (command: TwoFactorCommand) => Promise<unknown>;
+}
+
+/**
+ * The customer pool through the process-wide client.
+ *
+ * @throws {ApiError} 503 `cognito_unavailable` when the pool is not configured.
+ */
+function defaultPool(): CustomerPoolAccess {
+  const config = getCustomerCognitoConfig();
+  return {
+    userPoolId: config.userPoolId,
+    send: (command) => getClient(config).send(command as AdminGetUserCommand),
+  };
+}
+
 /** `UserMFASettingList` / `PreferredMfaSetting` as the drawer shows them. */
 function toTwoFactor(settings: string[] | undefined, preferred: string | undefined): CustomerTwoFactor {
   const methods: CustomerTwoFactorMethod[] = [];
@@ -551,12 +577,14 @@ function toTwoFactor(settings: string[] | undefined, preferred: string | undefin
  * @throws {ApiError} translated from Cognito (404 when the sub is not in the
  * pool, 503 when the deployment may not read it).
  */
-export async function readTwoFactor(sub: string): Promise<CustomerTwoFactor> {
-  const config = getCustomerCognitoConfig();
+export async function readTwoFactor(
+  sub: string,
+  pool: CustomerPoolAccess = defaultPool(),
+): Promise<CustomerTwoFactor> {
   try {
-    const found = await getClient(config).send(
-      new AdminGetUserCommand({ UserPoolId: config.userPoolId, Username: sub }),
-    );
+    const found = (await pool.send(
+      new AdminGetUserCommand({ UserPoolId: pool.userPoolId, Username: sub }),
+    )) as AdminGetUserCommandOutput;
     return toTwoFactor(found.UserMFASettingList, found.PreferredMfaSetting);
   } catch (error) {
     throw translateCognitoError(error, "reading a customer's two-factor settings");
@@ -579,12 +607,14 @@ export async function readTwoFactor(sub: string): Promise<CustomerTwoFactor> {
  * @throws {ApiError} translated from Cognito; a `NotAuthorizedException` or
  * `AccessDeniedException` is the task role lacking the permission (503).
  */
-export async function resetTwoFactor(sub: string): Promise<void> {
-  const config = getCustomerCognitoConfig();
+export async function resetTwoFactor(
+  sub: string,
+  pool: CustomerPoolAccess = defaultPool(),
+): Promise<void> {
   try {
-    await getClient(config).send(
+    await pool.send(
       new AdminSetUserMFAPreferenceCommand({
-        UserPoolId: config.userPoolId,
+        UserPoolId: pool.userPoolId,
         Username: sub,
         SoftwareTokenMfaSettings: { Enabled: false, PreferredMfa: false },
         WebAuthnMfaSettings: { Enabled: false },

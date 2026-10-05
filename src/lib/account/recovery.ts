@@ -34,6 +34,28 @@ import {
 import { getMfaStatus } from "./service";
 import type { MfaStatus, MfaStatusView, TotpEnrolmentResult } from "./types";
 
+/**
+ * What this module reaches for — the pool (through `./service` and the
+ * password re-check) and the codes table — so the best-effort rules can be
+ * tested against stubs (`./recovery.test.ts`). Production callers pass
+ * nothing and get the real functions.
+ */
+export interface RecoveryGateway {
+  verifyPassword: typeof verifyPasswordForSensitiveAction;
+  getMfaStatus: typeof getMfaStatus;
+  replaceRecoveryCodes: typeof replaceRecoveryCodes;
+  summariseRecoveryCodes: typeof summariseRecoveryCodes;
+  deleteRecoveryCodes: typeof deleteRecoveryCodes;
+}
+
+const defaultGateway: RecoveryGateway = {
+  verifyPassword: verifyPasswordForSensitiveAction,
+  getMfaStatus,
+  replaceRecoveryCodes,
+  summariseRecoveryCodes,
+  deleteRecoveryCodes,
+};
+
 /** The API code a wrong password comes back with (401). */
 export const PASSWORD_INCORRECT_CODE = "password_incorrect";
 
@@ -53,9 +75,12 @@ const NO_RECOVERY_CODES: RecoveryCodesSummary = { remaining: 0, total: 0, usedAt
  * admin database down, say) is logged and answered as "no codes", because a
  * 500 here would tell the drawer the factor did not flip when it did.
  */
-async function summariseAfterCognitoAccepted(userId: string): Promise<RecoveryCodesSummary> {
+async function summariseAfterCognitoAccepted(
+  userId: string,
+  gateway: RecoveryGateway,
+): Promise<RecoveryCodesSummary> {
   try {
-    return await summariseRecoveryCodes(userId);
+    return await gateway.summariseRecoveryCodes(userId);
   } catch (error) {
     const name = error instanceof Error ? error.name : typeof error;
     console.error(`[account] recovery codes: summary unavailable (${name})`);
@@ -78,10 +103,11 @@ export async function getMfaStatusView(accessToken: string, userId: string): Pro
 export async function issueRecoveryCodesAfterEnrolment(
   status: MfaStatus,
   userId: string,
+  gateway: RecoveryGateway = defaultGateway,
 ): Promise<TotpEnrolmentResult> {
   let issuedRecoveryCodes: string[] | null = null;
   try {
-    issuedRecoveryCodes = await replaceRecoveryCodes(userId);
+    issuedRecoveryCodes = await gateway.replaceRecoveryCodes(userId);
   } catch (error) {
     console.error(
       `[account] user ${userId}: the authenticator app is on but the recovery codes could not be created.`,
@@ -90,7 +116,7 @@ export async function issueRecoveryCodesAfterEnrolment(
   }
   return {
     ...status,
-    recoveryCodes: await summariseAfterCognitoAccepted(userId),
+    recoveryCodes: await summariseAfterCognitoAccepted(userId, gateway),
     issuedRecoveryCodes,
   };
 }
@@ -100,16 +126,20 @@ export async function issueRecoveryCodesAfterEnrolment(
  * leftover rows only ever show the drawer banner until the next enrolment
  * replaces them.
  */
-export async function clearRecoveryCodesAfterDisable(status: MfaStatus, userId: string): Promise<MfaStatusView> {
+export async function clearRecoveryCodesAfterDisable(
+  status: MfaStatus,
+  userId: string,
+  gateway: RecoveryGateway = defaultGateway,
+): Promise<MfaStatusView> {
   try {
-    await deleteRecoveryCodes(userId);
+    await gateway.deleteRecoveryCodes(userId);
   } catch (error) {
     console.error(
       `[account] user ${userId}: the authenticator app is off but the recovery codes could not be deleted.`,
       error,
     );
   }
-  return { ...status, recoveryCodes: await summariseAfterCognitoAccepted(userId) };
+  return { ...status, recoveryCodes: await summariseAfterCognitoAccepted(userId, gateway) };
 }
 
 /**
@@ -132,10 +162,11 @@ export async function regenerateRecoveryCodes(
   accessToken: string,
   operator: { id: string; email: string },
   password: string,
+  gateway: RecoveryGateway = defaultGateway,
 ): Promise<string[]> {
   let check;
   try {
-    check = await verifyPasswordForSensitiveAction(operator.email, password);
+    check = await gateway.verifyPassword(operator.email, password);
   } catch (error) {
     if (error instanceof CognitoConfigError) {
       console.error("[account] generate recovery codes: Cognito is not configured:", error);
@@ -163,13 +194,13 @@ export async function regenerateRecoveryCodes(
     throw new ApiError(401, PASSWORD_INCORRECT_CODE, "The password is incorrect.");
   }
 
-  const status = await getMfaStatus(accessToken);
+  const status = await gateway.getMfaStatus(accessToken);
   if (!status.totpEnabled) {
     throw new ValidationError(TURN_ON_FIRST_MESSAGE);
   }
 
   try {
-    return await replaceRecoveryCodes(operator.id);
+    return await gateway.replaceRecoveryCodes(operator.id);
   } catch (error) {
     if (!isMissingTableError(error)) throw error;
     console.warn(

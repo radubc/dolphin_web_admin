@@ -9,6 +9,7 @@ Internal admin console for the Penny Squeeze personal-finance product: operator 
 - `npm run build` / `npm run start` — production build and serve (start also binds 3001)
 - `npm run lint` — ESLint (flat config)
 - `npx tsc --noEmit` — type check
+- `npm test` — unit tests: `node --test` over `src/**/*.test.ts` through `scripts/test-loader.mjs` (the consumer app's setup); stubbed pools and gateways, no AWS, no database
 - `npm run prisma:generate` — regenerate **both** clients into `src/generated/prisma/` and `src/generated/prisma-admin/`
 - `npx prisma <cmd> --config prisma-admin.config.ts` — run any Prisma CLI command against the admin database; without `--config` it targets the main database
 - `npx prisma migrate dev --config prisma-admin.config.ts` — create/apply an admin-database migration (ask first; touches the DB). Never migrate the main database from here

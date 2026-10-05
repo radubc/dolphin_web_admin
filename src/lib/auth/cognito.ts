@@ -7,6 +7,7 @@ import {
   InitiateAuthCommand,
   RespondToAuthChallengeCommand,
   RevokeTokenCommand,
+  type InitiateAuthCommandOutput,
 } from "@aws-sdk/client-cognito-identity-provider";
 import { getCognitoConfig, type CognitoConfig } from "./config";
 import {
@@ -473,6 +474,15 @@ export type PasswordCheckResult =
   | { ok: false; failure: PasswordCheckFailure };
 
 /**
+ * The one call the re-check makes, so the tests can stub it
+ * (`./cognito.test.ts`); production callers pass nothing and get the
+ * process-wide client.
+ */
+export interface PasswordCheckClient {
+  send: (command: InitiateAuthCommand) => Promise<InitiateAuthCommandOutput>;
+}
+
+/**
  * Re-checks a password without signing anyone in.
  *
  * Two callers (`docs/two-factor-plan.md`, phase B): "Generate new codes" in
@@ -506,6 +516,7 @@ export type PasswordCheckResult =
 export async function verifyPasswordForSensitiveAction(
   email: string,
   password: string,
+  client?: PasswordCheckClient,
 ): Promise<PasswordCheckResult> {
   const config = getCognitoConfig();
 
@@ -520,7 +531,8 @@ export async function verifyPasswordForSensitiveAction(
 
   let response;
   try {
-    response = await getClient(config).send(
+    const sender: PasswordCheckClient = client ?? getClient(config);
+    response = await sender.send(
       new InitiateAuthCommand({
         AuthFlow: "USER_PASSWORD_AUTH",
         ClientId: config.clientId,

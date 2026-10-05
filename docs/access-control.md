@@ -135,16 +135,21 @@ from it. Two customer actions write to it as well: invitations
 
 One operation is gated by *how* the operator signed in, on top of the
 allowlist and the access map: turning off a customer's two-factor
-authentication (`admin.customers.two_factor_reset`). The session records its
-sign-in method — `password`, `password+totp` or `passkey` — in a signed cookie
-written at sign-in and carried across refreshes ([auth.md](./auth.md), "The
-session"), and the route refuses a `password` session with 403 "Sign in with
-your authenticator app or a passkey to use this." A passkey counts because the
+authentication (`admin.customers.two_factor_reset`). The method comes from the
+session `adminHandler` authenticated the request with — `Session.signInMethod`,
+`password`, `password+totp` or `passkey` — which is read from the signed
+`psa_sign_in_method` cookie that `createSession` writes at sign-in and the
+refresh endpoint re-signs (`src/lib/auth/sign-in-method.ts`;
+[auth.md](./auth.md), "The session"). `src/lib/api/auth.ts` hands the cookie to
+the verifier only for a cookie-authenticated request, so a bearer-token caller
+is always `password`. The route refuses a `password` session with 403 "Sign in
+with your authenticator app or a passkey to use this." A passkey counts because the
 admin pool treats a passkey with user verification as both factors. The
 Customers drawer shows the same sentence instead of the button when
 `GET /customers/[id]` says `operatorCanReset: false`, so the refusal is never a
-surprise. A session minted before the cookie existed, or a bearer-token
-caller, reads as `password`. The rule is the owner's (2026-10-04): an
+surprise. A session minted before the cookie existed, one whose cookie does
+not verify, or any bearer-token caller, reads as `password`. The rule is the
+owner's (2026-10-04): an
 attacker holding an operator's password alone must not be able to turn a
 customer's second factor off, and the operator's own second factor is what
 proves it is not them.
