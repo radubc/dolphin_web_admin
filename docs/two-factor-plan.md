@@ -2,7 +2,7 @@
 
 **Status: approved by the owner on 2026-10-04** (order A → C → B → D; the
 issuer label becomes "FairSums Admin"; the operator step-up rule in phase C
-is in). Phase A live on stage and verified 2026-10-04 (operator account lists WEB_AUTHN_MFA beside SOFTWARE_TOKEN_MFA; passkey and password+code both sign in). Phase C verified on stage 2026-10-04. Phase B built 2026-10-04 (owner steps and the stage test pending). Phase D built 2026-10-04: `npm test` covers the server paths of A, B and C (132 tests); docs brought up to date.
+is in). Phase A live on stage and verified 2026-10-04 (operator account lists WEB_AUTHN_MFA beside SOFTWARE_TOKEN_MFA; passkey and password+code both sign in). Phase C verified on stage 2026-10-04. Phase B verified on stage 2026-10-05. Phase D built 2026-10-04: `npm test` covers the server paths of A, B and C (132 tests); docs brought up to date. **All four phases complete.**
 
 Mirrors phases 1 and 2 of the web app's `docs/two-factor-plan.md`
 (`~/Developer/projects/penny-squeeze-web`), plus the customer-support action
