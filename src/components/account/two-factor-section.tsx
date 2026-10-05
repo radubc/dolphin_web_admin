@@ -99,6 +99,26 @@ function formatUsedAt(iso: string): string {
   });
 }
 
+/**
+ * Cognito's factor names in words. The raw values (`SOFTWARE_TOKEN_MFA`,
+ * `WEB_AUTHN_MFA`…) were shown as-is until 2026-10-04; an unknown one still
+ * falls through unchanged so nothing is hidden.
+ */
+function describeFactor(method: string): string {
+  switch (method) {
+    case "SOFTWARE_TOKEN_MFA":
+      return "authenticator app";
+    case "WEB_AUTHN_MFA":
+      return "passkey";
+    case "SMS_MFA":
+      return "SMS";
+    case "EMAIL_OTP":
+      return "email";
+    default:
+      return method;
+  }
+}
+
 /** The error code an `apiFetch` failure carries, if any. */
 function errorCode(error: unknown): string | null {
   const code = (error as { code?: unknown } | null)?.code;
@@ -589,8 +609,14 @@ export default function TwoFactorSection() {
 
       {status !== null && status.methods.length > 0 ? (
         <Typography.Text type="secondary" className="text-xs">
-          Factors Cognito has on file: {status.methods.join(", ")}
-          {status.preferred ? ` · preferred: ${status.preferred}` : ""}
+          On file with Cognito:{" "}
+          {status.methods
+            .map(
+              (method) =>
+                describeFactor(method) +
+                (method === status.preferred ? " (preferred)" : ""),
+            )
+            .join(", ")}
         </Typography.Text>
       ) : null}
 
