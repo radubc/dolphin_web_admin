@@ -24,6 +24,7 @@ import { adminFindUser, adminTurnOffSecondFactor } from "@/lib/auth/cognito-admi
 import { CognitoConfigError } from "@/lib/auth/config";
 import { decideRecoveryRedeem } from "@/lib/auth/recovery-redeem";
 import { createSession } from "@/lib/auth/session";
+import { passwordAccepted, passwordProofAccepted } from "@/lib/auth/sign-in-refund";
 import {
   attributeSpec,
   parseAttributeNames,
@@ -39,7 +40,7 @@ import {
   TOTP_CODE_PATTERN,
 } from "@/lib/auth/validation";
 import { clientIpFrom, ipRateLimitKey } from "@/lib/security/client-ip";
-import { enforceRateLimit, RATE_LIMITS } from "@/lib/security/rate-limit";
+import { enforceRateLimit, RATE_LIMITS, refundRateLimit } from "@/lib/security/rate-limit";
 
 /**
  * Shown when either sign-in limit is hit. Says nothing about which limit, how
@@ -291,6 +292,41 @@ async function checkMfaRateLimit(
   }
 }
 
+/*
+ * The refunds. The sign-in budgets count failed attempts only (owner,
+ * 2026-10-06, both apps): each check above still charges before Cognito is
+ * asked, and the matching refund below gives that charge back once Cognito
+ * has accepted what the attempt carried — the same keys and policies, so the
+ * refund lands on the counter the charge did. Which verdicts count as
+ * acceptance is `src/lib/auth/sign-in-refund.ts`; none of these is called on
+ * a wrong password or code, an outage or a throttle, so a guess still costs
+ * one and an honest sign-in costs nothing.
+ */
+
+/** Gives back what {@link checkLoginRateLimit} charged for this attempt. */
+async function refundLoginRateLimit(email: string): Promise<void> {
+  const ipKey = ipRateLimitKey("login:ip:", clientIpFrom(await headers()));
+  if (ipKey) {
+    await refundRateLimit(ipKey, RATE_LIMITS.authLogin);
+  }
+  await refundRateLimit(`login:email:${email.toLowerCase()}`, RATE_LIMITS.authLoginAccount);
+}
+
+/** Gives back what {@link checkPasskeyRateLimit} charged for this attempt. */
+async function refundPasskeyRateLimit(email: string): Promise<void> {
+  const ipKey = ipRateLimitKey("login:ip:", clientIpFrom(await headers()));
+  if (ipKey) {
+    await refundRateLimit(ipKey, RATE_LIMITS.authLogin);
+  }
+  await refundRateLimit(`passkey:email:${email.toLowerCase()}`, RATE_LIMITS.authPasskey);
+}
+
+/** Gives back what {@link checkMfaRateLimit} charged for this attempt; same key rule. */
+async function refundMfaRateLimit(username: string | null, email: string): Promise<void> {
+  const accountKey = (username === null || username === "" ? email : username).toLowerCase();
+  await refundRateLimit(`mfa:email:${accountKey}`, RATE_LIMITS.authMfa);
+}
+
 /**
  * Signs the operator in against Cognito and starts a session.
  * Shaped for `useActionState`.
@@ -336,6 +372,12 @@ export async function login(
   } catch (error) {
     // Missing/invalid Cognito environment configuration.
     return { error: describeUnconfigured(error) };
+  }
+
+  if (passwordAccepted(result)) {
+    // Tokens, or either challenge: Cognito accepted the password, so this was
+    // not a failed attempt and the sign-in pair gets its slot back.
+    await refundLoginRateLimit(email);
   }
 
   if (!result.ok) {
@@ -489,6 +531,10 @@ export async function completeInvitation(
     return { error: result.error, restart: result.restart };
   }
 
+  // The new password was accepted: not a failed attempt, so the sign-in pair
+  // this step charged gets its slot back.
+  await refundLoginRateLimit(email);
+
   // A freshly invited operator has no authenticator app yet: password-only.
   await createSession(result, undefined, "password");
 
@@ -559,6 +605,11 @@ export async function verifyMfaCode(
     }
     return { error: result.error, restart: result.restart };
   }
+
+  // The code was accepted: not a failed attempt, so everything this step
+  // charged — the sign-in pair and the second-factor budget — comes back.
+  await refundLoginRateLimit(email);
+  await refundMfaRateLimit(username, email);
 
   // The code was accepted, so TOTP is on: an operator who registered
   // passkeys before passkey MFA existed gets their flag here (one `GetUser`;
@@ -638,16 +689,30 @@ export async function redeemRecoveryCode(
     return { error: limited };
   }
 
+  // What the decision below establishes, for the refunds after it: the
+  // outcome alone cannot tell a wrong password from a wrong code (both are
+  // `neutral`, on purpose), so the two gateway calls that judge them record
+  // what Cognito and the claim said.
+  let passwordProven = false;
+  let codeClaimed = false;
+
   let outcome;
   try {
     outcome = await decideRecoveryRedeem(
       { email, password, code },
       {
-        verifyPassword: verifyPasswordForSensitiveAction,
+        verifyPassword: async (address, secret) => {
+          const check = await verifyPasswordForSensitiveAction(address, secret);
+          passwordProven = passwordProofAccepted(check);
+          return check;
+        },
         findPoolUser: (address) => adminFindUser(address),
         findEnabledOperatorBySub,
         hashCode: hashRecoveryCode,
-        claimCode: claimRecoveryCode,
+        claimCode: async (operatorId, codeHash) => {
+          codeClaimed = await claimRecoveryCode(operatorId, codeHash);
+          return codeClaimed;
+        },
         unclaimCode: unclaimRecoveryCode,
         deleteOtherCodes: deleteOtherRecoveryCodes,
         turnOffSecondFactor: (poolUsername) => adminTurnOffSecondFactor(poolUsername),
@@ -657,6 +722,18 @@ export async function redeemRecoveryCode(
   } catch (error) {
     // Missing/invalid Cognito environment configuration.
     return { error: describeUnconfigured(error) };
+  }
+
+  // Failed attempts only: a proven password gives the sign-in pair back
+  // whatever came after it (a wrong code refunds the pair and keeps the
+  // second-factor slot spent); a code that matched an unused row gives the
+  // second-factor slot back even if Cognito then refused to turn the factor
+  // off. A wrong password, an outage or a throttle refunds nothing.
+  if (passwordProven) {
+    await refundLoginRateLimit(email);
+  }
+  if (codeClaimed) {
+    await refundMfaRateLimit(null, email);
   }
 
   switch (outcome.kind) {
@@ -728,6 +805,9 @@ export async function startPasskeySignIn(
 
   // Before Cognito, and on the same budget as a password attempt: this call
   // starts an authentication, so it must not be a way around the login limits.
+  // Nothing is proven here, so nothing is refunded here: a ceremony that
+  // completes gives this charge back from `completePasskeySignIn`, and one
+  // that is abandoned or never had a passkey to answer with stays counted.
   const limited = await checkLoginRateLimit(address);
   if (limited) {
     return { ok: false, error: limited };
@@ -819,6 +899,12 @@ export async function completePasskeySignIn(
     // beyond showing the reason there.
     return { error: result.error };
   }
+
+  // The assertion verified: the whole ceremony was not a failed attempt, so
+  // both legs get their charges back — this leg's IP and passkey slots, and
+  // the sign-in pair `startPasskeySignIn` charged for the same address.
+  await refundPasskeyRateLimit(email);
+  await refundLoginRateLimit(email);
 
   // A passkey with user verification is both factors on the admin pool.
   await createSession(result, undefined, "passkey");

@@ -58,6 +58,12 @@ export interface RateLimitVerdict extends RateLimitSnapshot {
 export interface RateLimiter {
   /** Records one hit against `key` and reports whether it is allowed. */
   consume(key: string, policy: RateLimitPolicy): Promise<RateLimitVerdict>;
+  /**
+   * Gives back the most recent hit against `key`: the count goes down by one,
+   * never below zero, and the window is left where it is. A no-op for a key
+   * that was never charged (or has gone quiet).
+   */
+  refund(key: string, policy: RateLimitPolicy): Promise<void>;
 }
 
 /**
@@ -235,6 +241,27 @@ class MemoryRateLimiter implements RateLimiter {
     };
   }
 
+  async refund(key: string, policy: RateLimitPolicy): Promise<void> {
+    const storageKey = `${policy.name}:${key}`;
+    const stored = this.states.get(storageKey);
+    if (!stored) {
+      return;
+    }
+    const { windowMs } = policy;
+    const windowStart = Math.floor(Date.now() / windowMs) * windowMs;
+    const state = this.rollForward(stored, windowStart, windowMs);
+    // The most recent hit is in the current window unless that window has
+    // nothing left to give back, in which case it was the previous one's.
+    // Nothing goes below zero, and `windowStart` is not touched: a refund
+    // moves a count, never the window.
+    if (state.currentCount > 0) {
+      state.currentCount -= 1;
+    } else if (state.previousCount > 0) {
+      state.previousCount -= 1;
+    }
+    this.states.set(storageKey, state);
+  }
+
   /**
    * Advances a stored state to the current window: one window on rotates the
    * counts, two or more means the key went quiet and starts clean. A changed
@@ -369,4 +396,24 @@ export async function enforceRateLimit(
     });
   }
   return verdict;
+}
+
+/**
+ * Gives back one unit against `key`: the counterpart of
+ * {@link enforceRateLimit}, for a slot that was charged before the check and
+ * then turned out not to be a failed attempt. The sign-in budgets count
+ * failed attempts only (owner, 2026-10-06): a password, code or passkey that
+ * Cognito accepted refunds what that attempt charged, so an honest sign-in
+ * costs nothing and a guess still costs one. Never called for an outage or a
+ * throttle — nothing was judged, so nothing is given back — and never for a
+ * wrong password or code.
+ *
+ * Same key and policy as the charge, or the refund lands on the wrong
+ * counter. Never below zero; the window is untouched.
+ */
+export async function refundRateLimit(
+  key: string,
+  policy: RateLimitPolicy,
+): Promise<void> {
+  await getRateLimiter().refund(key, policy);
 }

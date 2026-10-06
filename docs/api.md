@@ -34,11 +34,12 @@ In-process sliding windows, per preset name (`src/lib/security/rate-limit.ts`):
 | Preset | Limit | Applies to |
 | --- | --- | --- |
 | `api` | 120 / minute per IP, and again per user | operator and session endpoints |
-| `authLogin` | 10 / 15 min per IP | sign-in |
-| `authLoginAccount` | 5 / 15 min per email | sign-in |
-| `authReset` | 5 / 15 min | password reset |
-| `authMfa` | 10 / 15 min per account | the second-factor steps at sign-in — the authenticator code (keyed by pool username) and the recovery code (keyed by the address the password is proven for) share one budget (`mfa:email:`) wherever the two coincide, on top of the sign-in budget each still spends |
-| `accountMfa` | 10 / 15 min per operator | "Generate new codes" in Account & security (it also charges `authLoginAccount` per email, because it proves a password) |
+| `authLogin` | 10 / 15 min per IP | sign-in; counts failed attempts only — a successful check refunds its slot (owner, 2026-10-06) |
+| `authLoginAccount` | 5 / 15 min per email | sign-in; counts failed attempts only — a successful check refunds its slot (owner, 2026-10-06) |
+| `authPasskey` | 10 / 15 min per account | the second leg of a passkey sign-in; counts failed attempts only — a verified assertion refunds its slot and the first leg's sign-in charges |
+| `authReset` | 5 / 15 min | password reset, and per operator the password change and the authenticator verification; per-operation, never refunded |
+| `authMfa` | 10 / 15 min per account | the second-factor steps at sign-in — the authenticator code (keyed by pool username) and the recovery code (keyed by the address the password is proven for) share one budget (`mfa:email:`) wherever the two coincide, on top of the sign-in budget each still spends; counts failed attempts only — an accepted code refunds its slot (owner, 2026-10-06) |
+| `accountMfa` | 10 / 15 min per operator | "Generate new codes" in Account & security (it also charges `authLoginAccount` per email, because it proves a password — that slot is refunded once the password is proven; this one is per-operation, never refunded) |
 | `authRefresh` | 200 / 15 min per IP | token refresh (an active tab renews every few minutes) |
 | `authLogout` | 30 / 15 min per IP | sign-out; its own budget, so an exhausted refresh budget never blocks a revoke |
 | `customerTwoFactorReset` | 5 / hour per operator | turning off a customer's two-factor authentication |
@@ -48,6 +49,14 @@ In-process sliding windows, per preset name (`src/lib/security/rate-limit.ts`):
 Per-IP policies are skipped when the client IP is unknown
 (`TRUST_PROXY_HEADERS` unset). Counters live in the Node process: N instances
 mean N× the limit, and a restart resets them.
+
+The sign-in budgets (`authLogin`, `authLoginAccount`, `authPasskey`, `authMfa`)
+count failed attempts only — a successful check refunds its slot (owner,
+2026-10-06, both apps). Every charge is still made before Cognito is asked;
+`refundRateLimit()` gives it back once Cognito accepts the password, code or
+passkey (never on a wrong one, an outage or a throttle). The per-operation
+budgets (`authReset`, `accountMfa`, `customerTwoFactorReset`) are not
+refunded. [`auth.md`](./auth.md) says what each step refunds.
 
 ## Endpoints
 

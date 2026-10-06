@@ -216,7 +216,11 @@ the web repo and is not repeated here — only the admin differences:
   environment stack exports an ARN only for the customers' pool). No
   Description change.
 - **Rate limits**: `authMfa` (10 / 15 min) and `accountMfa` (10 / 15 min)
-  added; nothing removed.
+  added; nothing removed. *2026-10-06 (owner, both apps):* the sign-in budgets
+  count failed attempts only — a successful check refunds its slot
+  (`refundRateLimit()`; `authMfa` on an accepted code, the sign-in pair on an
+  accepted password; `accountMfa` and `customerTwoFactorReset` stay
+  per-operation and are never refunded). See `auth.md` and `api.md`.
 - **Tests**: `npm test` — the consumer app's `node --test` setup
   (`scripts/test-loader.mjs`, `--conditions=react-server`) covering the pure
   code helpers, `adminFindUser` / `adminTurnOffSecondFactor` against a

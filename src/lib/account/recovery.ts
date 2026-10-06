@@ -63,6 +63,24 @@ const defaultGateway: RecoveryGateway = {
 /** The API code a wrong password comes back with (401). */
 export const PASSWORD_INCORRECT_CODE = "password_incorrect";
 
+/** The API code a Cognito outage during the re-check comes back with (503). */
+const AUTH_UNAVAILABLE_CODE = "auth_unavailable";
+
+/**
+ * Whether the password was proven before {@link regenerateRecoveryCodes}
+ * threw: true for everything but the two answers the re-check itself gives —
+ * 401 `password_incorrect` and 503 `auth_unavailable`. The route uses it to
+ * give the `authLoginAccount` slot back on a failure that came *after* the
+ * password (the authenticator off, the table missing, a database fault),
+ * because the sign-in budgets count failed attempts only (owner,
+ * 2026-10-06). The 401 covers the temporary-password case too, which a
+ * signed-in operator cannot be in, so it is not told apart.
+ */
+export function passwordProvenDespite(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return true;
+  return error.code !== PASSWORD_INCORRECT_CODE && error.code !== AUTH_UNAVAILABLE_CODE;
+}
+
 /** What `POST /api/v1/admin/me/mfa/recovery-codes` refuses with before the set is touched. */
 const TURN_ON_FIRST_MESSAGE = "Turn on the authenticator app first.";
 
@@ -182,7 +200,7 @@ export async function regenerateRecoveryCodes(
     if (error instanceof CognitoConfigError) {
       console.error("[account] generate recovery codes: Cognito is not configured:", error);
       throw new ServiceUnavailableError(
-        "auth_unavailable",
+        AUTH_UNAVAILABLE_CODE,
         "Your password could not be checked right now. Please try again.",
       );
     }
@@ -191,7 +209,7 @@ export async function regenerateRecoveryCodes(
   if (!check.ok) {
     if (check.failure === "unavailable") {
       throw new ServiceUnavailableError(
-        "auth_unavailable",
+        AUTH_UNAVAILABLE_CODE,
         "Your password could not be checked right now. Please try again.",
       );
     }

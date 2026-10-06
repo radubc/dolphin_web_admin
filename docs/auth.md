@@ -30,6 +30,15 @@ asked, two rate limits apply: per client IP (skipped when the IP is unknown,
 see below) and per email address (5 attempts per 15 minutes). Wrong password
 and unknown user share one message; the server log keeps the distinction.
 
+Both budgets count failed attempts only — a successful check refunds its slot
+(owner, 2026-10-06, both apps). The charge is still made before Cognito is
+asked; once Cognito accepts the password — tokens, `NEW_PASSWORD_REQUIRED` or
+`SOFTWARE_TOKEN_MFA` — the attempt gives both charges back
+(`refundRateLimit()` in `src/lib/security/rate-limit.ts`; which verdicts count
+is `src/lib/auth/sign-in-refund.ts`). A wrong password, an unknown account, an
+outage or a throttle keeps them spent, so a guess still costs one and an
+honest sign-in costs nothing.
+
 Cognito requirements on the app client: `ALLOW_USER_PASSWORD_AUTH`, token
 revocation on, and the client secret in `.env` if the client has one.
 `ALLOW_REFRESH_TOKEN_AUTH` is no longer needed — refreshes go through
@@ -80,7 +89,8 @@ step.
 
 Rate limiting is the sign-in budget, not a separate one: the second step
 finishes an authentication, so it must not be a way around the per-IP and
-per-address limits.
+per-address limits. An accepted new password refunds the pair (failed
+attempts only); a refused one, or a dead session, keeps it spent.
 
 ## Two-step verification at sign-in
 
@@ -90,7 +100,9 @@ step and `verifyMfaCode()` answers it with `RespondToAuthChallenge`
 (`ChallengeResponses.SOFTWARE_TOKEN_MFA_CODE`, plus the SECRET_HASH when the
 app client has a secret). A wrong code lands under the input and the same
 session is usually worth another try; once Cognito retires the session the form
-returns to step one. Same budget again: a code guess costs a sign-in attempt.
+returns to step one. Same budget again: a code guess costs a sign-in attempt —
+and an accepted code refunds it, together with the `authMfa` slot below
+(failed attempts only, owner 2026-10-06).
 
 The pool's `MfaConfiguration` is `OPTIONAL` with software tokens enabled, so
 this branch is live: anyone who enrols an app in
@@ -124,7 +136,14 @@ replay. The order, which `src/lib/auth/recovery-redeem.ts` owns and
    per email) because a password is checked, and `authMfa` on
    `mfa:email:<address>` — the address the password is about to be proven
    for, never the hidden `username` the browser posted; the same key the
-   code step uses wherever the pool username is the address.
+   code step uses wherever the pool username is the address. Failed attempts
+   only (owner, 2026-10-06): a proven password refunds the sign-in pair
+   whatever follows, and a code that matched an unused row refunds `authMfa`
+   even if Cognito then refused the switch-off — so a wrong code after a
+   right password refunds the pair and keeps the `authMfa` slot spent, and a
+   wrong password, an outage or a throttle refunds nothing. The action reads
+   both facts from the gateway calls, because the `neutral` outcome below
+   deliberately does not say which half failed.
 3. **Password** — `verifyPasswordForSensitiveAction()` in
    `src/lib/auth/cognito.ts`: a bare `USER_PASSWORD_AUTH` whose
    `SOFTWARE_TOKEN_MFA` challenge counts as proof and is left unanswered.
@@ -205,6 +224,12 @@ is that the payload is JSON of a sane size (8 KB,
 Both actions charge the sign-in budget — per IP and per email address, the same
 `authLogin` / `authLoginAccount` policies as a password attempt — because both
 are steps of an authentication and neither may become a way around the limits.
+(The second leg charges `authPasskey` per account in place of
+`authLoginAccount`.) Failed attempts only (owner, 2026-10-06): a verified
+assertion refunds both legs' charges — this leg's IP and `authPasskey` slots
+and the pair the first leg spent for the same address. The first leg refunds
+nothing on its own, since it proves nothing: a ceremony that is abandoned, or
+started for an address with no passkey, stays counted.
 
 ### What can go wrong
 
@@ -439,7 +464,11 @@ code verification also charge the `authReset` budget against the operator's id,
 not only against the client IP, because the per-IP limit is switched off
 whenever `TRUST_PROXY_HEADERS` is unset and neither may become an oracle.
 "Generate new recovery codes" proves a password, so it charges
-`authLoginAccount` per email and `accountMfa` per operator as well.
+`authLoginAccount` per email and `accountMfa` per operator as well. The
+`authLoginAccount` slot comes back once the password is proven, even if a
+later rule then refuses (failed attempts only, owner 2026-10-06); a wrong
+password or a Cognito outage keeps it spent. `accountMfa` and the `authReset`
+budgets are per-operation and are never refunded.
 
 **Changing a password does not sign other devices out.** Cognito leaves the
 refresh tokens it has already issued alone; revoking them everywhere means

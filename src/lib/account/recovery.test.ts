@@ -18,6 +18,7 @@ const {
   clearRecoveryCodesAfterDisable,
   getMfaStatusView,
   issueRecoveryCodesAfterEnrolment,
+  passwordProvenDespite,
   regenerateRecoveryCodes,
 } = (await import("./recovery" + ".ts")) as typeof Recovery;
 const { CognitoConfigError } = (await import("@/lib/auth/config" + ".ts")) as typeof Config;
@@ -397,5 +398,41 @@ describe("regenerateRecoveryCodes — refusals", () => {
       },
     });
     await assert.rejects(regenerateRecoveryCodes(TOKEN, OPERATOR, PASSWORD, gateway), /connection refused/);
+  });
+});
+
+describe("passwordProvenDespite", () => {
+  it("keeps the sign-in slot spent on a wrong password and on an outage", async () => {
+    const { gateway: wrong } = stubGateway({ verifyPassword: async () => ({ ok: false, failure: "incorrect" }) });
+    assert.equal(passwordProvenDespite(await rejectsApi(regenerateRecoveryCodes(TOKEN, OPERATOR, PASSWORD, wrong))), false);
+
+    const { gateway: down } = stubGateway({ verifyPassword: async () => ({ ok: false, failure: "unavailable" }) });
+    assert.equal(passwordProvenDespite(await rejectsApi(regenerateRecoveryCodes(TOKEN, OPERATOR, PASSWORD, down))), false);
+
+    const { gateway: unconfigured } = stubGateway({
+      verifyPassword: async () => {
+        throw new CognitoConfigError("COGNITO_USER_POOL_ID is not set");
+      },
+    });
+    assert.equal(
+      passwordProvenDespite(await rejectsApi(regenerateRecoveryCodes(TOKEN, OPERATOR, PASSWORD, unconfigured))),
+      false,
+    );
+  });
+
+  it("gives it back when the refusal came after the password: authenticator off, table missing, any other fault", async () => {
+    const { gateway: off } = stubGateway({
+      getMfaStatus: async () => status({ totpEnabled: false, preferred: null, methods: [] }),
+    });
+    assert.equal(passwordProvenDespite(await rejectsApi(regenerateRecoveryCodes(TOKEN, OPERATOR, PASSWORD, off))), true);
+
+    const { gateway: noTable } = stubGateway({
+      replaceRecoveryCodes: async () => {
+        throw missingTable("P2021");
+      },
+    });
+    assert.equal(passwordProvenDespite(await rejectsApi(regenerateRecoveryCodes(TOKEN, OPERATOR, PASSWORD, noTable))), true);
+
+    assert.equal(passwordProvenDespite(dbDown()), true);
   });
 });
