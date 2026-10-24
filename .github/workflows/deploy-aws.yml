@@ -240,6 +240,13 @@ jobs:
             --stack-name "$STACK_NAME" \
             --query "Stacks[0].Outputs[?OutputKey=='ServiceEndpoint'].OutputValue" \
             --output text)
+          # Keep this a bare host name. ECS Express returned one until
+          # 2026-10-24, when `Service.Endpoint` started carrying the scheme
+          # ("https://fa-….on.aws"); the listener-rule lookup below compares it
+          # with host-header values and the health probe prefixes "https://".
+          ENDPOINT="${ENDPOINT#https://}"
+          ENDPOINT="${ENDPOINT#http://}"
+          ENDPOINT="${ENDPOINT%%/*}"
           echo "Service endpoint: $ENDPOINT"
           echo "endpoint=$ENDPOINT" >> "$GITHUB_OUTPUT"
 
